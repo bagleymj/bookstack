@@ -71,5 +71,6 @@ Rails.application.configure do
   # config.generators.apply_rubocop_autocorrect_after_generate!
   
   config.hosts = "mb-desktop:3050,localhost:3050,127.0.0.1:3050".split(",")
+  config.web_console.permissions = "0.0.0.0/0"
 
 end
