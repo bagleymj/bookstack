@@ -44,6 +44,6 @@ class BooksController < ApplicationController
     end
     
     def book_params
-      params.expect(book: [ :title ])
+      params.expect(book: [ :title, :cover_image ])
     end
 end
