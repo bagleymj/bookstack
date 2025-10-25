@@ -9,7 +9,7 @@
  * Consider organizing styles into separate files for maintainability.
  */
 body {
-  font-family: "Arial, Helvetica, sans-serif"
+  font-family: Arial, Helvetica, sans-serif;
 }
 section.book img {
   max-width: 25%
