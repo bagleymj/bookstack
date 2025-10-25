@@ -1,4 +1,6 @@
-<%= image_tag @book.cover_image if @book.cover_image.attached? %>
+<section class="book">
+  <%= image_tag @book.cover_image if @book.cover_image.attached? %>
+</section>
 <h1><%= @book.title %></h1>
 <%= link_to "Back", books_path %>
 <%= link_to "Edit", edit_book_path(@book) %>
