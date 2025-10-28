@@ -4,6 +4,7 @@
 <h1><%= @book.title %></h1>
 <div><b>First Page:</b> <%= @book.first_page %></div>
 <div><b>Last Page:</b> <%= @book.last_page %></div>
+<div><b>Total Pages:</b> <%= @book.last_page - @book.first_page %></div>
 <%= link_to "Back", books_path %>
 <%= link_to "Edit", edit_book_path(@book) %>
 <%= button_to "Delete", @book, method: :delete, data: { turbo_confirm: "Are you sure?" } %>
