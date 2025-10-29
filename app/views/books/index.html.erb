@@ -5,7 +5,16 @@
 <div id="books">
   <% @books.each do |book| %>
     <div>
-      <%= link_to book.title, book %>
+      <%= link_to book.title, book %>-
+      <% if @user_books.include?(book) %>
+        <%= link_to "Destroy",
+          user_books_path(book_id: book.id),
+          data: { turbo_method: :delete } %>
+      <% else %>
+        <%= link_to "Add", 
+          user_books_path(book_id: book.id),
+          data: { turbo_method: :post } %>
+      <% end %>
     </div>
   <% end %>
 </div>

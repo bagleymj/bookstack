@@ -16,5 +16,9 @@ Rails.application.routes.draw do
   # root "posts#index"
 
   resources :books
-
+  resources :user_books, only: [:create] do
+    collection do
+      delete :destroy
+    end
+  end
 end
