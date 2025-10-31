@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_28_181908) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_31_191218) do
   create_table "action_text_rich_texts", force: :cascade do |t|
     t.string "name", null: false
     t.text "body"
@@ -57,6 +57,15 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_28_181908) do
     t.integer "last_page"
   end
 
+  create_table "readthroughs", force: :cascade do |t|
+    t.integer "user_book_id", null: false
+    t.date "start_date"
+    t.date "end_date"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["user_book_id"], name: "index_readthroughs_on_user_book_id"
+  end
+
   create_table "sessions", force: :cascade do |t|
     t.integer "user_id", null: false
     t.string "ip_address"
@@ -86,6 +95,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_28_181908) do
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
+  add_foreign_key "readthroughs", "user_books"
   add_foreign_key "sessions", "users"
   add_foreign_key "user_books", "books"
   add_foreign_key "user_books", "users"
