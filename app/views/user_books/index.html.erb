@@ -3,7 +3,7 @@
 <%= link_to "All Books", books_path %>
 
 <div id="books">
-  <% @books.each do |book| %>
-    <div><%= book.title %></div>
+  <% @user_books.each do |user_book| %>
+    <div><%= link_to user_book.book.title, user_book %></div>
   <% end %>
 </div>

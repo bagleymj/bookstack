@@ -1,6 +1,10 @@
 class UserBooksController < ApplicationController
   def index
-    @books = Current.user.books
+    @user_books = Current.user.user_books
+  end
+
+  def show
+    @user_book = UserBook.find(params[:id])
   end
 
   def create
