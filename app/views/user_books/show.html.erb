@@ -1,3 +1,16 @@
 <h1><%= @user_book.book.title %></h1>
-
 <%= link_to "Back", user_books_path %>
+
+<h2>Readthroughs</h2>
+<ul>
+  <% @user_book.readthroughs.each do |readthrough| %>
+    <li>
+      <%= readthrough.id %>-
+      <%= readthrough.start_date %>-
+      <%= readthrough.end_date %>
+    </li>
+  <% end %>
+  <li>
+    <%= link_to "Start New Readthrough", new_readthrough_path(user_book_id: @user_book.id) %>
+  </li>
+</ul>

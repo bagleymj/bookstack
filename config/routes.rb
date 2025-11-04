@@ -21,4 +21,5 @@ Rails.application.routes.draw do
       delete :destroy
     end
   end
+  resources :readthroughs, only: [:new, :create]
 end

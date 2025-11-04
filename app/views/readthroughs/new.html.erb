@@ -1,0 +1,17 @@
+<h1>New Readthrough</h1>
+<%= form_with model: @readthrough do |form| %>
+  <div>
+    <%= form.label :start_date %>
+    <%= form.date_field :start_date %>
+  </div>
+  <div>
+    <%= form.label :end_date %>
+    <%= form.date_field :end_date %>
+  </div>
+  <div>
+    <%= form.hidden_field :user_book_id, value: @readthrough.user_book_id %>
+    <%= form.submit %>
+  </div>
+<% end %>
+  
+
