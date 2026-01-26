@@ -37,6 +37,9 @@
 
             # For native gem compilation
             libpq
+
+            # Tailwind CSS (system binary for NixOS compatibility)
+            tailwindcss_4
           ];
 
           shellHook = ''
@@ -49,6 +52,9 @@
             export PGHOST="$PWD/.postgres"
             export PGPORT="5432"
             export DATABASE_URL="postgresql://localhost:5432/bookstack_development"
+
+            # Tell tailwindcss-rails to use the system binary
+            export TAILWINDCSS_INSTALL_DIR="${pkgs.tailwindcss_4}/bin"
 
             # Initialize PostgreSQL if needed
             if [ ! -d "$PGDATA" ]; then
