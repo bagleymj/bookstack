@@ -1,0 +1,104 @@
+<div class="space-y-6">
+  <div class="md:flex md:items-center md:justify-between">
+    <div class="min-w-0 flex-1">
+      <h2 class="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight">
+        <%= @reading_goal.book.title %>
+      </h2>
+      <p class="mt-1 text-sm text-gray-500">
+        Target: <%= @reading_goal.target_completion_date.strftime("%B %d, %Y") %>
+        <span class="inline-flex items-center ml-2 rounded-full px-2.5 py-0.5 text-xs font-medium <%= status_badge_class(@reading_goal.status) %>">
+          <%= @reading_goal.status.humanize %>
+        </span>
+      </p>
+    </div>
+    <div class="mt-4 flex gap-2 md:ml-4 md:mt-0">
+      <% if @reading_goal.active? %>
+        <%= button_to "Redistribute", redistribute_reading_goal_path(@reading_goal), method: :post, class: "inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50" %>
+        <%= button_to "Mark Complete", mark_completed_reading_goal_path(@reading_goal), method: :post, class: "inline-flex items-center rounded-md bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-500" %>
+      <% end %>
+    </div>
+  </div>
+
+  <!-- Progress Overview -->
+  <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+    <div class="rounded-lg bg-white p-4 shadow">
+      <dt class="text-sm font-medium text-gray-500">Days Remaining</dt>
+      <dd class="mt-1 text-2xl font-semibold text-gray-900"><%= @reading_goal.days_remaining %></dd>
+    </div>
+    <div class="rounded-lg bg-white p-4 shadow">
+      <dt class="text-sm font-medium text-gray-500">Pages Remaining</dt>
+      <dd class="mt-1 text-2xl font-semibold text-gray-900"><%= @reading_goal.remaining_pages %></dd>
+    </div>
+    <div class="rounded-lg bg-white p-4 shadow">
+      <dt class="text-sm font-medium text-gray-500">Pages/Day Needed</dt>
+      <dd class="mt-1 text-2xl font-semibold text-gray-900"><%= @reading_goal.pages_per_day %></dd>
+    </div>
+    <div class="rounded-lg bg-white p-4 shadow">
+      <dt class="text-sm font-medium text-gray-500">Progress</dt>
+      <dd class="mt-1 text-2xl font-semibold text-gray-900"><%= @reading_goal.progress_percentage %>%</dd>
+    </div>
+  </div>
+
+  <!-- Today's Quota -->
+  <% if @today_quota %>
+    <div class="rounded-lg bg-white shadow">
+      <div class="px-4 py-5 sm:p-6">
+        <h3 class="text-lg font-medium leading-6 text-gray-900">Today's Quota</h3>
+        <div class="mt-4">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-gray-600">
+              <%= @today_quota.actual_pages %> / <%= @today_quota.target_pages %> pages
+              <span class="text-gray-400">&rarr; read to page <%= @today_quota.target_page_number %></span>
+            </span>
+            <span class="text-sm font-medium <%= @today_quota.completed? ? 'text-green-600' : 'text-indigo-600' %>"><%= @today_quota.percentage_complete %>%</span>
+          </div>
+          <div class="relative pt-1">
+            <div class="overflow-hidden h-4 text-xs flex rounded bg-gray-200">
+              <div style="width:<%= @today_quota.percentage_complete %>%" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center <%= @today_quota.completed? ? 'bg-green-500' : 'bg-indigo-500' %>"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  <% end %>
+
+  <!-- Daily Quotas Calendar -->
+  <div class="rounded-lg bg-white shadow">
+    <div class="px-4 py-5 sm:p-6">
+      <h3 class="text-lg font-medium leading-6 text-gray-900">Daily Schedule</h3>
+      <div class="mt-4 overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead>
+            <tr>
+              <th class="py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+              <th class="py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pages</th>
+              <th class="py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Read to</th>
+              <th class="py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Progress</th>
+              <th class="py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-200">
+            <% @daily_quotas.each do |quota| %>
+              <tr class="<%= quota.date == Date.current ? 'bg-indigo-50' : '' %>">
+                <td class="py-3 text-sm text-gray-900">
+                  <%= quota.date.strftime("%a, %b %d") %>
+                  <% if quota.date == Date.current %>
+                    <span class="ml-2 text-xs text-indigo-600">(Today)</span>
+                  <% end %>
+                </td>
+                <td class="py-3 text-sm text-gray-500"><%= quota.target_pages %></td>
+                <td class="py-3 text-sm font-medium text-gray-900">p. <%= quota.target_page_number %></td>
+                <td class="py-3 text-sm text-gray-500"><%= quota.actual_pages %> / <%= quota.target_pages %></td>
+                <td class="py-3">
+                  <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium <%= status_badge_class(quota.status) %>">
+                    <%= quota.status.humanize %>
+                  </span>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>

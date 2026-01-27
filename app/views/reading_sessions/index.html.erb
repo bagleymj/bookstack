@@ -1,0 +1,56 @@
+<div class="space-y-6">
+  <div class="md:flex md:items-center md:justify-between">
+    <div class="min-w-0 flex-1">
+      <h2 class="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight">Reading Sessions</h2>
+    </div>
+  </div>
+
+  <% if @reading_sessions.any? %>
+    <div class="overflow-hidden bg-white shadow sm:rounded-md">
+      <ul class="divide-y divide-gray-200">
+        <% @reading_sessions.each do |session| %>
+          <li>
+            <%= link_to session, class: "block hover:bg-gray-50" do %>
+              <div class="px-4 py-4 sm:px-6">
+                <div class="flex items-center justify-between">
+                  <div class="flex-1 min-w-0">
+                    <p class="truncate text-sm font-medium text-indigo-600"><%= session.book.title %></p>
+                    <p class="mt-1 text-sm text-gray-500">
+                      <%= session.started_at.strftime("%B %d, %Y at %I:%M %p") %>
+                    </p>
+                  </div>
+                  <div class="ml-4 flex flex-shrink-0 items-center gap-4">
+                    <% if session.completed? %>
+                      <div class="text-right">
+                        <p class="text-sm font-medium text-gray-900"><%= session.pages_read %> pages</p>
+                        <p class="text-xs text-gray-500"><%= session.words_per_minute&.round %> WPM</p>
+                      </div>
+                      <div class="text-right">
+                        <p class="text-sm font-medium text-gray-900"><%= session.duration_seconds ? "#{session.duration_seconds / 60} min" : "-" %></p>
+                      </div>
+                    <% else %>
+                      <span class="inline-flex items-center rounded-full bg-yellow-100 px-2.5 py-0.5 text-xs font-medium text-yellow-800">
+                        In Progress
+                      </span>
+                    <% end %>
+                    <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            <% end %>
+          </li>
+        <% end %>
+      </ul>
+    </div>
+  <% else %>
+    <div class="text-center py-12 bg-white rounded-lg shadow">
+      <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      <h3 class="mt-2 text-sm font-medium text-gray-900">No reading sessions</h3>
+      <p class="mt-1 text-sm text-gray-500">Start a reading session from any book you're reading.</p>
+    </div>
+  <% end %>
+</div>

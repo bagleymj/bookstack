@@ -1,0 +1,110 @@
+<div class="space-y-6">
+  <div class="md:flex md:items-center md:justify-between">
+    <div class="min-w-0 flex-1">
+      <h2 class="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight"><%= @pipeline.name %></h2>
+      <% if @pipeline.description.present? %>
+        <p class="mt-1 text-sm text-gray-500"><%= @pipeline.description %></p>
+      <% end %>
+    </div>
+    <div class="mt-4 flex gap-2 md:ml-4 md:mt-0">
+      <%= button_to "Auto-Schedule", auto_schedule_pipeline_path(@pipeline), method: :post, class: "inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50" %>
+      <%= link_to "Edit", edit_pipeline_path(@pipeline), class: "inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50" %>
+    </div>
+  </div>
+
+  <!-- Visual Pipeline Chart -->
+  <div class="rounded-lg bg-white shadow">
+    <div class="px-4 py-5 sm:p-6">
+      <h3 class="text-lg font-medium leading-6 text-gray-900 mb-4">Timeline View</h3>
+      <div id="pipeline-chart" data-controller="pipeline-chart" data-pipeline-chart-url-value="<%= timeline_data_api_v1_pipeline_path(@pipeline) %>" class="overflow-x-auto">
+        <div class="min-h-[200px] flex items-center justify-center text-gray-500">
+          Loading timeline...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+    <!-- Books in Pipeline -->
+    <div class="lg:col-span-2 rounded-lg bg-white shadow">
+      <div class="px-4 py-5 sm:p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-medium leading-6 text-gray-900">Books in Pipeline</h3>
+          <p class="text-xs text-gray-500">Drag to reorder</p>
+        </div>
+        <% if @pipeline_books.any? %>
+          <div data-controller="sortable" data-sortable-url-value="<%= reorder_pipeline_pipeline_books_path(@pipeline) %>" class="space-y-6">
+            <% @pipeline.books_by_track.each do |track, pipeline_books| %>
+              <div data-sortable-target="track" data-track="<%= track %>" class="rounded-lg border border-gray-100 p-3 transition-colors">
+                <h4 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
+                  Track <%= track %>
+                  <span class="text-xs text-gray-400">(<%= pipeline_books.size %> books)</span>
+                </h4>
+                <div data-items class="space-y-2">
+                  <% pipeline_books.each do |pb| %>
+                    <div data-sortable-target="item" data-id="<%= pb.id %>" class="flex items-center justify-between rounded-lg border border-gray-200 p-3 hover:border-indigo-300 hover:shadow-sm transition-all cursor-grab active:cursor-grabbing bg-white">
+                      <div class="flex items-center gap-3 flex-1 min-w-0">
+                        <svg class="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"/>
+                        </svg>
+                        <div class="flex-1 min-w-0">
+                          <p class="font-medium text-gray-900 truncate"><%= pb.book.title %></p>
+                          <p class="text-sm text-gray-500">
+                            <% if pb.planned_start_date && pb.planned_end_date %>
+                              <%= pb.planned_start_date.strftime("%b %d") %> - <%= pb.planned_end_date.strftime("%b %d, %Y") %>
+                            <% else %>
+                              <span class="text-amber-600">Not scheduled</span>
+                            <% end %>
+                            &bull; <%= pb.book.total_pages %> pages
+                          </p>
+                        </div>
+                      </div>
+                      <div class="ml-4 flex items-center gap-2">
+                        <span class="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium <%= status_badge_class(pb.book.status) %>">
+                          <%= pb.book.status.humanize %>
+                        </span>
+                        <%= button_to pipeline_book_path(pb), method: :delete, data: { turbo_confirm: "Remove from pipeline?" }, class: "text-gray-400 hover:text-red-600" do %>
+                          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                          </svg>
+                        <% end %>
+                      </div>
+                    </div>
+                  <% end %>
+                </div>
+              </div>
+            <% end %>
+          </div>
+        <% else %>
+          <p class="mt-4 text-sm text-gray-500">No books in this pipeline yet.</p>
+        <% end %>
+      </div>
+    </div>
+
+    <!-- Add Books -->
+    <div class="rounded-lg bg-white shadow">
+      <div class="px-4 py-5 sm:p-6">
+        <h3 class="text-lg font-medium leading-6 text-gray-900">Add Books</h3>
+        <% if @available_books.any? %>
+          <div class="mt-4 space-y-2 max-h-96 overflow-y-auto">
+            <% @available_books.each do |book| %>
+              <div class="flex items-center justify-between p-2 rounded hover:bg-gray-50">
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium text-gray-900 truncate"><%= book.title %></p>
+                  <p class="text-xs text-gray-500"><%= book.total_pages %> pages</p>
+                </div>
+                <%= form_with url: pipeline_pipeline_books_path(@pipeline), method: :post, class: "ml-2" do |form| %>
+                  <%= form.hidden_field :book_id, value: book.id %>
+                  <%= form.submit "+", class: "w-8 h-8 flex items-center justify-center rounded-full bg-indigo-100 text-indigo-600 hover:bg-indigo-200 cursor-pointer font-bold" %>
+                <% end %>
+              </div>
+            <% end %>
+          </div>
+        <% else %>
+          <p class="mt-4 text-sm text-gray-500">All your books are in this pipeline, or you need to <%= link_to "add more books", new_book_path, class: "text-indigo-600 hover:text-indigo-500" %>.</p>
+        <% end %>
+      </div>
+    </div>
+  </div>
+</div>

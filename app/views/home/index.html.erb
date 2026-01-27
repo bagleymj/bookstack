@@ -1,0 +1,51 @@
+<div class="min-h-[80vh] flex items-center justify-center">
+  <div class="text-center">
+    <h1 class="text-4xl font-bold tracking-tight text-gray-900 sm:text-6xl">
+      Track Your Reading Journey
+    </h1>
+    <p class="mt-6 text-lg leading-8 text-gray-600 max-w-2xl mx-auto">
+      Build a reading pipeline, set daily goals, and visualize your progress.
+      BookStack helps you read consistently and reach your reading goals.
+    </p>
+    <div class="mt-10 flex items-center justify-center gap-x-6">
+      <%= link_to new_user_registration_path, class: "rounded-md bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600" do %>
+        Get started
+      <% end %>
+      <%= link_to new_user_session_path, class: "text-sm font-semibold leading-6 text-gray-900" do %>
+        Sign in <span aria-hidden="true">&rarr;</span>
+      <% end %>
+    </div>
+
+    <div class="mt-16 grid grid-cols-1 gap-8 sm:grid-cols-3 max-w-4xl mx-auto">
+      <div class="rounded-xl bg-white p-6 shadow-lg">
+        <div class="flex justify-center">
+          <svg class="w-12 h-12 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <h3 class="mt-4 text-lg font-semibold text-gray-900">Reading Timer</h3>
+        <p class="mt-2 text-sm text-gray-600">Track your reading sessions and build your personalized reading speed baseline.</p>
+      </div>
+
+      <div class="rounded-xl bg-white p-6 shadow-lg">
+        <div class="flex justify-center">
+          <svg class="w-12 h-12 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <h3 class="mt-4 text-lg font-semibold text-gray-900">Daily Goals</h3>
+        <p class="mt-2 text-sm text-gray-600">Set reading goals and get daily quotas that adjust when life gets in the way.</p>
+      </div>
+
+      <div class="rounded-xl bg-white p-6 shadow-lg">
+        <div class="flex justify-center">
+          <svg class="w-12 h-12 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+          </svg>
+        </div>
+        <h3 class="mt-4 text-lg font-semibold text-gray-900">Visual Pipeline</h3>
+        <p class="mt-2 text-sm text-gray-600">See your reading queue as a timeline and manage parallel books across tracks.</p>
+      </div>
+    </div>
+  </div>
+</div>

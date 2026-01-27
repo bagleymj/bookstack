@@ -1,0 +1,183 @@
+<div class="space-y-6">
+  <div class="md:flex md:items-start md:justify-between">
+    <div class="min-w-0 flex-1">
+      <div class="flex items-center gap-3">
+        <h2 class="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight"><%= @book.title %></h2>
+        <span class="inline-flex items-center rounded-full px-3 py-1 text-sm font-medium <%= status_badge_class(@book.status) %>">
+          <%= @book.status.humanize %>
+        </span>
+      </div>
+      <% if @book.author.present? %>
+        <p class="mt-1 text-lg text-gray-500">by <%= @book.author %></p>
+      <% end %>
+    </div>
+    <div class="mt-4 flex gap-2 md:ml-4 md:mt-0">
+      <% if @book.unread? %>
+        <%= button_to "Start Reading", start_reading_book_path(@book), method: :post, class: "inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500" %>
+      <% elsif @book.reading? %>
+        <%= link_to new_book_reading_session_path(@book), class: "inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500" do %>
+          <svg class="-ml-0.5 mr-1.5 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          Start Session
+        <% end %>
+      <% end %>
+      <%= link_to "Edit", edit_book_path(@book), class: "inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50" %>
+      <%= button_to "Delete", book_path(@book), method: :delete, data: { confirm: "Are you sure you want to delete this book?" }, class: "inline-flex items-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500" %>
+    </div>
+  </div>
+
+  <!-- Progress Section -->
+  <% if @book.reading? || @book.completed? %>
+    <div class="rounded-lg bg-white shadow">
+      <div class="px-4 py-5 sm:p-6">
+        <h3 class="text-lg font-medium leading-6 text-gray-900">Progress</h3>
+        <div class="mt-4">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-gray-600">Page <%= @book.actual_current_page %> of <%= @book.last_page %> (<%= @book.current_page %>/<%= @book.total_pages %> read)</span>
+            <span class="text-sm font-medium text-indigo-600"><%= @book.progress_percentage %>%</span>
+          </div>
+          <div class="relative pt-1">
+            <div class="overflow-hidden h-4 text-xs flex rounded bg-gray-200">
+              <div style="width:<%= @book.progress_percentage %>%" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center <%= @book.completed? ? 'bg-green-500' : 'bg-indigo-500' %>"></div>
+            </div>
+          </div>
+          <% unless @book.completed? %>
+            <p class="mt-2 text-sm text-gray-500"><%= @book.remaining_pages %> pages remaining &bull; Est. <%= @book.formatted_estimated_time %></p>
+          <% end %>
+        </div>
+
+        <% unless @book.completed? %>
+          <div class="mt-6">
+            <%= form_with url: update_progress_book_path(@book), method: :post, class: "flex items-center gap-3" do |form| %>
+              <label class="text-sm text-gray-700">I'm now on page:</label>
+              <%= number_field_tag :page, @book.actual_current_page, min: @book.first_page, max: @book.last_page, class: "w-24 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" %>
+              <%= form.submit "Update", class: "rounded-md bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-900 hover:bg-gray-200 cursor-pointer" %>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+
+  <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+    <!-- Book Details -->
+    <div class="rounded-lg bg-white shadow">
+      <div class="px-4 py-5 sm:p-6">
+        <h3 class="text-lg font-medium leading-6 text-gray-900">Details</h3>
+        <dl class="mt-4 space-y-3">
+          <div class="flex justify-between">
+            <dt class="text-sm text-gray-500">Page Range</dt>
+            <dd class="text-sm font-medium text-gray-900"><%= @book.first_page %> - <%= @book.last_page %> (<%= @book.total_pages %> pages)</dd>
+          </div>
+          <div class="flex justify-between">
+            <dt class="text-sm text-gray-500">Words per Page</dt>
+            <dd class="text-sm font-medium text-gray-900"><%= @book.effective_words_per_page %></dd>
+          </div>
+          <div class="flex justify-between">
+            <dt class="text-sm text-gray-500">Difficulty</dt>
+            <dd class="text-sm font-medium text-gray-900"><%= @book.difficulty.humanize %></dd>
+          </div>
+          <% if @book.actual_difficulty_modifier %>
+            <div class="flex justify-between">
+              <dt class="text-sm text-gray-500">Learned Modifier</dt>
+              <dd class="text-sm font-medium text-gray-900"><%= (@book.actual_difficulty_modifier * 100).round %>%</dd>
+            </div>
+          <% end %>
+          <div class="flex justify-between">
+            <dt class="text-sm text-gray-500">Total Words</dt>
+            <dd class="text-sm font-medium text-gray-900"><%= number_with_delimiter(@book.total_words) %></dd>
+          </div>
+          <% if @book.isbn.present? %>
+            <div class="flex justify-between">
+              <dt class="text-sm text-gray-500">ISBN</dt>
+              <dd class="text-sm font-medium text-gray-900"><%= @book.isbn %></dd>
+            </div>
+          <% end %>
+        </dl>
+      </div>
+    </div>
+
+    <!-- Active Goal -->
+    <% if @active_goal %>
+      <div class="rounded-lg bg-white shadow">
+        <div class="px-4 py-5 sm:p-6">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-medium leading-6 text-gray-900">Active Goal</h3>
+            <%= link_to "View", @active_goal, class: "text-sm text-indigo-600 hover:text-indigo-500" %>
+          </div>
+          <dl class="mt-4 space-y-3">
+            <div class="flex justify-between">
+              <dt class="text-sm text-gray-500">Target Date</dt>
+              <dd class="text-sm font-medium text-gray-900"><%= @active_goal.target_completion_date.strftime("%B %d, %Y") %></dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-sm text-gray-500">Days Remaining</dt>
+              <dd class="text-sm font-medium text-gray-900"><%= @active_goal.days_remaining %></dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-sm text-gray-500">Pages/Day Needed</dt>
+              <dd class="text-sm font-medium text-gray-900"><%= @active_goal.pages_per_day %></dd>
+            </div>
+            <% if @active_goal.today_quota %>
+              <div class="flex justify-between">
+                <dt class="text-sm text-gray-500">Today's Quota</dt>
+                <dd class="text-sm font-medium text-gray-900"><%= @active_goal.today_quota.actual_pages %> / <%= @active_goal.today_quota.target_pages %> pages</dd>
+              </div>
+              <div class="flex justify-between">
+                <dt class="text-sm text-gray-500">Read to Page</dt>
+                <dd class="text-sm font-medium text-gray-900"><%= @active_goal.today_quota.target_page_number %></dd>
+              </div>
+            <% end %>
+          </dl>
+        </div>
+      </div>
+    <% else %>
+      <div class="rounded-lg bg-white shadow">
+        <div class="px-4 py-5 sm:p-6">
+          <h3 class="text-lg font-medium leading-6 text-gray-900">Reading Goal</h3>
+          <p class="mt-2 text-sm text-gray-500">Set a goal to track your daily reading progress for this book.</p>
+          <div class="mt-4">
+            <%= link_to new_reading_goal_path(book_id: @book.id), class: "inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500" do %>
+              Create Goal
+            <% end %>
+          </div>
+        </div>
+      </div>
+    <% end %>
+  </div>
+
+  <!-- Recent Sessions -->
+  <% if @reading_sessions.any? %>
+    <div class="rounded-lg bg-white shadow">
+      <div class="px-4 py-5 sm:p-6">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-medium leading-6 text-gray-900">Recent Reading Sessions</h3>
+        </div>
+        <div class="mt-4 overflow-hidden">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead>
+              <tr>
+                <th class="py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                <th class="py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
+                <th class="py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pages</th>
+                <th class="py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">WPM</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+              <% @reading_sessions.each do |session| %>
+                <tr>
+                  <td class="py-3 text-sm text-gray-900"><%= session.started_at.strftime("%b %d, %Y") %></td>
+                  <td class="py-3 text-sm text-gray-500"><%= session.duration_seconds ? "#{session.duration_seconds / 60} min" : "-" %></td>
+                  <td class="py-3 text-sm text-gray-500"><%= session.pages_read || "-" %></td>
+                  <td class="py-3 text-sm text-gray-500"><%= session.words_per_minute&.round || "-" %></td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  <% end %>
+</div>

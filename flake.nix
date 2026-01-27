@@ -40,6 +40,9 @@
 
             # Tailwind CSS (system binary for NixOS compatibility)
             tailwindcss_4
+
+            # File watcher for CSS compilation
+            watchman
           ];
 
           shellHook = ''
