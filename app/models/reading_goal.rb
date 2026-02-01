@@ -41,6 +41,14 @@ class ReadingGoal < ApplicationRecord
     end
   end
 
+  # Total reading days across the full goal span (start to end)
+  def goal_reading_days
+    days = (started_on..target_completion_date).count do |date|
+      include_weekends? || !date.on_weekend?
+    end
+    [days, 1].max
+  end
+
   def pages_per_day
     return 0 if reading_days_remaining.zero?
     (remaining_pages.to_f / reading_days_remaining).ceil
@@ -84,7 +92,7 @@ class ReadingGoal < ApplicationRecord
   end
 
   def as_pipeline_data
-    reading_days = reading_days_remaining.zero? ? 1 : reading_days_remaining
+    goal_duration = goal_reading_days
     {
       id: id,
       book_id: book.id,
@@ -98,7 +106,7 @@ class ReadingGoal < ApplicationRecord
       total_pages: book.total_pages,
       estimated_hours: book.estimated_reading_time_hours,
       estimated_minutes: book.effective_reading_time_minutes,
-      minutes_per_day: (book.effective_reading_time_minutes.to_f / reading_days).ceil,
+      minutes_per_day: (book.effective_reading_time_minutes.to_f / goal_duration).ceil,
       duration_days: (target_completion_date - started_on).to_i,
       goal_status: status,
       on_track: on_track?,
