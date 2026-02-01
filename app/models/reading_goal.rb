@@ -57,9 +57,14 @@ class ReadingGoal < ApplicationRecord
     daily_quotas.find_by(date: Date.current)
   end
 
+  def not_started?
+    active? && started_on > Date.current
+  end
+
   def on_track?
     return true if completed?
     return false if abandoned?
+    return false if not_started?
 
     quota = today_quota
     return true unless quota

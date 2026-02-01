@@ -2,11 +2,6 @@ class ReadingGoalsController < ApplicationController
   before_action :authenticate_user!
   before_action :set_reading_goal, only: [:show, :edit, :update, :destroy, :mark_completed, :mark_abandoned, :redistribute]
 
-  def index
-    @active_goals = current_user.reading_goals.active.includes(:book, :daily_quotas)
-    @completed_goals = current_user.reading_goals.completed.includes(:book).limit(10)
-  end
-
   def show
     @daily_quotas = @reading_goal.daily_quotas.order(:date)
     @today_quota = @reading_goal.today_quota
@@ -45,17 +40,17 @@ class ReadingGoalsController < ApplicationController
 
   def destroy
     @reading_goal.destroy
-    redirect_to reading_goals_path, notice: "Reading goal deleted."
+    redirect_to pipeline_path, notice: "Reading goal deleted."
   end
 
   def mark_completed
     @reading_goal.mark_completed!
-    redirect_to reading_goals_path, notice: "Congratulations on completing your reading goal!"
+    redirect_to pipeline_path, notice: "Congratulations on completing your reading goal!"
   end
 
   def mark_abandoned
     @reading_goal.mark_abandoned!
-    redirect_to reading_goals_path, notice: "Reading goal marked as abandoned."
+    redirect_to pipeline_path, notice: "Reading goal marked as abandoned."
   end
 
   def redistribute

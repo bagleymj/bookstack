@@ -22,7 +22,7 @@ Rails.application.routes.draw do
       end
     end
 
-    resources :reading_goals do
+    resources :reading_goals, except: [:index] do
       member do
         post :mark_completed
         post :mark_abandoned

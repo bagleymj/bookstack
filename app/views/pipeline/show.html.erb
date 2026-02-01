@@ -30,42 +30,87 @@
     </div>
   </div>
 
-  <!-- Goals List -->
-  <% if @reading_goals.any? %>
-    <div class="rounded-lg bg-white shadow">
-      <div class="px-4 py-5 sm:p-6">
-        <h3 class="text-lg font-medium leading-6 text-gray-900 mb-4">Goals</h3>
-        <div class="space-y-3">
-          <% @reading_goals.each do |goal| %>
-            <div class="flex items-center justify-between rounded-lg border border-gray-200 p-4 hover:border-indigo-300 transition-colors">
-              <div class="flex-1 min-w-0">
-                <%= link_to reading_goal_path(goal), class: "hover:text-indigo-600" do %>
-                  <p class="font-medium text-gray-900 truncate"><%= goal.book.title %></p>
-                <% end %>
-                <p class="text-sm text-gray-500">
-                  <%= goal.started_on.strftime("%b %d") %> &ndash; <%= goal.target_completion_date.strftime("%b %d, %Y") %>
-                  &bull; <%= goal.pages_per_day %> pages/day
-                </p>
-              </div>
-              <div class="flex items-center gap-3 ml-4">
-                <% if goal.active? %>
-                  <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium <%= goal.on_track? ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800' %>">
-                    <%= goal.on_track? ? "On Track" : "Behind" %>
-                  </span>
+  <!-- Active Goals -->
+  <% if @active_goals.any? %>
+    <div class="space-y-4">
+      <h3 class="text-lg font-medium text-gray-900">Active Goals</h3>
+      <% @active_goals.each do |goal| %>
+        <%= link_to goal, class: "block rounded-lg bg-white p-6 shadow hover:shadow-md transition-shadow" do %>
+          <div class="flex items-start justify-between">
+            <div>
+              <h4 class="text-lg font-medium text-gray-900"><%= goal.book.title %></h4>
+              <p class="text-sm text-gray-500">Target: <%= goal.target_completion_date.strftime("%B %d, %Y") %></p>
+            </div>
+            <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium
+              <% if goal.not_started? %>
+                bg-gray-100 text-gray-800">Not Started
+              <% elsif goal.on_track? %>
+                bg-green-100 text-green-800">On Track
+              <% else %>
+                bg-yellow-100 text-yellow-800">Behind
+              <% end %>
+            </span>
+          </div>
+
+          <div class="mt-4">
+            <div class="flex items-center justify-between text-sm text-gray-500 mb-2">
+              <span><%= goal.book.current_page %> / <%= goal.book.total_pages %> pages</span>
+              <span>
+                <% if goal.not_started? %>
+                  <%= goal.goal_reading_days %> day duration
                 <% else %>
-                  <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-800">
-                    <%= goal.status.capitalize %>
-                  </span>
+                  <%= goal.days_remaining %> days left
                 <% end %>
-                <div class="w-24">
-                  <div class="overflow-hidden h-2 text-xs flex rounded bg-gray-200">
-                    <div style="width:<%= goal.progress_percentage %>%" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center <%= goal.completed? ? 'bg-green-500' : 'bg-indigo-500' %>"></div>
-                  </div>
-                </div>
+              </span>
+            </div>
+            <div class="relative pt-1">
+              <div class="overflow-hidden h-2 text-xs flex rounded bg-gray-200">
+                <div style="width:<%= goal.progress_percentage %>%" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-indigo-500"></div>
+              </div>
+            </div>
+          </div>
+
+          <% if goal.today_quota %>
+            <div class="mt-4 p-3 rounded-md bg-gray-50">
+              <div class="flex items-center justify-between">
+                <span class="text-sm text-gray-600">Today's quota</span>
+                <span class="text-sm font-medium <%= goal.today_quota.completed? ? 'text-green-600' : 'text-gray-900' %>">
+                  <%= goal.today_quota.actual_pages %> / <%= goal.today_quota.target_pages %> pages &rarr; p. <%= goal.today_quota.target_page_number %>
+                </span>
               </div>
             </div>
           <% end %>
-        </div>
+        <% end %>
+      <% end %>
+    </div>
+  <% end %>
+
+  <!-- Completed Goals -->
+  <% if @completed_goals.any? %>
+    <div class="space-y-4">
+      <h3 class="text-lg font-medium text-gray-900">Completed Goals</h3>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <% @completed_goals.each do |goal| %>
+          <div class="rounded-lg bg-white p-4 shadow">
+            <h4 class="font-medium text-gray-900"><%= goal.book.title %></h4>
+            <p class="text-sm text-gray-500">Completed <%= time_ago_in_words(goal.updated_at) %> ago</p>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+
+  <% if @active_goals.empty? && @completed_goals.empty? %>
+    <div class="text-center py-12 bg-white rounded-lg shadow">
+      <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      <h3 class="mt-2 text-sm font-medium text-gray-900">No reading goals</h3>
+      <p class="mt-1 text-sm text-gray-500">Set a goal to track your daily reading progress.</p>
+      <div class="mt-6">
+        <%= link_to new_reading_goal_path, class: "inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500" do %>
+          Create Goal
+        <% end %>
       </div>
     </div>
   <% end %>
