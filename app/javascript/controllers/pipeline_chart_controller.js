@@ -74,6 +74,55 @@ export default class extends Controller {
     }
   }
 
+  // Compute interlocking brick segments for all goals.
+  // At every transition point (where any book starts or ends), restack
+  // the active books so blocks drop down into gaps.
+  computeSegments(goals) {
+    // Collect all unique transition dates
+    const dateSet = new Set()
+    goals.forEach(g => {
+      dateSet.add(g.startDate.getTime())
+      dateSet.add(g.endDate.getTime())
+    })
+    const transitions = Array.from(dateSet).sort((a, b) => a - b)
+
+    // For each interval, stack the active goals
+    const segmentsByGoal = new Map()
+    goals.forEach(g => segmentsByGoal.set(g.id, []))
+
+    for (let i = 0; i < transitions.length - 1; i++) {
+      const segStart = transitions[i]
+      const segEnd = transitions[i + 1]
+
+      // Which goals are active during this interval?
+      const active = goals.filter(g =>
+        g.startDate.getTime() <= segStart && g.endDate.getTime() >= segEnd
+      )
+
+      // Stack them: longest duration on bottom (already sorted)
+      let yOffset = 0
+      active.forEach(g => {
+        segmentsByGoal.get(g.id).push({
+          startDate: new Date(segStart),
+          endDate: new Date(segEnd),
+          yOffset: yOffset,
+          minutes_per_day: g.minutes_per_day
+        })
+        yOffset += g.minutes_per_day
+      })
+    }
+
+    // Compute total Y extent (peak stack height)
+    let maxY = 0
+    segmentsByGoal.forEach(segments => {
+      segments.forEach(s => {
+        maxY = Math.max(maxY, s.yOffset + s.minutes_per_day)
+      })
+    })
+
+    return { segmentsByGoal, maxY }
+  }
+
   render() {
     if (!this.chartData || !this.chartData.goals.length) {
       this.element.innerHTML = `
@@ -110,27 +159,14 @@ export default class extends Controller {
     // Sort by duration descending (longest on bottom = Breakout style)
     goals.sort((a, b) => b.duration_days - a.duration_days)
 
-    // Assign colors and compute stack offsets based on time overlap
-    // Each block sits on top of overlapping blocks below it (like Breakout)
-    const placed = []
+    // Assign colors
     goals.forEach((g, i) => {
       g.color = this.constructor.BLOCK_COLORS[i % this.constructor.BLOCK_COLORS.length]
-
-      // Find all already-placed goals that overlap in time with this one
-      const overlapping = placed.filter(p =>
-        p.startDate < g.endDate && p.endDate > g.startDate
-      )
-
-      // Stack on top of the highest overlapping block
-      g.yOffset = overlapping.length > 0
-        ? Math.max(...overlapping.map(p => p.yOffset + p.minutes_per_day))
-        : 0
-
-      placed.push(g)
     })
 
-    // Total Y extent is the max top edge of any block
-    const totalMinutes = Math.max(...goals.map(g => g.yOffset + g.minutes_per_day))
+    // Compute interlocking brick segments
+    const { segmentsByGoal, maxY } = this.computeSegments(goals)
+    const totalMinutes = maxY || 1
 
     // Dynamic chart height based on content
     const minChartHeight = this.compactValue ? 150 : 250
@@ -281,234 +317,249 @@ export default class extends Controller {
       .attr("class", "absolute hidden bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg pointer-events-none z-50 max-w-xs")
       .style("transition", "opacity 0.15s")
 
-    // Draw Breakout blocks
+    // Draw interlocking brick segments for each goal
     const self = this
-    const blocks = svg.selectAll(".pipeline-block")
-      .data(goals)
-      .enter()
-      .append("g")
-      .attr("class", "pipeline-block cursor-pointer")
+    goals.forEach(goal => {
+      const segments = segmentsByGoal.get(goal.id)
+      if (!segments || segments.length === 0) return
 
-    // Main colored block
-    blocks.append("rect")
-      .attr("class", "block-fill")
-      .attr("x", d => xScale(d.startDate))
-      .attr("y", d => yScale(d.yOffset + d.minutes_per_day))
-      .attr("width", d => Math.max(xScale(d.endDate) - xScale(d.startDate), 8))
-      .attr("height", d => Math.max(yScale(d.yOffset) - yScale(d.yOffset + d.minutes_per_day), 2))
-      .attr("rx", 3)
-      .attr("ry", 3)
-      .style("fill", d => d.color)
-      .style("opacity", 0.85)
-      .style("stroke", d => d3.color(d.color).darker(0.3))
-      .style("stroke-width", 1)
+      const blockGroup = svg.append("g")
+        .attr("class", "pipeline-block cursor-pointer")
+        .datum(goal)
 
-    // Progress overlay (darker shade showing how much is read)
-    blocks.append("rect")
-      .attr("class", "block-progress")
-      .attr("x", d => xScale(d.startDate))
-      .attr("y", d => yScale(d.yOffset + d.minutes_per_day))
-      .attr("width", d => {
-        const fullWidth = Math.max(xScale(d.endDate) - xScale(d.startDate), 8)
-        return fullWidth * (d.progress / 100)
+      // Draw each segment as a rect
+      segments.forEach(seg => {
+        const x = xScale(seg.startDate)
+        const segWidth = Math.max(xScale(seg.endDate) - x, 1)
+        const y = yScale(seg.yOffset + seg.minutes_per_day)
+        const segHeight = Math.max(yScale(seg.yOffset) - y, 1)
+
+        blockGroup.append("rect")
+          .attr("class", "block-fill")
+          .attr("x", x)
+          .attr("y", y)
+          .attr("width", segWidth)
+          .attr("height", segHeight)
+          .style("fill", goal.color)
+          .style("opacity", 0.85)
+          .style("stroke", d3.color(goal.color).darker(0.3))
+          .style("stroke-width", 0.5)
       })
-      .attr("height", d => Math.max(yScale(d.yOffset) - yScale(d.yOffset + d.minutes_per_day), 2))
-      .attr("rx", 3)
-      .attr("ry", 3)
-      .style("fill", d => d3.color(d.color).darker(0.5))
-      .style("opacity", 0.4)
 
-    // Estimate indicator (dashed border for estimated vs actual data)
-    blocks.filter(d => !d.uses_actual_data)
-      .append("rect")
-      .attr("class", "block-estimate-indicator")
-      .attr("x", d => xScale(d.startDate) + 1)
-      .attr("y", d => yScale(d.yOffset + d.minutes_per_day) + 1)
-      .attr("width", d => Math.max(xScale(d.endDate) - xScale(d.startDate) - 2, 6))
-      .attr("height", d => Math.max(yScale(d.yOffset) - yScale(d.yOffset + d.minutes_per_day) - 2, 1))
-      .attr("rx", 2)
-      .style("fill", "none")
-      .style("stroke", "rgba(255,255,255,0.3)")
-      .style("stroke-width", 1)
-      .style("stroke-dasharray", "3,3")
+      // Progress overlay — spans from startDate across progress %
+      const fullWidth = xScale(goal.endDate) - xScale(goal.startDate)
+      const progressWidth = fullWidth * (goal.progress / 100)
+      const progressEndDate = new Date(goal.startDate.getTime() + (goal.endDate.getTime() - goal.startDate.getTime()) * (goal.progress / 100))
 
-    // Book title labels (inside blocks when large enough)
-    blocks.each(function(d) {
-      const blockWidth = Math.max(xScale(d.endDate) - xScale(d.startDate), 8)
-      const blockHeight = Math.max(yScale(d.yOffset) - yScale(d.yOffset + d.minutes_per_day), 2)
-      const minWidthForText = 60
-      const minHeightForText = 18
+      segments.forEach(seg => {
+        // Only draw progress on segments that fall within the progress range
+        if (seg.endDate <= goal.startDate || seg.startDate >= progressEndDate) return
 
-      if (blockWidth >= minWidthForText && blockHeight >= minHeightForText) {
-        const maxChars = Math.floor((blockWidth - 16) / 7)
-        const title = d.title.length > maxChars ? d.title.substring(0, maxChars - 1) + "\u2026" : d.title
+        const clipStart = Math.max(seg.startDate.getTime(), goal.startDate.getTime())
+        const clipEnd = Math.min(seg.endDate.getTime(), progressEndDate.getTime())
+        const x = xScale(new Date(clipStart))
+        const w = Math.max(xScale(new Date(clipEnd)) - x, 0)
+        const y = yScale(seg.yOffset + seg.minutes_per_day)
+        const h = Math.max(yScale(seg.yOffset) - y, 1)
 
-        d3.select(this).append("text")
-          .attr("x", xScale(d.startDate) + 8)
-          .attr("y", yScale(d.yOffset + d.minutes_per_day) + blockHeight / 2)
+        if (w > 0) {
+          blockGroup.append("rect")
+            .attr("class", "block-progress")
+            .attr("x", x)
+            .attr("y", y)
+            .attr("width", w)
+            .attr("height", h)
+            .style("fill", d3.color(goal.color).darker(0.5))
+            .style("opacity", 0.4)
+        }
+      })
+
+      // Estimate indicator (dashed inner border on widest segment)
+      if (!goal.uses_actual_data) {
+        const widest = segments.reduce((a, b) =>
+          (xScale(b.endDate) - xScale(b.startDate)) > (xScale(a.endDate) - xScale(a.startDate)) ? b : a
+        )
+        const wx = xScale(widest.startDate) + 1
+        const wy = yScale(widest.yOffset + widest.minutes_per_day) + 1
+        const ww = Math.max(xScale(widest.endDate) - xScale(widest.startDate) - 2, 4)
+        const wh = Math.max(yScale(widest.yOffset) - yScale(widest.yOffset + widest.minutes_per_day) - 2, 1)
+
+        blockGroup.append("rect")
+          .attr("x", wx).attr("y", wy)
+          .attr("width", ww).attr("height", wh)
+          .attr("rx", 2)
+          .style("fill", "none")
+          .style("stroke", "rgba(255,255,255,0.3)")
+          .style("stroke-width", 1)
+          .style("stroke-dasharray", "3,3")
+      }
+
+      // Book title label — placed on the widest segment if it's large enough
+      const widestSeg = segments.reduce((a, b) =>
+        (xScale(b.endDate) - xScale(b.startDate)) > (xScale(a.endDate) - xScale(a.startDate)) ? b : a
+      )
+      const labelWidth = xScale(widestSeg.endDate) - xScale(widestSeg.startDate)
+      const labelHeight = yScale(widestSeg.yOffset) - yScale(widestSeg.yOffset + widestSeg.minutes_per_day)
+
+      if (labelWidth >= 60 && labelHeight >= 18) {
+        const maxChars = Math.floor((labelWidth - 16) / 7)
+        const title = goal.title.length > maxChars ? goal.title.substring(0, maxChars - 1) + "\u2026" : goal.title
+
+        blockGroup.append("text")
+          .attr("x", xScale(widestSeg.startDate) + 8)
+          .attr("y", yScale(widestSeg.yOffset + widestSeg.minutes_per_day) + labelHeight / 2)
           .attr("dy", "0.35em")
           .style("fill", "#fff")
-          .style("font-size", blockHeight >= 28 ? "12px" : "10px")
+          .style("font-size", labelHeight >= 28 ? "12px" : "10px")
           .style("font-weight", "600")
           .style("text-shadow", "0 1px 2px rgba(0,0,0,0.3)")
           .style("pointer-events", "none")
           .text(title)
       }
-    })
 
-    // Minutes/day label on right side of block (when tall enough)
-    if (!this.compactValue) {
-      blocks.each(function(d) {
-        const blockWidth = Math.max(xScale(d.endDate) - xScale(d.startDate), 8)
-        const blockHeight = Math.max(yScale(d.yOffset) - yScale(d.yOffset + d.minutes_per_day), 2)
+      // Minutes/day label on widest segment
+      if (!this.compactValue && labelHeight >= 18 && labelWidth >= 80) {
+        blockGroup.append("text")
+          .attr("x", xScale(widestSeg.endDate) - 8)
+          .attr("y", yScale(widestSeg.yOffset + widestSeg.minutes_per_day) + labelHeight / 2)
+          .attr("dy", "0.35em")
+          .attr("text-anchor", "end")
+          .style("fill", "rgba(255,255,255,0.8)")
+          .style("font-size", "10px")
+          .style("font-weight", "500")
+          .style("text-shadow", "0 1px 2px rgba(0,0,0,0.3)")
+          .style("pointer-events", "none")
+          .text(`${goal.minutes_per_day}m/day`)
+      }
 
-        if (blockHeight >= 18 && blockWidth >= 80) {
-          d3.select(this).append("text")
-            .attr("x", xScale(d.endDate) - 8)
-            .attr("y", yScale(d.yOffset + d.minutes_per_day) + blockHeight / 2)
-            .attr("dy", "0.35em")
-            .attr("text-anchor", "end")
-            .style("fill", "rgba(255,255,255,0.8)")
-            .style("font-size", "10px")
-            .style("font-weight", "500")
-            .style("text-shadow", "0 1px 2px rgba(0,0,0,0.3)")
-            .style("pointer-events", "none")
-            .text(`${d.minutes_per_day}m/day`)
-        }
-      })
-    }
+      // Resize handle (right edge of the last segment)
+      const lastSeg = segments[segments.length - 1]
+      blockGroup.append("rect")
+        .attr("class", "resize-handle")
+        .attr("x", xScale(lastSeg.endDate) - 5)
+        .attr("y", yScale(lastSeg.yOffset + lastSeg.minutes_per_day))
+        .attr("width", 5)
+        .attr("height", Math.max(yScale(lastSeg.yOffset) - yScale(lastSeg.yOffset + lastSeg.minutes_per_day), 2))
+        .style("fill", "transparent")
+        .style("cursor", "ew-resize")
+        .call(d3.drag()
+          .on("start", function(event) {
+            goal._resizeStartX = event.x
+            goal._origEndDate = goal.endDate
+            d3.select(this).style("fill", "rgba(255,255,255,0.3)")
+          })
+          .on("drag", function(event) {
+            const dx = event.x - goal._resizeStartX
+            const newEnd = new Date(goal._origEndDate.getTime() + dx / width * (endDate - startDate))
+            if (newEnd > goal.startDate) {
+              goal.endDate = newEnd
+              d3.select(this).attr("x", xScale(goal.endDate) - 5)
+            }
+          })
+          .on("end", function() {
+            d3.select(this).style("fill", "transparent")
+            if (goal.endDate !== goal._origEndDate) {
+              self.updateGoalDates(goal.id, goal.startDate, goal.endDate)
+            }
+          })
+        )
 
-    // Resize handle (right edge of each block)
-    blocks.append("rect")
-      .attr("class", "resize-handle")
-      .attr("x", d => xScale(d.endDate) - 5)
-      .attr("y", d => yScale(d.yOffset + d.minutes_per_day))
-      .attr("width", 5)
-      .attr("height", d => Math.max(yScale(d.yOffset) - yScale(d.yOffset + d.minutes_per_day), 2))
-      .style("fill", "transparent")
-      .style("cursor", "ew-resize")
-      .call(d3.drag()
-        .on("start", function(event, d) {
-          d._resizeStartX = event.x
-          d._origEndDate = d.endDate
-          d3.select(this).style("fill", "rgba(255,255,255,0.3)")
+      // Drag to move entire block horizontally
+      blockGroup.call(d3.drag()
+        .filter(function(event) {
+          return !event.target.classList.contains("resize-handle")
         })
-        .on("drag", function(event, d) {
-          const dx = event.x - d._resizeStartX
-          const newEnd = new Date(d._origEndDate.getTime() + dx / width * (endDate - startDate))
-          if (newEnd > d.startDate) {
-            d.endDate = newEnd
-            const block = d3.select(this.parentNode)
-            const blockWidth = Math.max(xScale(d.endDate) - xScale(d.startDate), 8)
-            block.select(".block-fill").attr("width", blockWidth)
-            block.select(".block-progress").attr("width", blockWidth * (d.progress / 100))
-            d3.select(this).attr("x", xScale(d.endDate) - 5)
-          }
+        .on("start", function(event) {
+          goal._dragStartX = event.x
+          goal._origStartDate = goal.startDate
+          goal._origEndDate = goal.endDate
+          d3.select(this).raise().style("opacity", 0.7)
         })
-        .on("end", function(event, d) {
-          d3.select(this).style("fill", "transparent")
-          if (d.endDate !== d._origEndDate) {
-            self.updateGoalDates(d.id, d.startDate, d.endDate)
+        .on("drag", function(event) {
+          const dx = event.x - goal._dragStartX
+          const msPerPx = (endDate - startDate) / width
+          const offsetMs = dx * msPerPx
+          goal.startDate = new Date(goal._origStartDate.getTime() + offsetMs)
+          goal.endDate = new Date(goal._origEndDate.getTime() + offsetMs)
+
+          // Shift all rects in this group horizontally
+          const shift = xScale(goal.startDate) - xScale(goal._origStartDate)
+          d3.select(this).selectAll("rect").each(function() {
+            const el = d3.select(this)
+            const origX = parseFloat(el.attr("data-orig-x") || el.attr("x"))
+            if (!el.attr("data-orig-x")) el.attr("data-orig-x", el.attr("x"))
+            el.attr("x", origX + shift)
+          })
+          d3.select(this).selectAll("text").each(function() {
+            const el = d3.select(this)
+            const origX = parseFloat(el.attr("data-orig-x") || el.attr("x"))
+            if (!el.attr("data-orig-x")) el.attr("data-orig-x", el.attr("x"))
+            el.attr("x", origX + shift)
+          })
+        })
+        .on("end", function() {
+          d3.select(this).style("opacity", 1)
+          if (goal.startDate.getTime() !== goal._origStartDate.getTime()) {
+            self.updateGoalDates(goal.id, goal.startDate, goal.endDate)
           }
         })
       )
 
-    // Drag to move entire block horizontally
-    blocks.call(d3.drag()
-      .filter(function(event) {
-        return !event.target.classList.contains("resize-handle")
-      })
-      .on("start", function(event, d) {
-        d._dragStartX = event.x
-        d._origStartDate = d.startDate
-        d._origEndDate = d.endDate
-        d3.select(this).raise().style("opacity", 0.7)
-      })
-      .on("drag", function(event, d) {
-        const dx = event.x - d._dragStartX
-        const msPerPx = (endDate - startDate) / width
-        const offsetMs = dx * msPerPx
-        d.startDate = new Date(d._origStartDate.getTime() + offsetMs)
-        d.endDate = new Date(d._origEndDate.getTime() + offsetMs)
-        const newX = xScale(d.startDate)
-        const blockWidth = Math.max(xScale(d.endDate) - xScale(d.startDate), 8)
-        const block = d3.select(this)
-        block.select(".block-fill").attr("x", newX)
-        block.select(".block-progress").attr("x", newX)
-        block.select(".resize-handle").attr("x", newX + blockWidth - 5)
-        block.selectAll("text").each(function() {
-          const el = d3.select(this)
-          if (el.attr("text-anchor") === "end") {
-            el.attr("x", newX + blockWidth - 8)
-          } else {
-            el.attr("x", newX + 8)
-          }
-        })
-      })
-      .on("end", function(event, d) {
-        d3.select(this).style("opacity", 1)
-        if (d.startDate.getTime() !== d._origStartDate.getTime()) {
-          self.updateGoalDates(d.id, d.startDate, d.endDate)
+      // Hover effects
+      blockGroup.on("mouseenter", function(event) {
+        d3.select(this).selectAll(".block-fill").style("opacity", 1)
+
+        const dataSource = goal.uses_actual_data
+          ? '<span class="text-green-400">Based on actual reading speed</span>'
+          : '<span class="text-gray-400">Estimated from difficulty</span>'
+
+        let daysLine
+        if (goal.goal_status === "completed") {
+          daysLine = '<span class="text-green-400">Completed</span>'
+        } else if (goal.goal_status === "abandoned") {
+          daysLine = '<span class="text-red-400">Abandoned</span>'
+        } else if (goal.days_remaining > 0 && goal.startDate <= new Date()) {
+          const suffix = !goal.include_weekends ? ` <span class="text-gray-500">(${goal.calendar_days} calendar)</span>` : ""
+          daysLine = `${goal.days_remaining} days remaining${suffix}`
+        } else {
+          const suffix = !goal.include_weekends ? ` <span class="text-gray-500">(${goal.calendar_days} calendar)</span>` : ""
+          daysLine = `${goal.duration_days} day duration${suffix}`
         }
+
+        tooltip
+          .html(`
+            <div class="font-semibold mb-1">${goal.title}</div>
+            <div class="text-gray-300 text-xs">${goal.author || "Unknown author"}</div>
+            <div class="mt-2 space-y-1 text-xs">
+              <div><span class="text-gray-400">Minutes/day:</span> ${goal.minutes_per_day}</div>
+              <div>${daysLine}</div>
+              <div><span class="text-gray-400">Pages:</span> ${goal.total_pages}</div>
+              <div><span class="text-gray-400">Progress:</span> ${goal.progress}%</div>
+              <div><span class="text-gray-400">Pages/day:</span> ${goal.pages_per_day}</div>
+              <div><span class="text-gray-400">Est. remaining:</span> ${(goal.estimated_hours || 0).toFixed(1)}h</div>
+              <div>${dataSource}</div>
+            </div>
+          `)
+          .classed("hidden", false)
+          .style("left", `${event.offsetX + 15}px`)
+          .style("top", `${event.offsetY - 10}px`)
       })
-    )
 
-    // Hover effects
-    blocks.on("mouseenter", function(event, d) {
-      d3.select(this).select(".block-fill").style("opacity", 1)
+      blockGroup.on("mousemove", function(event) {
+        tooltip
+          .style("left", `${event.offsetX + 15}px`)
+          .style("top", `${event.offsetY - 10}px`)
+      })
 
-      const dataSource = d.uses_actual_data
-        ? '<span class="text-green-400">Based on actual reading speed</span>'
-        : '<span class="text-gray-400">Estimated from difficulty</span>'
+      blockGroup.on("mouseleave", function() {
+        d3.select(this).selectAll(".block-fill").style("opacity", 0.85)
+        tooltip.classed("hidden", true)
+      })
 
-      let daysLine
-      if (d.goal_status === "completed") {
-        daysLine = '<span class="text-green-400">Completed</span>'
-      } else if (d.goal_status === "abandoned") {
-        daysLine = '<span class="text-red-400">Abandoned</span>'
-      } else if (d.days_remaining > 0 && new Date(d.start_date + "T00:00:00") <= new Date()) {
-        // Active: started and has days left
-        const suffix = !d.include_weekends ? ` <span class="text-gray-500">(${d.calendar_days} calendar)</span>` : ""
-        daysLine = `${d.days_remaining} days remaining${suffix}`
-      } else {
-        // Future: hasn't started yet
-        const suffix = !d.include_weekends ? ` <span class="text-gray-500">(${d.calendar_days} calendar)</span>` : ""
-        daysLine = `${d.duration_days} day duration${suffix}`
-      }
-
-      tooltip
-        .html(`
-          <div class="font-semibold mb-1">${d.title}</div>
-          <div class="text-gray-300 text-xs">${d.author || "Unknown author"}</div>
-          <div class="mt-2 space-y-1 text-xs">
-            <div><span class="text-gray-400">Minutes/day:</span> ${d.minutes_per_day}</div>
-            <div>${daysLine}</div>
-            <div><span class="text-gray-400">Pages:</span> ${d.total_pages}</div>
-            <div><span class="text-gray-400">Progress:</span> ${d.progress}%</div>
-            <div><span class="text-gray-400">Pages/day:</span> ${d.pages_per_day}</div>
-            <div><span class="text-gray-400">Est. remaining:</span> ${(d.estimated_hours || 0).toFixed(1)}h</div>
-            <div>${dataSource}</div>
-          </div>
-        `)
-        .classed("hidden", false)
-        .style("left", `${event.offsetX + 15}px`)
-        .style("top", `${event.offsetY - 10}px`)
-    })
-
-    blocks.on("mousemove", function(event) {
-      tooltip
-        .style("left", `${event.offsetX + 15}px`)
-        .style("top", `${event.offsetY - 10}px`)
-    })
-
-    blocks.on("mouseleave", function() {
-      d3.select(this).select(".block-fill").style("opacity", 0.85)
-      tooltip.classed("hidden", true)
-    })
-
-    blocks.on("click", (event, d) => {
-      if (event.defaultPrevented) return
-      window.location.href = `/reading_goals/${d.id}`
+      blockGroup.on("click", (event) => {
+        if (event.defaultPrevented) return
+        window.location.href = `/reading_goals/${goal.id}`
+      })
     })
 
     // Legend (color blocks matching each book)
@@ -564,7 +615,7 @@ export default class extends Controller {
       if (!response.ok) {
         console.error("Failed to update goal dates")
       }
-      // Always reload to get recalculated minutes_per_day
+      // Always reload to get recalculated layout
       this.loadData()
     } catch (error) {
       console.error("Error updating goal:", error)
