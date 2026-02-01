@@ -75,15 +75,35 @@ export default class extends Controller {
   }
 
   // Compute interlocking brick segments for all goals.
-  // At every transition point (where any book starts or ends), restack
-  // the active books so blocks drop down into gaps.
+  // At every transition point (where any book starts or ends, plus
+  // weekday/weekend boundaries), restack the active books so blocks
+  // drop down into gaps. Goals that exclude weekends are not active
+  // on Saturday/Sunday, creating gaps in their blocks.
   computeSegments(goals) {
-    // Collect all unique transition dates
+    // Collect all unique transition dates: book start/end boundaries
     const dateSet = new Set()
     goals.forEach(g => {
       dateSet.add(g.startDate.getTime())
       dateSet.add(g.endDate.getTime())
     })
+
+    // Add weekday/weekend boundaries for goals that exclude weekends.
+    // This ensures segments never straddle a Fri->Sat or Sun->Mon edge.
+    const hasWeekendExclusion = goals.some(g => !g.include_weekends)
+    if (hasWeekendExclusion) {
+      const earliest = Math.min(...goals.map(g => g.startDate.getTime()))
+      const latest = Math.max(...goals.map(g => g.endDate.getTime()))
+      let day = new Date(earliest)
+      while (day.getTime() <= latest) {
+        const dow = day.getDay()
+        // Add Saturday start and Monday start as transitions
+        if (dow === 6 || dow === 1) {
+          dateSet.add(day.getTime())
+        }
+        day = new Date(day.getTime() + 86400000)
+      }
+    }
+
     const transitions = Array.from(dateSet).sort((a, b) => a - b)
 
     // For each interval, stack the active goals
@@ -93,11 +113,16 @@ export default class extends Controller {
     for (let i = 0; i < transitions.length - 1; i++) {
       const segStart = transitions[i]
       const segEnd = transitions[i + 1]
+      const segDay = new Date(segStart).getDay()
+      const isWeekend = segDay === 0 || segDay === 6
 
       // Which goals are active during this interval?
-      const active = goals.filter(g =>
-        g.startDate.getTime() <= segStart && g.endDate.getTime() >= segEnd
-      )
+      // Skip goals that exclude weekends when the segment is on a weekend.
+      const active = goals.filter(g => {
+        if (g.startDate.getTime() > segStart || g.endDate.getTime() < segEnd) return false
+        if (isWeekend && !g.include_weekends) return false
+        return true
+      })
 
       // Stack them: longest duration on bottom (already sorted)
       let yOffset = 0
