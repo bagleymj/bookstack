@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-BookStack is a Rails 7.1 application for managing reading goals and tracking progress. Users set reading goals with target dates, view them on an interactive timeline, and track reading sessions to analyze reading speed.
+BookStack is a Rails 7.1 application for managing reading goals and tracking progress. Users set reading goals with target dates, view them on an interactive pipeline visualization, and track reading sessions to analyze reading speed.
 
 ## Development Environment
 
@@ -56,7 +56,7 @@ bin/rails console
 
 - **User** - Devise authentication, stores reading speed preferences
 - **Book** - Core entity with page ranges, difficulty ratings, and reading status (unread/reading/completed/abandoned)
-- **ReadingGoal** - Target completion date for a book with weekend inclusion option; drives the timeline view
+- **ReadingGoal** - Target completion date for a book with weekend inclusion option; drives the pipeline view
 - **DailyQuota** - Auto-generated per-day page targets for a reading goal
 - **ReadingSession** - Tracks time spent reading with start/end pages for WPM calculation
 - **UserReadingStats** - Aggregated reading statistics (average WPM, totals)
@@ -73,8 +73,9 @@ bin/rails console
 
 - Books use `first_page` and `last_page` instead of raw page count (accommodates different editions)
 - Difficulty enum affects reading speed estimates via modifiers (easy=1.3x, dense=0.7x)
-- Reading goals drive an interactive D3 timeline (drag to reschedule, resize to change end date)
-- Timeline API at `/api/v1/timeline` serves goal data for the chart
+- Reading goals drive an interactive D3 pipeline chart (Breakout-style stacked blocks; X=days, Y=minutes/day)
+- Pipeline API at `/api/v1/pipeline` serves goal data for the chart
+- Book reading time uses actual WPM from sessions when available, falling back to estimated WPM * difficulty modifier
 - All authenticated routes are nested under `authenticate :user`
 
 ### Testing

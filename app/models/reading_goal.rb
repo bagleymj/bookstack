@@ -18,7 +18,7 @@ class ReadingGoal < ApplicationRecord
 
   # Scopes
   scope :current, -> { active.where("target_completion_date >= ?", Date.current) }
-  scope :timeline_visible, -> { where(status: [:active, :completed]).or(where("started_on > ?", Date.current)) }
+  scope :pipeline_visible, -> { where(status: [:active, :completed]).or(where("started_on > ?", Date.current)) }
   scope :ordered_by_start, -> { order(:started_on, :target_completion_date) }
 
   # Callbacks
@@ -83,7 +83,8 @@ class ReadingGoal < ApplicationRecord
     QuotaCalculator.new(self).generate_quotas!
   end
 
-  def as_timeline_data
+  def as_pipeline_data
+    reading_days = reading_days_remaining.zero? ? 1 : reading_days_remaining
     {
       id: id,
       book_id: book.id,
@@ -96,9 +97,13 @@ class ReadingGoal < ApplicationRecord
       difficulty: book.difficulty,
       total_pages: book.total_pages,
       estimated_hours: book.estimated_reading_time_hours,
+      estimated_minutes: book.effective_reading_time_minutes,
+      minutes_per_day: (book.effective_reading_time_minutes.to_f / reading_days).ceil,
+      duration_days: (target_completion_date - started_on).to_i,
       goal_status: status,
       on_track: on_track?,
-      pages_per_day: pages_per_day
+      pages_per_day: pages_per_day,
+      uses_actual_data: book.actual_wpm.present?
     }
   end
 

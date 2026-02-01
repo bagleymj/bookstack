@@ -31,11 +31,11 @@ Rails.application.routes.draw do
       resources :daily_quotas, only: [:update], shallow: true
     end
 
-    resource :timeline, only: [:show], controller: "timeline"
+    resource :pipeline, only: [:show], controller: "pipeline"
 
     namespace :api do
       namespace :v1 do
-        resources :timeline, only: [:index], controller: "timeline" do
+        resources :pipeline, only: [:index], controller: "pipeline" do
           member do
             patch :update
           end

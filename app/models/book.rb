@@ -84,6 +84,18 @@ class Book < ApplicationRecord
     actual_difficulty_modifier || DIFFICULTY_MODIFIERS[difficulty.to_sym]
   end
 
+  def actual_wpm
+    sessions = reading_sessions.where.not(words_per_minute: nil)
+    return nil if sessions.empty?
+    sessions.average(:words_per_minute)&.to_f
+  end
+
+  def effective_reading_time_minutes
+    wpm = actual_wpm || (user.effective_reading_speed * difficulty_modifier)
+    return 0 if wpm.zero? || remaining_words.zero?
+    (remaining_words / wpm).round
+  end
+
   def estimated_reading_time_minutes
     return 0 if remaining_words.zero?
 
@@ -92,7 +104,7 @@ class Book < ApplicationRecord
   end
 
   def estimated_reading_time_hours
-    (estimated_reading_time_minutes / 60.0).round(1)
+    (effective_reading_time_minutes / 60.0).round(1)
   end
 
   def formatted_estimated_time

@@ -2,9 +2,9 @@
   <div class="md:flex md:items-center md:justify-between">
     <div class="min-w-0 flex-1">
       <h2 class="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight">
-        Reading Timeline
+        Reading Pipeline
       </h2>
-      <p class="mt-1 text-sm text-gray-500">Drag goals to reschedule. Drag the right edge to change the end date. Click for details.</p>
+      <p class="mt-1 text-sm text-gray-500">Your reading commitments visualized over time. Drag to reschedule, resize right edge to adjust end date.</p>
     </div>
     <div class="mt-4 flex md:ml-4 md:mt-0">
       <%= link_to new_reading_goal_path, class: "inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500" do %>
@@ -16,15 +16,15 @@
     </div>
   </div>
 
-  <!-- Timeline Chart -->
+  <!-- Pipeline Chart -->
   <div class="rounded-lg bg-white shadow">
     <div class="px-4 py-5 sm:p-6">
-      <div data-controller="timeline-chart"
-           data-timeline-chart-url-value="<%= api_v1_timeline_index_path %>"
+      <div data-controller="pipeline-chart"
+           data-pipeline-chart-url-value="<%= api_v1_pipeline_index_path %>"
            class="overflow-x-auto relative"
            style="touch-action: none;">
         <div class="min-h-[200px] flex items-center justify-center text-gray-500">
-          Loading timeline...
+          Loading pipeline...
         </div>
       </div>
     </div>

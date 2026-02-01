@@ -143,21 +143,21 @@
     </div>
   </div>
 
-  <!-- Timeline Summary -->
+  <!-- Pipeline Summary -->
   <% if @active_goals.any? %>
     <div class="rounded-lg bg-white shadow">
       <div class="px-4 py-5 sm:p-6">
         <div class="flex items-center justify-between mb-4">
-          <h3 class="text-lg font-medium leading-6 text-gray-900">Reading Timeline</h3>
-          <%= link_to "Full timeline", timeline_path, class: "text-sm text-indigo-600 hover:text-indigo-500" %>
+          <h3 class="text-lg font-medium leading-6 text-gray-900">Reading Pipeline</h3>
+          <%= link_to "Full pipeline", pipeline_path, class: "text-sm text-indigo-600 hover:text-indigo-500" %>
         </div>
-        <div data-controller="timeline-chart"
-             data-timeline-chart-url-value="<%= api_v1_timeline_index_path %>"
-             data-timeline-chart-compact-value="true"
+        <div data-controller="pipeline-chart"
+             data-pipeline-chart-url-value="<%= api_v1_pipeline_index_path %>"
+             data-pipeline-chart-compact-value="true"
              class="overflow-x-auto relative"
              style="touch-action: none;">
           <div class="min-h-[100px] flex items-center justify-center text-gray-500">
-            Loading timeline...
+            Loading pipeline...
           </div>
         </div>
       </div>
