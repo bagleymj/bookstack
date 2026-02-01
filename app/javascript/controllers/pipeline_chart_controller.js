@@ -448,9 +448,10 @@ export default class extends Controller {
         ? '<span class="text-green-400">Based on actual reading speed</span>'
         : '<span class="text-gray-400">Estimated from difficulty</span>'
 
-      const durationText = d.include_weekends || d.duration_days === d.calendar_days
-        ? `${d.duration_days} days`
-        : `${d.duration_days} reading days <span class="text-gray-500">(${d.calendar_days} calendar)</span>`
+      const daysRemaining = d.days_remaining
+      const durationText = d.include_weekends
+        ? `${daysRemaining} days`
+        : `${daysRemaining} reading days <span class="text-gray-500">(${d.calendar_days} calendar)</span>`
 
       tooltip
         .html(`
@@ -458,7 +459,7 @@ export default class extends Controller {
           <div class="text-gray-300 text-xs">${d.author || "Unknown author"}</div>
           <div class="mt-2 space-y-1 text-xs">
             <div><span class="text-gray-400">Minutes/day:</span> ${d.minutes_per_day}</div>
-            <div><span class="text-gray-400">Duration:</span> ${durationText}</div>
+            <div><span class="text-gray-400">Days remaining:</span> ${durationText}</div>
             <div><span class="text-gray-400">Pages:</span> ${d.total_pages}</div>
             <div><span class="text-gray-400">Progress:</span> ${d.progress}%</div>
             <div><span class="text-gray-400">Pages/day:</span> ${d.pages_per_day}</div>
