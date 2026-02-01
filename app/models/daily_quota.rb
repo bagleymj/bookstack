@@ -42,17 +42,12 @@ class DailyQuota < ApplicationRecord
   end
 
   # The actual book page number to reach after completing this quota
-  # For today: current position + target
-  # For future: cumulative from start
+  # Current position + cumulative pages from today through this date
   def target_page_number
-    if date == Date.current
-      book.actual_current_page + target_pages
-    else
-      # Calculate cumulative target from book start
-      prior_quotas = reading_goal.daily_quotas.where("date <= ?", date)
-      cumulative_pages = prior_quotas.sum(:target_pages)
-      book.first_page + cumulative_pages - 1
-    end
+    cumulative_pages = reading_goal.daily_quotas
+                                   .where(date: Date.current..date)
+                                   .sum(:target_pages)
+    book.actual_current_page + cumulative_pages
   end
 
   def record_pages!(pages_read)
