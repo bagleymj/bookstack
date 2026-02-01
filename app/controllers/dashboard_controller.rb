@@ -10,7 +10,6 @@ class DashboardController < ApplicationController
                               .where(date: Date.current)
                               .includes(reading_goal: :book)
     @stats = current_user.user_reading_stats
-    @pipelines = current_user.pipelines.includes(pipeline_books: :book).limit(3)
     @unread_books = current_user.books.unread.limit(5)
   end
 end

@@ -50,48 +50,12 @@
             export PATH="$GEM_HOME/bin:$PATH"
             export BUNDLE_PATH="$GEM_HOME"
 
-            # PostgreSQL data directory
             export PGDATA="$PWD/.postgres"
             export PGHOST="$PWD/.postgres"
             export PGPORT="5432"
             export DATABASE_URL="postgresql://localhost:5432/bookstack_development"
 
-            # Tell tailwindcss-rails to use the system binary
             export TAILWINDCSS_INSTALL_DIR="${pkgs.tailwindcss_4}/bin"
-
-            # Initialize PostgreSQL if needed
-            if [ ! -d "$PGDATA" ]; then
-              echo "Initializing PostgreSQL database..."
-              initdb --auth=trust --no-locale --encoding=UTF8
-            fi
-
-            # Start PostgreSQL if not running
-            if ! pg_ctl status > /dev/null 2>&1; then
-              echo "Starting PostgreSQL..."
-              pg_ctl start -l "$PGDATA/postgres.log" -o "-k $PGDATA"
-              sleep 2
-            fi
-
-            # Create the database user and database if they don't exist
-            createdb bookstack_development 2>/dev/null || true
-            createdb bookstack_test 2>/dev/null || true
-
-            # Install gems if Gemfile exists and Gemfile.lock is missing or outdated
-            if [ -f "Gemfile" ]; then
-              if [ ! -f "Gemfile.lock" ] || [ "Gemfile" -nt "Gemfile.lock" ]; then
-                echo "Installing Ruby gems..."
-                bundle install
-              fi
-            fi
-
-            echo ""
-            echo "BookStack development environment ready!"
-            echo "Ruby: $(ruby --version)"
-            echo "Node: $(node --version)"
-            echo "PostgreSQL: $(psql --version)"
-            if [ -f "Gemfile.lock" ]; then
-              echo "Rails: $(bundle exec rails --version 2>/dev/null || echo 'run bundle install')"
-            fi
           '';
         };
       }

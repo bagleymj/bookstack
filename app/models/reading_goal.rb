@@ -18,6 +18,8 @@ class ReadingGoal < ApplicationRecord
 
   # Scopes
   scope :current, -> { active.where("target_completion_date >= ?", Date.current) }
+  scope :timeline_visible, -> { where(status: [:active, :completed]).or(where("started_on > ?", Date.current)) }
+  scope :ordered_by_start, -> { order(:started_on, :target_completion_date) }
 
   # Callbacks
   after_create :generate_daily_quotas
@@ -73,6 +75,31 @@ class ReadingGoal < ApplicationRecord
 
   def mark_abandoned!
     update!(status: :abandoned)
+  end
+
+  def reschedule!(new_start, new_end)
+    update!(started_on: new_start, target_completion_date: new_end)
+    daily_quotas.destroy_all
+    QuotaCalculator.new(self).generate_quotas!
+  end
+
+  def as_timeline_data
+    {
+      id: id,
+      book_id: book.id,
+      title: book.title,
+      author: book.author,
+      start_date: started_on.to_s,
+      end_date: target_completion_date.to_s,
+      progress: progress_percentage,
+      status: book.status,
+      difficulty: book.difficulty,
+      total_pages: book.total_pages,
+      estimated_hours: book.estimated_reading_time_hours,
+      goal_status: status,
+      on_track: on_track?,
+      pages_per_day: pages_per_day
+    }
   end
 
   private

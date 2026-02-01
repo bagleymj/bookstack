@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_01_27_122357) do
+ActiveRecord::Schema[7.1].define(version: 2026_02_01_002500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -46,32 +46,6 @@ ActiveRecord::Schema[7.1].define(version: 2026_01_27_122357) do
     t.index ["date"], name: "index_daily_quotas_on_date"
     t.index ["reading_goal_id", "date"], name: "index_daily_quotas_on_reading_goal_id_and_date", unique: true
     t.index ["reading_goal_id"], name: "index_daily_quotas_on_reading_goal_id"
-  end
-
-  create_table "pipeline_books", force: :cascade do |t|
-    t.bigint "pipeline_id", null: false
-    t.bigint "book_id", null: false
-    t.integer "position", default: 0
-    t.date "planned_start_date"
-    t.date "planned_end_date"
-    t.integer "track", default: 1
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["book_id"], name: "index_pipeline_books_on_book_id"
-    t.index ["pipeline_id", "book_id"], name: "index_pipeline_books_on_pipeline_id_and_book_id", unique: true
-    t.index ["pipeline_id", "position"], name: "index_pipeline_books_on_pipeline_id_and_position"
-    t.index ["pipeline_id"], name: "index_pipeline_books_on_pipeline_id"
-    t.index ["track"], name: "index_pipeline_books_on_track"
-  end
-
-  create_table "pipelines", force: :cascade do |t|
-    t.bigint "user_id", null: false
-    t.string "name", null: false
-    t.text "description"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["user_id", "name"], name: "index_pipelines_on_user_id_and_name"
-    t.index ["user_id"], name: "index_pipelines_on_user_id"
   end
 
   create_table "reading_goals", force: :cascade do |t|
@@ -136,9 +110,6 @@ ActiveRecord::Schema[7.1].define(version: 2026_01_27_122357) do
 
   add_foreign_key "books", "users"
   add_foreign_key "daily_quotas", "reading_goals"
-  add_foreign_key "pipeline_books", "books"
-  add_foreign_key "pipeline_books", "pipelines"
-  add_foreign_key "pipelines", "users"
   add_foreign_key "reading_goals", "books"
   add_foreign_key "reading_goals", "users"
   add_foreign_key "reading_sessions", "books"

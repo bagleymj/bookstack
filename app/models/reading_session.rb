@@ -16,6 +16,8 @@ class ReadingSession < ApplicationRecord
 
   # Callbacks
   before_save :calculate_metrics, if: :completed?
+  after_save :update_user_stats!
+  after_destroy :update_user_stats!
 
   def completed?
     ended_at.present? && end_page.present?
@@ -31,7 +33,6 @@ class ReadingSession < ApplicationRecord
       end_page: end_page_number
     )
     update_book_progress!
-    update_user_stats!
   end
 
   def duration

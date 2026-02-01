@@ -1,0 +1,72 @@
+<div class="space-y-6">
+  <div class="md:flex md:items-center md:justify-between">
+    <div class="min-w-0 flex-1">
+      <h2 class="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight">
+        Reading Timeline
+      </h2>
+      <p class="mt-1 text-sm text-gray-500">Drag goals to reschedule. Drag the right edge to change the end date. Click for details.</p>
+    </div>
+    <div class="mt-4 flex md:ml-4 md:mt-0">
+      <%= link_to new_reading_goal_path, class: "inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500" do %>
+        <svg class="-ml-0.5 mr-1.5 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+        New Goal
+      <% end %>
+    </div>
+  </div>
+
+  <!-- Timeline Chart -->
+  <div class="rounded-lg bg-white shadow">
+    <div class="px-4 py-5 sm:p-6">
+      <div data-controller="timeline-chart"
+           data-timeline-chart-url-value="<%= api_v1_timeline_index_path %>"
+           class="overflow-x-auto relative"
+           style="touch-action: none;">
+        <div class="min-h-[200px] flex items-center justify-center text-gray-500">
+          Loading timeline...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Goals List -->
+  <% if @reading_goals.any? %>
+    <div class="rounded-lg bg-white shadow">
+      <div class="px-4 py-5 sm:p-6">
+        <h3 class="text-lg font-medium leading-6 text-gray-900 mb-4">Goals</h3>
+        <div class="space-y-3">
+          <% @reading_goals.each do |goal| %>
+            <div class="flex items-center justify-between rounded-lg border border-gray-200 p-4 hover:border-indigo-300 transition-colors">
+              <div class="flex-1 min-w-0">
+                <%= link_to reading_goal_path(goal), class: "hover:text-indigo-600" do %>
+                  <p class="font-medium text-gray-900 truncate"><%= goal.book.title %></p>
+                <% end %>
+                <p class="text-sm text-gray-500">
+                  <%= goal.started_on.strftime("%b %d") %> &ndash; <%= goal.target_completion_date.strftime("%b %d, %Y") %>
+                  &bull; <%= goal.pages_per_day %> pages/day
+                </p>
+              </div>
+              <div class="flex items-center gap-3 ml-4">
+                <% if goal.active? %>
+                  <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium <%= goal.on_track? ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800' %>">
+                    <%= goal.on_track? ? "On Track" : "Behind" %>
+                  </span>
+                <% else %>
+                  <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-800">
+                    <%= goal.status.capitalize %>
+                  </span>
+                <% end %>
+                <div class="w-24">
+                  <div class="overflow-hidden h-2 text-xs flex rounded bg-gray-200">
+                    <div style="width:<%= goal.progress_percentage %>%" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center <%= goal.completed? ? 'bg-green-500' : 'bg-indigo-500' %>"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    </div>
+  <% end %>
+</div>

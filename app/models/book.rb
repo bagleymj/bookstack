@@ -2,8 +2,6 @@ class Book < ApplicationRecord
   belongs_to :user
   has_many :reading_sessions, dependent: :destroy
   has_many :reading_goals, dependent: :destroy
-  has_many :pipeline_books, dependent: :destroy
-  has_many :pipelines, through: :pipeline_books
 
   # Enums
   enum :status, {

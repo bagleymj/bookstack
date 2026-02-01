@@ -27,16 +27,17 @@ class QuotaRedistributor
 
     return if future_quotas.empty? || pages_remaining <= 0
 
-    # Calculate new pages per day
-    pages_per_day = (pages_remaining.to_f / future_quotas.size).ceil
-    remaining = pages_remaining
+    # Distribute evenly: base pages per day, with remainder spread across first N days
+    num_days = future_quotas.size
+    base_pages = pages_remaining / num_days
+    extra_days = pages_remaining % num_days
 
-    future_quotas.each do |quota|
-      pages_today = [pages_per_day, remaining].min
-      remaining -= pages_today
+    future_quotas.each_with_index do |quota, i|
+      pages_today = base_pages + (i < extra_days ? 1 : 0)
 
-      # Only update if the quota changed
-      if quota.target_pages != pages_today
+      if pages_today <= 0
+        quota.update!(status: :completed) unless quota.completed?
+      elsif quota.target_pages != pages_today
         quota.update!(
           target_pages: pages_today,
           status: quota.actual_pages >= pages_today ? :completed : :adjusted

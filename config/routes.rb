@@ -31,23 +31,13 @@ Rails.application.routes.draw do
       resources :daily_quotas, only: [:update], shallow: true
     end
 
-    resources :pipelines do
-      member do
-        post :auto_schedule
-      end
-      resources :pipeline_books, only: [:create, :update, :destroy], shallow: true do
-        collection do
-          post :reorder
-        end
-      end
-    end
+    resource :timeline, only: [:show], controller: "timeline"
 
-    # API endpoints for the pipeline chart
     namespace :api do
       namespace :v1 do
-        resources :pipelines, only: [] do
+        resources :timeline, only: [:index], controller: "timeline" do
           member do
-            get :timeline_data
+            patch :update
           end
         end
       end

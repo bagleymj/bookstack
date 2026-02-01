@@ -8,7 +8,6 @@ class User < ApplicationRecord
   has_many :books, dependent: :destroy
   has_many :reading_sessions, dependent: :destroy
   has_many :reading_goals, dependent: :destroy
-  has_many :pipelines, dependent: :destroy
   has_one :user_reading_stats, dependent: :destroy
 
   # Validations

@@ -3,7 +3,7 @@ import { Controller } from "@hotwired/stimulus"
 export default class extends Controller {
   static targets = [
     "display", "statusText",
-    "startButton", "finishButton",
+    "toggleButton", "toggleIcon", "toggleText",
     "progressInfo", "completionForm", "cancelLink",
     "durationField", "endPageField", "finalTime"
   ]
@@ -26,6 +26,14 @@ export default class extends Controller {
     this.stopInterval()
   }
 
+  toggle() {
+    if (this.running) {
+      this.stop()
+    } else {
+      this.start()
+    }
+  }
+
   start() {
     this.running = true
     this.startTime = Date.now()
@@ -36,7 +44,7 @@ export default class extends Controller {
     this.updateUI()
   }
 
-  finish() {
+  stop() {
     if (!this.running) return
 
     // Calculate final elapsed time
@@ -108,19 +116,45 @@ export default class extends Controller {
       }
     }
 
-    // Update button visibility
-    if (this.hasStartButtonTarget) {
-      this.startButtonTarget.classList.toggle("hidden", this.running)
+    // Update toggle button appearance
+    if (this.hasToggleButtonTarget) {
+      if (this.running) {
+        // Switch to red stop button
+        this.toggleButtonTarget.classList.remove("bg-green-600", "hover:bg-green-500", "focus-visible:outline-green-600")
+        this.toggleButtonTarget.classList.add("bg-red-600", "hover:bg-red-500", "focus-visible:outline-red-600")
+      } else {
+        // Switch to green start button
+        this.toggleButtonTarget.classList.remove("bg-red-600", "hover:bg-red-500", "focus-visible:outline-red-600")
+        this.toggleButtonTarget.classList.add("bg-green-600", "hover:bg-green-500", "focus-visible:outline-green-600")
+      }
     }
-    if (this.hasFinishButtonTarget) {
-      this.finishButtonTarget.classList.toggle("hidden", !this.running)
+
+    // Update toggle button text
+    if (this.hasToggleTextTarget) {
+      this.toggleTextTarget.textContent = this.running ? "Stop" : "Start"
+    }
+
+    // Update toggle button icon
+    if (this.hasToggleIconTarget) {
+      if (this.running) {
+        // Stop icon (square inside circle)
+        this.toggleIconTarget.innerHTML = `
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>
+        `
+      } else {
+        // Play icon (triangle inside circle)
+        this.toggleIconTarget.innerHTML = `
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        `
+      }
     }
   }
 
   showCompletionForm() {
     // Hide timer controls and show completion form
-    if (this.hasStartButtonTarget) this.startButtonTarget.classList.add("hidden")
-    if (this.hasFinishButtonTarget) this.finishButtonTarget.classList.add("hidden")
+    if (this.hasToggleButtonTarget) this.toggleButtonTarget.classList.add("hidden")
     if (this.hasProgressInfoTarget) this.progressInfoTarget.classList.add("hidden")
     if (this.hasCancelLinkTarget) this.cancelLinkTarget.classList.add("hidden")
 

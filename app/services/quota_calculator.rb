@@ -12,14 +12,13 @@ class QuotaCalculator
 
     return if reading_dates.empty?
 
-    pages_per_day = (pages_remaining.to_f / reading_dates.size).ceil
-    remaining = pages_remaining
+    num_days = reading_dates.size
+    base_pages = pages_remaining / num_days
+    extra_days = pages_remaining % num_days
 
-    reading_dates.each do |date|
-      break if remaining <= 0
-
-      pages_today = [pages_per_day, remaining].min
-      remaining -= pages_today
+    reading_dates.each_with_index do |date, i|
+      pages_today = base_pages + (i < extra_days ? 1 : 0)
+      next if pages_today <= 0
 
       @goal.daily_quotas.create!(
         date: date,

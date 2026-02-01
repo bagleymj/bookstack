@@ -1,2 +1,3 @@
-web: bin/rails server
-css: bin/rails tailwindcss:watch
+postgres: postgres -D $PWD/.postgres -k $PWD/.postgres
+web: bin/rails server -b 0.0.0.0 -p 3000
+css: tailwindcss -i app/assets/tailwind/application.css -o app/assets/builds/tailwind.css --watch=always

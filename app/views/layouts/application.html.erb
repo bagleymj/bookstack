@@ -32,7 +32,7 @@
                     <%= link_to "Dashboard", dashboard_path, class: "rounded-md px-3 py-2 text-sm font-medium #{request.path == dashboard_path ? 'bg-indigo-700 text-white' : 'text-indigo-100 hover:bg-indigo-500 hover:text-white'}" %>
                     <%= link_to "Books", books_path, class: "rounded-md px-3 py-2 text-sm font-medium #{controller_name == 'books' ? 'bg-indigo-700 text-white' : 'text-indigo-100 hover:bg-indigo-500 hover:text-white'}" %>
                     <%= link_to "Goals", reading_goals_path, class: "rounded-md px-3 py-2 text-sm font-medium #{controller_name == 'reading_goals' ? 'bg-indigo-700 text-white' : 'text-indigo-100 hover:bg-indigo-500 hover:text-white'}" %>
-                    <%= link_to "Pipeline", pipelines_path, class: "rounded-md px-3 py-2 text-sm font-medium #{controller_name == 'pipelines' ? 'bg-indigo-700 text-white' : 'text-indigo-100 hover:bg-indigo-500 hover:text-white'}" %>
+                    <%= link_to "Timeline", timeline_path, class: "rounded-md px-3 py-2 text-sm font-medium #{controller_name == 'timeline' ? 'bg-indigo-700 text-white' : 'text-indigo-100 hover:bg-indigo-500 hover:text-white'}" %>
                     <%= link_to "Sessions", reading_sessions_path, class: "rounded-md px-3 py-2 text-sm font-medium #{controller_name == 'reading_sessions' ? 'bg-indigo-700 text-white' : 'text-indigo-100 hover:bg-indigo-500 hover:text-white'}" %>
                   </div>
                 </div>
@@ -71,7 +71,7 @@
               <%= link_to "Dashboard", dashboard_path, class: "block rounded-md px-3 py-2 text-base font-medium #{request.path == dashboard_path ? 'bg-indigo-700 text-white' : 'text-indigo-100 hover:bg-indigo-500 hover:text-white'}" %>
               <%= link_to "Books", books_path, class: "block rounded-md px-3 py-2 text-base font-medium #{controller_name == 'books' ? 'bg-indigo-700 text-white' : 'text-indigo-100 hover:bg-indigo-500 hover:text-white'}" %>
               <%= link_to "Goals", reading_goals_path, class: "block rounded-md px-3 py-2 text-base font-medium #{controller_name == 'reading_goals' ? 'bg-indigo-700 text-white' : 'text-indigo-100 hover:bg-indigo-500 hover:text-white'}" %>
-              <%= link_to "Pipeline", pipelines_path, class: "block rounded-md px-3 py-2 text-base font-medium #{controller_name == 'pipelines' ? 'bg-indigo-700 text-white' : 'text-indigo-100 hover:bg-indigo-500 hover:text-white'}" %>
+              <%= link_to "Timeline", timeline_path, class: "block rounded-md px-3 py-2 text-base font-medium #{controller_name == 'timeline' ? 'bg-indigo-700 text-white' : 'text-indigo-100 hover:bg-indigo-500 hover:text-white'}" %>
               <%= link_to "Sessions", reading_sessions_path, class: "block rounded-md px-3 py-2 text-base font-medium #{controller_name == 'reading_sessions' ? 'bg-indigo-700 text-white' : 'text-indigo-100 hover:bg-indigo-500 hover:text-white'}" %>
             </div>
             <div class="border-t border-indigo-500 pb-3 pt-4">
@@ -156,11 +156,11 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
           <% end %>
-          <%= link_to pipelines_path, class: "flex flex-col items-center py-2 px-3 #{controller_name == 'pipelines' ? 'text-indigo-600' : 'text-gray-500'}" do %>
+          <%= link_to timeline_path, class: "flex flex-col items-center py-2 px-3 #{controller_name == 'timeline' ? 'text-indigo-600' : 'text-gray-500'}" do %>
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
             </svg>
-            <span class="text-xs mt-1">Pipeline</span>
+            <span class="text-xs mt-1">Timeline</span>
           <% end %>
           <%= link_to reading_goals_path, class: "flex flex-col items-center py-2 px-3 #{controller_name == 'reading_goals' ? 'text-indigo-600' : 'text-gray-500'}" do %>
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
