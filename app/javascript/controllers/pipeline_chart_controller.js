@@ -448,10 +448,20 @@ export default class extends Controller {
         ? '<span class="text-green-400">Based on actual reading speed</span>'
         : '<span class="text-gray-400">Estimated from difficulty</span>'
 
-      const daysRemaining = d.days_remaining
-      const durationText = d.include_weekends
-        ? `${daysRemaining} days`
-        : `${daysRemaining} reading days <span class="text-gray-500">(${d.calendar_days} calendar)</span>`
+      let daysLine
+      if (d.goal_status === "completed") {
+        daysLine = '<span class="text-green-400">Completed</span>'
+      } else if (d.goal_status === "abandoned") {
+        daysLine = '<span class="text-red-400">Abandoned</span>'
+      } else if (d.days_remaining > 0 && new Date(d.start_date + "T00:00:00") <= new Date()) {
+        // Active: started and has days left
+        const suffix = !d.include_weekends ? ` <span class="text-gray-500">(${d.calendar_days} calendar)</span>` : ""
+        daysLine = `${d.days_remaining} days remaining${suffix}`
+      } else {
+        // Future: hasn't started yet
+        const suffix = !d.include_weekends ? ` <span class="text-gray-500">(${d.calendar_days} calendar)</span>` : ""
+        daysLine = `${d.duration_days} day duration${suffix}`
+      }
 
       tooltip
         .html(`
@@ -459,7 +469,7 @@ export default class extends Controller {
           <div class="text-gray-300 text-xs">${d.author || "Unknown author"}</div>
           <div class="mt-2 space-y-1 text-xs">
             <div><span class="text-gray-400">Minutes/day:</span> ${d.minutes_per_day}</div>
-            <div><span class="text-gray-400">Days remaining:</span> ${durationText}</div>
+            <div>${daysLine}</div>
             <div><span class="text-gray-400">Pages:</span> ${d.total_pages}</div>
             <div><span class="text-gray-400">Progress:</span> ${d.progress}%</div>
             <div><span class="text-gray-400">Pages/day:</span> ${d.pages_per_day}</div>

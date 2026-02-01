@@ -32,7 +32,17 @@
           <div class="mt-4">
             <div class="flex items-center justify-between text-sm text-gray-500 mb-2">
               <span><%= goal.book.current_page %> / <%= goal.book.total_pages %> pages</span>
-              <span><%= goal.days_remaining %> days left</span>
+              <span>
+                <% if goal.completed? %>
+                  Completed
+                <% elsif goal.abandoned? %>
+                  Abandoned
+                <% elsif goal.started_on > Date.current %>
+                  <%= goal.goal_reading_days %> day duration
+                <% else %>
+                  <%= goal.days_remaining %> days left
+                <% end %>
+              </span>
             </div>
             <div class="relative pt-1">
               <div class="overflow-hidden h-2 text-xs flex rounded bg-gray-200">

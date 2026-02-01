@@ -22,8 +22,19 @@
   <!-- Progress Overview -->
   <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
     <div class="rounded-lg bg-white p-4 shadow">
-      <dt class="text-sm font-medium text-gray-500">Days Remaining</dt>
-      <dd class="mt-1 text-2xl font-semibold text-gray-900"><%= @reading_goal.days_remaining %></dd>
+      <% if @reading_goal.completed? %>
+        <dt class="text-sm font-medium text-gray-500">Status</dt>
+        <dd class="mt-1 text-2xl font-semibold text-green-600">Completed</dd>
+      <% elsif @reading_goal.abandoned? %>
+        <dt class="text-sm font-medium text-gray-500">Status</dt>
+        <dd class="mt-1 text-2xl font-semibold text-red-600">Abandoned</dd>
+      <% elsif @reading_goal.started_on > Date.current %>
+        <dt class="text-sm font-medium text-gray-500">Duration</dt>
+        <dd class="mt-1 text-2xl font-semibold text-gray-900"><%= @reading_goal.goal_reading_days %> days</dd>
+      <% else %>
+        <dt class="text-sm font-medium text-gray-500">Days Remaining</dt>
+        <dd class="mt-1 text-2xl font-semibold text-gray-900"><%= @reading_goal.days_remaining %></dd>
+      <% end %>
     </div>
     <div class="rounded-lg bg-white p-4 shadow">
       <dt class="text-sm font-medium text-gray-500">Pages Remaining</dt>
