@@ -29,8 +29,7 @@ class ReadingGoal < ApplicationRecord
   end
 
   def days_remaining
-    return 0 if target_completion_date < Date.current
-    (Date.current..target_completion_date).count
+    reading_days_remaining
   end
 
   def reading_days_remaining
@@ -107,7 +106,7 @@ class ReadingGoal < ApplicationRecord
       estimated_hours: book.estimated_reading_time_hours,
       estimated_minutes: book.effective_reading_time_minutes,
       minutes_per_day: (book.effective_reading_time_minutes.to_f / goal_duration).ceil,
-      duration_days: (started_on..target_completion_date).count,
+      duration_days: goal_reading_days,
       goal_status: status,
       on_track: on_track?,
       pages_per_day: pages_per_day,
