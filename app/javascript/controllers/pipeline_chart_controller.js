@@ -177,6 +177,32 @@ export default class extends Controller {
       .selectAll("line")
       .style("stroke", "#f3f4f6")
 
+    // Weekend shading (if any goal excludes weekends)
+    const hasWeekendExclusion = goals.some(g => !g.include_weekends)
+    if (hasWeekendExclusion) {
+      const weekendDays = []
+      let day = d3.timeDay.floor(startDate)
+      while (day <= endDate) {
+        if (day.getDay() === 0 || day.getDay() === 6) {
+          weekendDays.push(new Date(day))
+        }
+        day = d3.timeDay.offset(day, 1)
+      }
+
+      svg.append("g")
+        .attr("class", "weekend-shading")
+        .selectAll("rect")
+        .data(weekendDays)
+        .enter()
+        .append("rect")
+        .attr("x", d => xScale(d))
+        .attr("y", 0)
+        .attr("width", d => xScale(d3.timeDay.offset(d, 1)) - xScale(d))
+        .attr("height", chartHeight)
+        .style("fill", "#f3f4f6")
+        .style("opacity", 0.6)
+    }
+
     // X axis
     const xAxis = d3.axisBottom(xScale)
       .ticks(d3.timeWeek.every(1))
@@ -422,13 +448,17 @@ export default class extends Controller {
         ? '<span class="text-green-400">Based on actual reading speed</span>'
         : '<span class="text-gray-400">Estimated from difficulty</span>'
 
+      const durationText = d.include_weekends || d.duration_days === d.calendar_days
+        ? `${d.duration_days} days`
+        : `${d.duration_days} reading days <span class="text-gray-500">(${d.calendar_days} calendar)</span>`
+
       tooltip
         .html(`
           <div class="font-semibold mb-1">${d.title}</div>
           <div class="text-gray-300 text-xs">${d.author || "Unknown author"}</div>
           <div class="mt-2 space-y-1 text-xs">
             <div><span class="text-gray-400">Minutes/day:</span> ${d.minutes_per_day}</div>
-            <div><span class="text-gray-400">Duration:</span> ${d.duration_days} days</div>
+            <div><span class="text-gray-400">Duration:</span> ${durationText}</div>
             <div><span class="text-gray-400">Pages:</span> ${d.total_pages}</div>
             <div><span class="text-gray-400">Progress:</span> ${d.progress}%</div>
             <div><span class="text-gray-400">Pages/day:</span> ${d.pages_per_day}</div>

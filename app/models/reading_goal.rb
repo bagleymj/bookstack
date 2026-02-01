@@ -107,6 +107,8 @@ class ReadingGoal < ApplicationRecord
       estimated_minutes: book.effective_reading_time_minutes,
       minutes_per_day: (book.effective_reading_time_minutes.to_f / goal_duration).ceil,
       duration_days: goal_reading_days,
+      calendar_days: (started_on..target_completion_date).count,
+      include_weekends: include_weekends?,
       goal_status: status,
       on_track: on_track?,
       pages_per_day: pages_per_day,
