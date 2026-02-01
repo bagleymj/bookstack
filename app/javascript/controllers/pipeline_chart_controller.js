@@ -110,14 +110,27 @@ export default class extends Controller {
     // Sort by duration descending (longest on bottom = Breakout style)
     goals.sort((a, b) => b.duration_days - a.duration_days)
 
-    // Assign colors and compute stack offsets
-    let cumulativeMinutes = 0
+    // Assign colors and compute stack offsets based on time overlap
+    // Each block sits on top of overlapping blocks below it (like Breakout)
+    const placed = []
     goals.forEach((g, i) => {
       g.color = this.constructor.BLOCK_COLORS[i % this.constructor.BLOCK_COLORS.length]
-      g.yOffset = cumulativeMinutes
-      cumulativeMinutes += g.minutes_per_day
+
+      // Find all already-placed goals that overlap in time with this one
+      const overlapping = placed.filter(p =>
+        p.startDate < g.endDate && p.endDate > g.startDate
+      )
+
+      // Stack on top of the highest overlapping block
+      g.yOffset = overlapping.length > 0
+        ? Math.max(...overlapping.map(p => p.yOffset + p.minutes_per_day))
+        : 0
+
+      placed.push(g)
     })
-    const totalMinutes = cumulativeMinutes
+
+    // Total Y extent is the max top edge of any block
+    const totalMinutes = Math.max(...goals.map(g => g.yOffset + g.minutes_per_day))
 
     // Dynamic chart height based on content
     const minChartHeight = this.compactValue ? 150 : 250
