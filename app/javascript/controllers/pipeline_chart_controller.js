@@ -145,6 +145,25 @@ export default class extends Controller {
       })
     })
 
+    // Merge adjacent segments at the same yOffset into single wider rects.
+    // This eliminates visible seams between segments that are visually contiguous.
+    segmentsByGoal.forEach((segments, goalId) => {
+      if (segments.length <= 1) return
+      const merged = [segments[0]]
+      for (let i = 1; i < segments.length; i++) {
+        const prev = merged[merged.length - 1]
+        const curr = segments[i]
+        if (curr.yOffset === prev.yOffset &&
+            curr.minutes_per_day === prev.minutes_per_day &&
+            curr.startDate.getTime() === prev.endDate.getTime()) {
+          prev.endDate = curr.endDate
+        } else {
+          merged.push(curr)
+        }
+      }
+      segmentsByGoal.set(goalId, merged)
+    })
+
     return { segmentsByGoal, maxY }
   }
 
@@ -367,8 +386,6 @@ export default class extends Controller {
           .attr("height", segHeight)
           .style("fill", goal.color)
           .style("opacity", 0.85)
-          .style("stroke", d3.color(goal.color).darker(0.3))
-          .style("stroke-width", 0.5)
       })
 
       // Progress overlay — spans from startDate across progress %
@@ -419,20 +436,29 @@ export default class extends Controller {
           .style("stroke-dasharray", "3,3")
       }
 
-      // Book title label — placed on the widest segment if it's large enough
-      const widestSeg = segments.reduce((a, b) =>
-        (xScale(b.endDate) - xScale(b.startDate)) > (xScale(a.endDate) - xScale(a.startDate)) ? b : a
-      )
-      const labelWidth = xScale(widestSeg.endDate) - xScale(widestSeg.startDate)
-      const labelHeight = yScale(widestSeg.yOffset) - yScale(widestSeg.yOffset + widestSeg.minutes_per_day)
+      // Create a clipPath from all segments so text doesn't overflow into gaps
+      const clipId = `clip-goal-${goal.id}`
+      const clipPath = svg.append("defs").append("clipPath").attr("id", clipId)
+      segments.forEach(seg => {
+        const cx = xScale(seg.startDate)
+        const cw = Math.max(xScale(seg.endDate) - cx, 1)
+        const cy = yScale(seg.yOffset + seg.minutes_per_day)
+        const ch = Math.max(yScale(seg.yOffset) - cy, 1)
+        clipPath.append("rect").attr("x", cx).attr("y", cy).attr("width", cw).attr("height", ch)
+      })
 
-      if (labelWidth >= 60 && labelHeight >= 18) {
-        const maxChars = Math.floor((labelWidth - 16) / 7)
+      // Use the full goal span for label sizing
+      const fullLabelWidth = xScale(goal.endDate) - xScale(goal.startDate)
+      const labelHeight = yScale(segments[0].yOffset) - yScale(segments[0].yOffset + segments[0].minutes_per_day)
+
+      if (fullLabelWidth >= 60 && labelHeight >= 18) {
+        const maxChars = Math.floor((fullLabelWidth - 16) / 7)
         const title = goal.title.length > maxChars ? goal.title.substring(0, maxChars - 1) + "\u2026" : goal.title
 
         blockGroup.append("text")
-          .attr("x", xScale(widestSeg.startDate) + 8)
-          .attr("y", yScale(widestSeg.yOffset + widestSeg.minutes_per_day) + labelHeight / 2)
+          .attr("clip-path", `url(#${clipId})`)
+          .attr("x", xScale(goal.startDate) + 8)
+          .attr("y", yScale(segments[0].yOffset + segments[0].minutes_per_day) + labelHeight / 2)
           .attr("dy", "0.35em")
           .style("fill", "#fff")
           .style("font-size", labelHeight >= 28 ? "12px" : "10px")
@@ -442,11 +468,14 @@ export default class extends Controller {
           .text(title)
       }
 
-      // Minutes/day label on widest segment
-      if (!this.compactValue && labelHeight >= 18 && labelWidth >= 80) {
+      // Minutes/day label on right edge of last segment
+      const lastVisibleSeg = segments[segments.length - 1]
+      const lastSegWidth = xScale(lastVisibleSeg.endDate) - xScale(lastVisibleSeg.startDate)
+      if (!this.compactValue && labelHeight >= 18 && lastSegWidth >= 50) {
         blockGroup.append("text")
-          .attr("x", xScale(widestSeg.endDate) - 8)
-          .attr("y", yScale(widestSeg.yOffset + widestSeg.minutes_per_day) + labelHeight / 2)
+          .attr("clip-path", `url(#${clipId})`)
+          .attr("x", xScale(lastVisibleSeg.endDate) - 8)
+          .attr("y", yScale(lastVisibleSeg.yOffset + lastVisibleSeg.minutes_per_day) + labelHeight / 2)
           .attr("dy", "0.35em")
           .attr("text-anchor", "end")
           .style("fill", "rgba(255,255,255,0.8)")
