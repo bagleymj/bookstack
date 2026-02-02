@@ -385,68 +385,25 @@ export default class extends Controller {
       }
       runs.push(currentRun)
 
-      // Build a single path string for all runs, using S-curves at transitions
-      const curveRadius = 10
+      // Build a single path string for all runs
       let pathD = ""
       runs.forEach(run => {
-        const firstSeg = run[0]
-        const lastSeg = run[run.length - 1]
-
-        // Start at top-left
-        pathD += `M ${xScale(firstSeg.startDate)} ${yScale(firstSeg.yOffset + firstSeg.minutes_per_day)}`
-
-        // Top edge: left to right with S-curves at level changes
+        // Trace top edge left-to-right
+        pathD += `M ${xScale(run[0].startDate)} ${yScale(run[0].yOffset + run[0].minutes_per_day)}`
         for (let i = 0; i < run.length; i++) {
           const seg = run[i]
           const top = yScale(seg.yOffset + seg.minutes_per_day)
-          const right = xScale(seg.endDate)
-
-          if (i < run.length - 1) {
-            const next = run[i + 1]
-            const nextTop = yScale(next.yOffset + next.minutes_per_day)
-
-            if (top !== nextTop) {
-              const segW = right - xScale(seg.startDate)
-              const nextW = xScale(next.endDate) - right
-              const cr = Math.min(curveRadius, segW / 2, nextW / 2)
-              pathD += ` H ${right - cr}`
-              pathD += ` C ${right} ${top} ${right} ${nextTop} ${right + cr} ${nextTop}`
-            } else {
-              pathD += ` H ${right}`
-            }
-          } else {
-            pathD += ` H ${right}`
-          }
+          if (i > 0) pathD += ` V ${top}`
+          pathD += ` H ${xScale(seg.endDate)}`
         }
-
-        // Right side: down to bottom-right
-        pathD += ` V ${yScale(lastSeg.yOffset)}`
-
-        // Bottom edge: right to left with S-curves at level changes
+        // Trace bottom edge right-to-left
         for (let i = run.length - 1; i >= 0; i--) {
           const seg = run[i]
           const bottom = yScale(seg.yOffset)
-          const left = xScale(seg.startDate)
-
-          if (i > 0) {
-            const prev = run[i - 1]
-            const prevBottom = yScale(prev.yOffset)
-
-            if (bottom !== prevBottom) {
-              const segW = xScale(seg.endDate) - left
-              const prevW = left - xScale(prev.startDate)
-              const cr = Math.min(curveRadius, segW / 2, prevW / 2)
-              pathD += ` H ${left + cr}`
-              pathD += ` C ${left} ${bottom} ${left} ${prevBottom} ${left - cr} ${prevBottom}`
-            } else {
-              pathD += ` H ${left}`
-            }
-          } else {
-            pathD += ` H ${left}`
-          }
+          pathD += ` V ${bottom}`
+          if (i > 0) pathD += ` H ${xScale(seg.startDate)}`
         }
-
-        pathD += ` Z`
+        pathD += ` H ${xScale(run[0].startDate)} Z`
       })
 
       blockGroup.append("path")
