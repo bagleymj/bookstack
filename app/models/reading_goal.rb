@@ -72,6 +72,25 @@ class ReadingGoal < ApplicationRecord
     quota.completed? || quota.actual_pages >= quota.target_pages
   end
 
+  # Three-state tracking: :behind, :reading_due, :caught_up
+  # - behind: has missed/incomplete quotas from past days
+  # - reading_due: past days are fine, but today's reading isn't done yet
+  # - caught_up: today's quota is complete
+  def tracking_status
+    return :caught_up if completed?
+    return :behind if abandoned?
+    return nil if not_started?
+
+    has_past_incomplete = daily_quotas.past.incomplete.exists?
+    return :behind if has_past_incomplete
+
+    quota = today_quota
+    return :caught_up unless quota
+    return :caught_up if quota.completed? || quota.actual_pages >= quota.target_pages
+
+    :reading_due
+  end
+
   def progress_percentage
     return 100 if completed?
     book.progress_percentage

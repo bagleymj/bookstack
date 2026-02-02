@@ -44,8 +44,10 @@
             <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium
               <% if goal.not_started? %>
                 bg-gray-100 text-gray-800">Not Started
-              <% elsif goal.on_track? %>
-                bg-green-100 text-green-800">On Track
+              <% elsif goal.tracking_status == :caught_up %>
+                bg-green-100 text-green-800">Caught Up
+              <% elsif goal.tracking_status == :reading_due %>
+                bg-blue-100 text-blue-800">Reading Due
               <% else %>
                 bg-yellow-100 text-yellow-800">Behind
               <% end %>
