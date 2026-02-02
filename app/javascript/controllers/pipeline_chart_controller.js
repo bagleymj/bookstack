@@ -74,83 +74,94 @@ export default class extends Controller {
     }
   }
 
-  // Assign each goal a fixed vertical lane and produce segments.
-  // Goals are stacked bottom-up based on time overlap (longest on bottom).
-  // Each goal stays at a consistent y-position for its entire span,
-  // with gaps only for weekend exclusions.
+  // Compute interlocking brick segments for all goals.
+  // At every transition point (where any book starts or ends, plus
+  // weekday/weekend boundaries), restack the active books so blocks
+  // drop down into gaps. Goals that exclude weekends are not active
+  // on Saturday/Sunday, creating gaps in their blocks.
   computeSegments(goals) {
-    // Assign fixed y-offsets by stacking overlapping goals.
-    // Goals are already sorted by duration descending (longest first = bottom).
-    const goalLanes = new Map()
-
-    goals.forEach(goal => {
-      let yOffset = 0
-      goals.forEach(other => {
-        if (other.id === goal.id || !goalLanes.has(other.id)) return
-        // Check time overlap
-        if (goal.startDate < other.endDate && goal.endDate > other.startDate) {
-          yOffset = Math.max(yOffset, goalLanes.get(other.id) + other.minutes_per_day)
-        }
-      })
-      goalLanes.set(goal.id, yOffset)
+    // Collect all unique transition dates: book start/end boundaries
+    const dateSet = new Set()
+    goals.forEach(g => {
+      dateSet.add(g.startDate.getTime())
+      dateSet.add(g.endDate.getTime())
     })
 
-    // Build segments for each goal. Goals that include weekends get a single
-    // segment spanning their full range. Goals excluding weekends get one
-    // segment per contiguous weekday run.
-    const segmentsByGoal = new Map()
-
-    goals.forEach(goal => {
-      const yOffset = goalLanes.get(goal.id)
-
-      if (goal.include_weekends) {
-        segmentsByGoal.set(goal.id, [{
-          startDate: goal.startDate,
-          endDate: goal.endDate,
-          yOffset,
-          minutes_per_day: goal.minutes_per_day
-        }])
-      } else {
-        const segments = []
-        let cursor = new Date(goal.startDate)
-        let segStart = null
-
-        while (cursor < goal.endDate) {
-          const dow = cursor.getDay()
-          const isWeekend = dow === 0 || dow === 6
-
-          if (!isWeekend) {
-            if (!segStart) segStart = new Date(cursor)
-          } else if (segStart) {
-            segments.push({
-              startDate: segStart,
-              endDate: new Date(cursor),
-              yOffset,
-              minutes_per_day: goal.minutes_per_day
-            })
-            segStart = null
-          }
-          cursor = new Date(cursor.getTime() + 86400000)
+    // Add weekday/weekend boundaries for goals that exclude weekends.
+    // This ensures segments never straddle a Fri->Sat or Sun->Mon edge.
+    const hasWeekendExclusion = goals.some(g => !g.include_weekends)
+    if (hasWeekendExclusion) {
+      const earliest = Math.min(...goals.map(g => g.startDate.getTime()))
+      const latest = Math.max(...goals.map(g => g.endDate.getTime()))
+      let day = new Date(earliest)
+      while (day.getTime() <= latest) {
+        const dow = day.getDay()
+        // Add Saturday start and Monday start as transitions
+        if (dow === 6 || dow === 1) {
+          dateSet.add(day.getTime())
         }
-
-        if (segStart) {
-          segments.push({
-            startDate: segStart,
-            endDate: goal.endDate,
-            yOffset,
-            minutes_per_day: goal.minutes_per_day
-          })
-        }
-
-        segmentsByGoal.set(goal.id, segments)
+        day = new Date(day.getTime() + 86400000)
       }
+    }
+
+    const transitions = Array.from(dateSet).sort((a, b) => a - b)
+
+    // For each interval, stack the active goals
+    const segmentsByGoal = new Map()
+    goals.forEach(g => segmentsByGoal.set(g.id, []))
+
+    for (let i = 0; i < transitions.length - 1; i++) {
+      const segStart = transitions[i]
+      const segEnd = transitions[i + 1]
+      const segDay = new Date(segStart).getDay()
+      const isWeekend = segDay === 0 || segDay === 6
+
+      // Which goals are active during this interval?
+      // Skip goals that exclude weekends when the segment is on a weekend.
+      const active = goals.filter(g => {
+        if (g.startDate.getTime() > segStart || g.endDate.getTime() < segEnd) return false
+        if (isWeekend && !g.include_weekends) return false
+        return true
+      })
+
+      // Stack them: longest duration on bottom (already sorted)
+      let yOffset = 0
+      active.forEach(g => {
+        segmentsByGoal.get(g.id).push({
+          startDate: new Date(segStart),
+          endDate: new Date(segEnd),
+          yOffset: yOffset,
+          minutes_per_day: g.minutes_per_day
+        })
+        yOffset += g.minutes_per_day
+      })
+    }
+
+    // Compute total Y extent (peak stack height)
+    let maxY = 0
+    segmentsByGoal.forEach(segments => {
+      segments.forEach(s => {
+        maxY = Math.max(maxY, s.yOffset + s.minutes_per_day)
+      })
     })
 
-    // Compute max Y
-    let maxY = 0
-    goalLanes.forEach((yOffset, goalId) => {
-      const goal = goals.find(g => g.id === goalId)
-      maxY = Math.max(maxY, yOffset + goal.minutes_per_day)
+    // Merge adjacent segments at the same yOffset into single wider rects.
+    // This eliminates visible seams between segments that are visually contiguous.
+    segmentsByGoal.forEach((segments, goalId) => {
+      if (segments.length <= 1) return
+      const merged = [segments[0]]
+      for (let i = 1; i < segments.length; i++) {
+        const prev = merged[merged.length - 1]
+        const curr = segments[i]
+        if (curr.yOffset === prev.yOffset &&
+            curr.minutes_per_day === prev.minutes_per_day &&
+            curr.startDate.getTime() === prev.endDate.getTime()) {
+          prev.endDate = curr.endDate
+        } else {
+          merged.push(curr)
+        }
+      }
+      segmentsByGoal.set(goalId, merged)
     })
 
     return { segmentsByGoal, maxY }
@@ -197,7 +208,7 @@ export default class extends Controller {
       g.color = this.constructor.BLOCK_COLORS[i % this.constructor.BLOCK_COLORS.length]
     })
 
-    // Compute fixed-lane segments
+    // Compute interlocking brick segments
     const { segmentsByGoal, maxY } = this.computeSegments(goals)
     const totalMinutes = maxY || 1
 
@@ -350,56 +361,56 @@ export default class extends Controller {
       .attr("class", "absolute hidden bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg pointer-events-none z-50 max-w-xs")
       .style("transition", "opacity 0.15s")
 
-    // Draw each goal as a fixed-lane block
+    // Draw interlocking brick segments for each goal
     const self = this
     goals.forEach(goal => {
       const segments = segmentsByGoal.get(goal.id)
       if (!segments || segments.length === 0) return
 
-      const yOffset = segments[0].yOffset
       const blockGroup = svg.append("g")
         .attr("class", "pipeline-block cursor-pointer")
         .datum(goal)
-
-      // Block dimensions (consistent across all segments)
-      const blockY = yScale(yOffset + goal.minutes_per_day)
-      const blockHeight = Math.max(yScale(yOffset) - blockY, 1)
 
       // Draw each segment as a rect
       segments.forEach(seg => {
         const x = xScale(seg.startDate)
         const segWidth = Math.max(xScale(seg.endDate) - x, 1)
+        const y = yScale(seg.yOffset + seg.minutes_per_day)
+        const segHeight = Math.max(yScale(seg.yOffset) - y, 1)
 
         blockGroup.append("rect")
           .attr("class", "block-fill")
           .attr("x", x)
-          .attr("y", blockY)
+          .attr("y", y)
           .attr("width", segWidth)
-          .attr("height", blockHeight)
-          .attr("rx", 3)
+          .attr("height", segHeight)
           .style("fill", goal.color)
           .style("opacity", 0.85)
       })
 
       // Progress overlay — spans from startDate across progress %
+      const fullWidth = xScale(goal.endDate) - xScale(goal.startDate)
+      const progressWidth = fullWidth * (goal.progress / 100)
       const progressEndDate = new Date(goal.startDate.getTime() + (goal.endDate.getTime() - goal.startDate.getTime()) * (goal.progress / 100))
 
       segments.forEach(seg => {
+        // Only draw progress on segments that fall within the progress range
         if (seg.endDate <= goal.startDate || seg.startDate >= progressEndDate) return
 
         const clipStart = Math.max(seg.startDate.getTime(), goal.startDate.getTime())
         const clipEnd = Math.min(seg.endDate.getTime(), progressEndDate.getTime())
         const x = xScale(new Date(clipStart))
         const w = Math.max(xScale(new Date(clipEnd)) - x, 0)
+        const y = yScale(seg.yOffset + seg.minutes_per_day)
+        const h = Math.max(yScale(seg.yOffset) - y, 1)
 
         if (w > 0) {
           blockGroup.append("rect")
             .attr("class", "block-progress")
             .attr("x", x)
-            .attr("y", blockY)
+            .attr("y", y)
             .attr("width", w)
-            .attr("height", blockHeight)
-            .attr("rx", 3)
+            .attr("height", h)
             .style("fill", d3.color(goal.color).darker(0.5))
             .style("opacity", 0.4)
         }
@@ -411,11 +422,13 @@ export default class extends Controller {
           (xScale(b.endDate) - xScale(b.startDate)) > (xScale(a.endDate) - xScale(a.startDate)) ? b : a
         )
         const wx = xScale(widest.startDate) + 1
+        const wy = yScale(widest.yOffset + widest.minutes_per_day) + 1
         const ww = Math.max(xScale(widest.endDate) - xScale(widest.startDate) - 2, 4)
+        const wh = Math.max(yScale(widest.yOffset) - yScale(widest.yOffset + widest.minutes_per_day) - 2, 1)
 
         blockGroup.append("rect")
-          .attr("x", wx).attr("y", blockY + 1)
-          .attr("width", ww).attr("height", Math.max(blockHeight - 2, 1))
+          .attr("x", wx).attr("y", wy)
+          .attr("width", ww).attr("height", wh)
           .attr("rx", 2)
           .style("fill", "none")
           .style("stroke", "rgba(255,255,255,0.3)")
@@ -429,35 +442,40 @@ export default class extends Controller {
       segments.forEach(seg => {
         const cx = xScale(seg.startDate)
         const cw = Math.max(xScale(seg.endDate) - cx, 1)
-        clipPath.append("rect").attr("x", cx).attr("y", blockY).attr("width", cw).attr("height", blockHeight)
+        const cy = yScale(seg.yOffset + seg.minutes_per_day)
+        const ch = Math.max(yScale(seg.yOffset) - cy, 1)
+        clipPath.append("rect").attr("x", cx).attr("y", cy).attr("width", cw).attr("height", ch)
       })
 
-      // Book title label — spans the full goal width, clipped to segments
+      // Use the full goal span for label sizing
       const fullLabelWidth = xScale(goal.endDate) - xScale(goal.startDate)
+      const labelHeight = yScale(segments[0].yOffset) - yScale(segments[0].yOffset + segments[0].minutes_per_day)
 
-      if (fullLabelWidth >= 60 && blockHeight >= 18) {
+      if (fullLabelWidth >= 60 && labelHeight >= 18) {
         const maxChars = Math.floor((fullLabelWidth - 16) / 7)
         const title = goal.title.length > maxChars ? goal.title.substring(0, maxChars - 1) + "\u2026" : goal.title
 
         blockGroup.append("text")
           .attr("clip-path", `url(#${clipId})`)
           .attr("x", xScale(goal.startDate) + 8)
-          .attr("y", blockY + blockHeight / 2)
+          .attr("y", yScale(segments[0].yOffset + segments[0].minutes_per_day) + labelHeight / 2)
           .attr("dy", "0.35em")
           .style("fill", "#fff")
-          .style("font-size", blockHeight >= 28 ? "12px" : "10px")
+          .style("font-size", labelHeight >= 28 ? "12px" : "10px")
           .style("font-weight", "600")
           .style("text-shadow", "0 1px 2px rgba(0,0,0,0.3)")
           .style("pointer-events", "none")
           .text(title)
       }
 
-      // Minutes/day label on right edge
-      if (!this.compactValue && blockHeight >= 18 && fullLabelWidth >= 80) {
+      // Minutes/day label on right edge of last segment
+      const lastVisibleSeg = segments[segments.length - 1]
+      const lastSegWidth = xScale(lastVisibleSeg.endDate) - xScale(lastVisibleSeg.startDate)
+      if (!this.compactValue && labelHeight >= 18 && lastSegWidth >= 50) {
         blockGroup.append("text")
           .attr("clip-path", `url(#${clipId})`)
-          .attr("x", xScale(goal.endDate) - 8)
-          .attr("y", blockY + blockHeight / 2)
+          .attr("x", xScale(lastVisibleSeg.endDate) - 8)
+          .attr("y", yScale(lastVisibleSeg.yOffset + lastVisibleSeg.minutes_per_day) + labelHeight / 2)
           .attr("dy", "0.35em")
           .attr("text-anchor", "end")
           .style("fill", "rgba(255,255,255,0.8)")
@@ -473,9 +491,9 @@ export default class extends Controller {
       blockGroup.append("rect")
         .attr("class", "resize-handle")
         .attr("x", xScale(lastSeg.endDate) - 5)
-        .attr("y", blockY)
+        .attr("y", yScale(lastSeg.yOffset + lastSeg.minutes_per_day))
         .attr("width", 5)
-        .attr("height", Math.max(blockHeight, 2))
+        .attr("height", Math.max(yScale(lastSeg.yOffset) - yScale(lastSeg.yOffset + lastSeg.minutes_per_day), 2))
         .style("fill", "transparent")
         .style("cursor", "ew-resize")
         .call(d3.drag()
