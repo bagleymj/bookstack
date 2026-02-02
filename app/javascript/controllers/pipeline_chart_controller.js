@@ -371,50 +371,65 @@ export default class extends Controller {
         .attr("class", "pipeline-block cursor-pointer")
         .datum(goal)
 
-      // Draw each segment as a rect
-      segments.forEach(seg => {
-        const x = xScale(seg.startDate)
-        const segWidth = Math.max(xScale(seg.endDate) - x, 1)
-        const y = yScale(seg.yOffset + seg.minutes_per_day)
-        const segHeight = Math.max(yScale(seg.yOffset) - y, 1)
-
-        blockGroup.append("rect")
-          .attr("class", "block-fill")
-          .attr("x", x)
-          .attr("y", y)
-          .attr("width", segWidth)
-          .attr("height", segHeight)
-          .style("fill", goal.color)
-          .style("opacity", 0.85)
-      })
-
-      // Progress overlay — spans from startDate across progress %
-      const fullWidth = xScale(goal.endDate) - xScale(goal.startDate)
-      const progressWidth = fullWidth * (goal.progress / 100)
-      const progressEndDate = new Date(goal.startDate.getTime() + (goal.endDate.getTime() - goal.startDate.getTime()) * (goal.progress / 100))
-
-      segments.forEach(seg => {
-        // Only draw progress on segments that fall within the progress range
-        if (seg.endDate <= goal.startDate || seg.startDate >= progressEndDate) return
-
-        const clipStart = Math.max(seg.startDate.getTime(), goal.startDate.getTime())
-        const clipEnd = Math.min(seg.endDate.getTime(), progressEndDate.getTime())
-        const x = xScale(new Date(clipStart))
-        const w = Math.max(xScale(new Date(clipEnd)) - x, 0)
-        const y = yScale(seg.yOffset + seg.minutes_per_day)
-        const h = Math.max(yScale(seg.yOffset) - y, 1)
-
-        if (w > 0) {
-          blockGroup.append("rect")
-            .attr("class", "block-progress")
-            .attr("x", x)
-            .attr("y", y)
-            .attr("width", w)
-            .attr("height", h)
-            .style("fill", d3.color(goal.color).darker(0.5))
-            .style("opacity", 0.4)
+      // Group consecutive segments into runs (no time gap between them)
+      // and draw each run as a single SVG path tracing the staircase outline.
+      const runs = []
+      let currentRun = [segments[0]]
+      for (let i = 1; i < segments.length; i++) {
+        if (segments[i].startDate.getTime() === currentRun[currentRun.length - 1].endDate.getTime()) {
+          currentRun.push(segments[i])
+        } else {
+          runs.push(currentRun)
+          currentRun = [segments[i]]
         }
+      }
+      runs.push(currentRun)
+
+      // Build a single path string for all runs
+      let pathD = ""
+      runs.forEach(run => {
+        // Trace top edge left-to-right
+        pathD += `M ${xScale(run[0].startDate)} ${yScale(run[0].yOffset + run[0].minutes_per_day)}`
+        for (let i = 0; i < run.length; i++) {
+          const seg = run[i]
+          const top = yScale(seg.yOffset + seg.minutes_per_day)
+          if (i > 0) pathD += ` V ${top}`
+          pathD += ` H ${xScale(seg.endDate)}`
+        }
+        // Trace bottom edge right-to-left
+        for (let i = run.length - 1; i >= 0; i--) {
+          const seg = run[i]
+          const bottom = yScale(seg.yOffset)
+          pathD += ` V ${bottom}`
+          if (i > 0) pathD += ` H ${xScale(seg.startDate)}`
+        }
+        pathD += ` H ${xScale(run[0].startDate)} Z`
       })
+
+      blockGroup.append("path")
+        .attr("class", "block-fill")
+        .attr("d", pathD)
+        .style("fill", goal.color)
+        .style("opacity", 0.85)
+
+      // Progress overlay — clip the same shape to the progress range
+      const progressEndDate = new Date(goal.startDate.getTime() + (goal.endDate.getTime() - goal.startDate.getTime()) * (goal.progress / 100))
+      if (goal.progress > 0) {
+        const clipId = `clip-progress-${goal.id}`
+        svg.append("defs").append("clipPath").attr("id", clipId)
+          .append("rect")
+          .attr("x", xScale(goal.startDate))
+          .attr("y", 0)
+          .attr("width", xScale(progressEndDate) - xScale(goal.startDate))
+          .attr("height", chartHeight)
+
+        blockGroup.append("path")
+          .attr("class", "block-progress")
+          .attr("d", pathD)
+          .attr("clip-path", `url(#${clipId})`)
+          .style("fill", d3.color(goal.color).darker(0.5))
+          .style("opacity", 0.4)
+      }
 
       // Estimate indicator (dashed inner border on widest segment)
       if (!goal.uses_actual_data) {
@@ -436,29 +451,20 @@ export default class extends Controller {
           .style("stroke-dasharray", "3,3")
       }
 
-      // Create a clipPath from all segments so text doesn't overflow into gaps
-      const clipId = `clip-goal-${goal.id}`
-      const clipPath = svg.append("defs").append("clipPath").attr("id", clipId)
-      segments.forEach(seg => {
-        const cx = xScale(seg.startDate)
-        const cw = Math.max(xScale(seg.endDate) - cx, 1)
-        const cy = yScale(seg.yOffset + seg.minutes_per_day)
-        const ch = Math.max(yScale(seg.yOffset) - cy, 1)
-        clipPath.append("rect").attr("x", cx).attr("y", cy).attr("width", cw).attr("height", ch)
-      })
+      // Book title label — placed on the widest merged segment
+      const widestSeg = segments.reduce((a, b) =>
+        (xScale(b.endDate) - xScale(b.startDate)) > (xScale(a.endDate) - xScale(a.startDate)) ? b : a
+      )
+      const labelWidth = xScale(widestSeg.endDate) - xScale(widestSeg.startDate)
+      const labelHeight = yScale(widestSeg.yOffset) - yScale(widestSeg.yOffset + widestSeg.minutes_per_day)
 
-      // Use the full goal span for label sizing
-      const fullLabelWidth = xScale(goal.endDate) - xScale(goal.startDate)
-      const labelHeight = yScale(segments[0].yOffset) - yScale(segments[0].yOffset + segments[0].minutes_per_day)
-
-      if (fullLabelWidth >= 60 && labelHeight >= 18) {
-        const maxChars = Math.floor((fullLabelWidth - 16) / 7)
+      if (labelWidth >= 60 && labelHeight >= 18) {
+        const maxChars = Math.floor((labelWidth - 16) / 7)
         const title = goal.title.length > maxChars ? goal.title.substring(0, maxChars - 1) + "\u2026" : goal.title
 
         blockGroup.append("text")
-          .attr("clip-path", `url(#${clipId})`)
-          .attr("x", xScale(goal.startDate) + 8)
-          .attr("y", yScale(segments[0].yOffset + segments[0].minutes_per_day) + labelHeight / 2)
+          .attr("x", xScale(widestSeg.startDate) + 8)
+          .attr("y", yScale(widestSeg.yOffset + widestSeg.minutes_per_day) + labelHeight / 2)
           .attr("dy", "0.35em")
           .style("fill", "#fff")
           .style("font-size", labelHeight >= 28 ? "12px" : "10px")
@@ -468,14 +474,11 @@ export default class extends Controller {
           .text(title)
       }
 
-      // Minutes/day label on right edge of last segment
-      const lastVisibleSeg = segments[segments.length - 1]
-      const lastSegWidth = xScale(lastVisibleSeg.endDate) - xScale(lastVisibleSeg.startDate)
-      if (!this.compactValue && labelHeight >= 18 && lastSegWidth >= 50) {
+      // Minutes/day label on widest segment
+      if (!this.compactValue && labelHeight >= 18 && labelWidth >= 80) {
         blockGroup.append("text")
-          .attr("clip-path", `url(#${clipId})`)
-          .attr("x", xScale(lastVisibleSeg.endDate) - 8)
-          .attr("y", yScale(lastVisibleSeg.yOffset + lastVisibleSeg.minutes_per_day) + labelHeight / 2)
+          .attr("x", xScale(widestSeg.endDate) - 8)
+          .attr("y", yScale(widestSeg.yOffset + widestSeg.minutes_per_day) + labelHeight / 2)
           .attr("dy", "0.35em")
           .attr("text-anchor", "end")
           .style("fill", "rgba(255,255,255,0.8)")
