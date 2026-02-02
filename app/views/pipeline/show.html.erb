@@ -52,6 +52,9 @@
                 bg-yellow-100 text-yellow-800">Behind
               <% end %>
             </span>
+            <% if goal.tracking_status == :behind %>
+              <%= button_to "Catch Up", catch_up_reading_goal_path(goal), method: :post, data: { turbo_confirm: "This will mark all missed quotas as completed and advance your book position. Continue?" }, class: "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 hover:bg-amber-200" %>
+            <% end %>
           </div>
 
           <div class="mt-4">

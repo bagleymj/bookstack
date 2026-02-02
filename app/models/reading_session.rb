@@ -16,8 +16,8 @@ class ReadingSession < ApplicationRecord
 
   # Callbacks
   before_save :calculate_metrics, if: :completed?
-  after_save :update_user_stats!
-  after_destroy :update_user_stats!
+  after_save :update_user_stats!, unless: :untracked?
+  after_destroy :update_user_stats!, unless: :untracked?
 
   def completed?
     ended_at.present? && end_page.present?
@@ -86,7 +86,7 @@ class ReadingSession < ApplicationRecord
       self.duration_seconds = (ended_at - started_at).to_i
     end
     self.pages_read = calculated_pages_read
-    self.words_per_minute = calculated_wpm
+    self.words_per_minute = untracked? ? nil : calculated_wpm
   end
 
   def update_book_progress!

@@ -27,6 +27,7 @@ Rails.application.routes.draw do
         post :mark_completed
         post :mark_abandoned
         post :redistribute
+        post :catch_up
       end
       resources :daily_quotas, only: [:update], shallow: true
     end

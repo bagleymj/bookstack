@@ -96,6 +96,25 @@ class ReadingGoal < ApplicationRecord
     book.progress_percentage
   end
 
+  def catch_up!
+    missed_quotas = daily_quotas.past.incomplete
+    return if missed_quotas.empty?
+
+    total_caught_up = 0
+    missed_quotas.find_each do |quota|
+      pages_to_credit = quota.target_pages - quota.actual_pages
+      quota.update!(actual_pages: quota.target_pages, status: :completed)
+      total_caught_up += pages_to_credit
+    end
+
+    if total_caught_up > 0
+      new_page = book.current_page + total_caught_up
+      book.update_progress!(new_page)
+    end
+
+    redistribute_quotas!
+  end
+
   def redistribute_quotas!
     QuotaRedistributor.new(self).redistribute!
   end

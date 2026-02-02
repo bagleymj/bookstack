@@ -4,7 +4,7 @@ class UserReadingStats < ApplicationRecord
   belongs_to :user
 
   def recalculate!
-    sessions = user.reading_sessions.completed
+    sessions = user.reading_sessions.completed.where(untracked: false)
 
     update!(
       total_sessions: sessions.count,

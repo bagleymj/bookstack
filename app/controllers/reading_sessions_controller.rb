@@ -94,7 +94,7 @@ class ReadingSessionsController < ApplicationController
   end
 
   def reading_session_params
-    params.require(:reading_session).permit(:start_page, :end_page, :started_at, :ended_at, :duration_seconds)
+    params.require(:reading_session).permit(:start_page, :end_page, :started_at, :ended_at, :duration_seconds, :untracked)
   end
 
   def format_duration(seconds)

@@ -1,6 +1,6 @@
 class ReadingGoalsController < ApplicationController
   before_action :authenticate_user!
-  before_action :set_reading_goal, only: [:show, :edit, :update, :destroy, :mark_completed, :mark_abandoned, :redistribute]
+  before_action :set_reading_goal, only: [:show, :edit, :update, :destroy, :mark_completed, :mark_abandoned, :redistribute, :catch_up]
 
   def show
     @daily_quotas = @reading_goal.daily_quotas.order(:date)
@@ -56,6 +56,11 @@ class ReadingGoalsController < ApplicationController
   def redistribute
     @reading_goal.redistribute_quotas!
     redirect_to @reading_goal, notice: "Quotas have been redistributed based on current progress."
+  end
+
+  def catch_up
+    @reading_goal.catch_up!
+    redirect_to @reading_goal, notice: "Caught up! Missed quotas have been marked as completed."
   end
 
   private
