@@ -29,8 +29,17 @@ class ReadingGoalsController < ApplicationController
   end
 
   def update
+    dates_changed = @reading_goal.started_on != reading_goal_params[:started_on]&.to_date ||
+                    @reading_goal.target_completion_date != reading_goal_params[:target_completion_date]&.to_date
+
     if @reading_goal.update(reading_goal_params)
-      @reading_goal.redistribute_quotas!
+      if dates_changed
+        # Regenerate quotas when dates change
+        @reading_goal.daily_quotas.destroy_all
+        QuotaCalculator.new(@reading_goal).generate_quotas!
+      else
+        @reading_goal.redistribute_quotas!
+      end
       redirect_to @reading_goal, notice: "Reading goal updated and quotas recalculated."
     else
       @books = current_user.books.where.not(status: :completed)
