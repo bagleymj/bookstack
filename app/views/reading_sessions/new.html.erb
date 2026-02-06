@@ -26,16 +26,27 @@
       </div>
 
       <!-- Current Progress Info -->
-      <div class="mt-8 grid grid-cols-2 gap-4 text-center" data-timer-target="progressInfo">
+      <div class="mt-8 grid grid-cols-<%= @today_quota && !@today_quota.effectively_complete? ? '3' : '2' %> gap-4 text-center" data-timer-target="progressInfo">
         <div class="rounded-lg bg-gray-50 p-4">
           <p class="text-sm text-gray-500">Starting Page</p>
           <p class="text-2xl font-semibold text-gray-900"><%= @book.actual_current_page %></p>
         </div>
+        <% if @today_quota && !@today_quota.effectively_complete? %>
+          <div class="rounded-lg bg-indigo-50 p-4 border-2 border-indigo-200">
+            <p class="text-sm text-indigo-600 font-medium">Today's Target</p>
+            <p class="text-2xl font-semibold text-indigo-700">p. <%= @today_quota.target_page_number %></p>
+          </div>
+        <% end %>
         <div class="rounded-lg bg-gray-50 p-4">
           <p class="text-sm text-gray-500">Book Progress</p>
           <p class="text-2xl font-semibold text-gray-900"><%= @book.progress_percentage %>%</p>
         </div>
       </div>
+      <% if @today_quota&.effectively_complete? %>
+        <div class="mt-4 rounded-md bg-green-50 p-3 text-center">
+          <p class="text-sm font-medium text-green-800">Today's reading goal complete!</p>
+        </div>
+      <% end %>
 
       <!-- Session Completion Form (hidden until timer finishes) -->
       <div data-timer-target="completionForm" class="hidden mt-8">

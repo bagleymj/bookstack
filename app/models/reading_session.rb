@@ -55,16 +55,29 @@ class ReadingSession < ApplicationRecord
     book.first_page + end_page
   end
 
+  # Returns the duration to use for display/calculations
+  # For tracked sessions: actual duration from timer
+  # For untracked sessions: estimated duration based on WPM snapshot
+  def effective_duration_seconds
+    untracked? ? (estimated_duration_seconds || duration_seconds) : duration_seconds
+  end
+
+  def effective_duration_minutes
+    return 0 unless effective_duration_seconds&.positive?
+    (effective_duration_seconds / 60.0).round
+  end
+
   def formatted_duration
-    return "0 min" unless duration_seconds&.positive?
-    hours = duration_seconds / 3600
-    minutes = (duration_seconds % 3600) / 60
+    seconds = effective_duration_seconds
+    return "0 min" unless seconds&.positive?
+    hours = seconds / 3600
+    minutes = (seconds % 3600) / 60
     if hours > 0
       "#{hours}h #{minutes}m"
     elsif minutes > 0
       "#{minutes} min"
     else
-      "#{duration_seconds} sec"
+      "#{seconds} sec"
     end
   end
 
@@ -87,6 +100,22 @@ class ReadingSession < ApplicationRecord
     end
     self.pages_read = calculated_pages_read
     self.words_per_minute = untracked? ? nil : calculated_wpm
+
+    # For untracked sessions, calculate estimated duration based on WPM snapshot
+    if untracked?
+      calculate_estimated_duration
+    end
+  end
+
+  def calculate_estimated_duration
+    # Snapshot WPM: prefer book's actual WPM, fallback to user average * difficulty
+    self.wpm_snapshot = book.actual_wpm || (user.effective_reading_speed * book.difficulty_modifier)
+
+    return if wpm_snapshot.nil? || wpm_snapshot.zero? || pages_read.nil? || pages_read.zero?
+
+    words_read = pages_read * book.effective_words_per_page
+    minutes = words_read / wpm_snapshot
+    self.estimated_duration_seconds = (minutes * 60).round
   end
 
   def update_book_progress!

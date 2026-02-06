@@ -17,6 +17,10 @@ class ReadingSessionsController < ApplicationController
       started_at: Time.current,
       start_page: @book.current_page
     )
+
+    # Find today's quota for this book (if there's an active reading goal)
+    active_goal = current_user.reading_goals.active.find_by(book: @book)
+    @today_quota = active_goal&.today_quota
   end
 
   def create
