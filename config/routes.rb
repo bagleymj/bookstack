@@ -26,8 +26,10 @@ Rails.application.routes.draw do
       member do
         post :mark_completed
         post :mark_abandoned
+        get :redistribute
         post :redistribute
         post :catch_up
+        post :resolve_discrepancy
       end
       resources :daily_quotas, only: [:update], shallow: true
     end
@@ -41,6 +43,7 @@ Rails.application.routes.draw do
             patch :update
           end
         end
+        resources :active_books, only: [:index]
       end
     end
   end

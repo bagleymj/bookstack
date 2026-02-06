@@ -16,6 +16,86 @@
     </div>
   </div>
 
+  <!-- Discrepancy Alerts -->
+  <% if @goals_with_discrepancies.any? %>
+    <div class="space-y-3">
+      <% @goals_with_discrepancies.each do |goal| %>
+        <% discrepancy = goal.yesterday_discrepancy %>
+        <% if discrepancy %>
+          <div class="rounded-lg border-2 <%= discrepancy[:type] == :behind ? 'border-amber-300 bg-amber-50' : 'border-green-300 bg-green-50' %> p-4 shadow-sm">
+            <div class="flex items-start gap-4">
+              <!-- Icon -->
+              <div class="flex-shrink-0">
+                <% if discrepancy[:type] == :behind %>
+                  <div class="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100">
+                    <svg class="h-6 w-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                  </div>
+                <% else %>
+                  <div class="flex h-10 w-10 items-center justify-center rounded-full bg-green-100">
+                    <svg class="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+                    </svg>
+                  </div>
+                <% end %>
+              </div>
+
+              <!-- Content -->
+              <div class="flex-1 min-w-0">
+                <h4 class="text-sm font-semibold <%= discrepancy[:type] == :behind ? 'text-amber-800' : 'text-green-800' %>">
+                  <% if discrepancy[:type] == :behind %>
+                    Missed <%= discrepancy[:pages] %> pages yesterday
+                  <% else %>
+                    Read <%= discrepancy[:pages] %> extra pages yesterday!
+                  <% end %>
+                </h4>
+                <p class="mt-0.5 text-sm <%= discrepancy[:type] == :behind ? 'text-amber-700' : 'text-green-700' %>">
+                  <%= goal.book.title %>
+                </p>
+                <p class="mt-2 text-xs <%= discrepancy[:type] == :behind ? 'text-amber-600' : 'text-green-600' %>">
+                  <% if discrepancy[:type] == :behind %>
+                    How would you like to catch up?
+                  <% else %>
+                    How would you like to use your extra progress?
+                  <% end %>
+                </p>
+              </div>
+
+              <!-- Actions -->
+              <div class="flex flex-col sm:flex-row gap-2">
+                <%= button_to resolve_discrepancy_reading_goal_path(goal, strategy: :redistribute),
+                    method: :post,
+                    class: "inline-flex items-center justify-center px-3 py-1.5 text-xs font-medium rounded-md #{discrepancy[:type] == :behind ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-green-100 text-green-700 hover:bg-green-200'} transition-colors" do %>
+                  <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                  </svg>
+                  Spread it out
+                <% end %>
+
+                <%= button_to resolve_discrepancy_reading_goal_path(goal, strategy: :apply_to_today),
+                    method: :post,
+                    class: "inline-flex items-center justify-center px-3 py-1.5 text-xs font-medium rounded-md #{discrepancy[:type] == :behind ? 'bg-amber-600 text-white hover:bg-amber-700' : 'bg-green-600 text-white hover:bg-green-700'} transition-colors" do %>
+                  <% if discrepancy[:type] == :behind %>
+                    <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                    Catch up today
+                  <% else %>
+                    <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    Credit to today
+                  <% end %>
+                <% end %>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+  <% end %>
+
   <!-- Stats -->
   <% if @stats %>
     <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -38,27 +118,38 @@
     </div>
   <% end %>
 
-  <!-- Today's Quotas -->
+  <!-- Today's Reading Time -->
   <% if @today_quotas.any? %>
-    <div class="rounded-lg bg-white shadow">
-      <div class="px-4 py-5 sm:p-6">
-        <h3 class="text-lg font-medium leading-6 text-gray-900">Today's Reading Goals</h3>
-        <div class="mt-4 space-y-4">
-          <% @today_quotas.each do |quota| %>
-            <div class="flex items-center justify-between rounded-lg border border-gray-200 p-4">
-              <div class="flex-1">
-                <p class="font-medium text-gray-900"><%= quota.book.title %></p>
-                <p class="text-sm text-gray-500"><%= quota.actual_pages %> / <%= quota.target_pages %> pages (to page <%= quota.target_page_number %>)</p>
-              </div>
-              <div class="ml-4">
-                <div class="relative pt-1 w-32">
-                  <div class="overflow-hidden h-2 text-xs flex rounded bg-gray-200">
-                    <div style="width:<%= quota.percentage_complete %>%" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center <%= quota.completed? ? 'bg-green-500' : 'bg-indigo-500' %>"></div>
-                  </div>
-                </div>
-                <p class="text-xs text-gray-500 mt-1 text-right"><%= quota.percentage_complete %>%</p>
-              </div>
-            </div>
+    <div class="rounded-lg bg-gradient-to-r <%= @today_reading_minutes.zero? ? 'from-green-500 to-emerald-600' : 'from-indigo-500 to-purple-600' %> p-6 shadow-lg">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-white/80">Today's Reading</p>
+          <% if @today_reading_minutes.zero? %>
+            <p class="mt-1 text-3xl font-bold text-white">All done!</p>
+            <p class="mt-1 text-sm text-white/80">You've completed all your reading goals for today</p>
+          <% else %>
+            <p class="mt-1 text-3xl font-bold text-white">
+              <% if @today_reading_minutes >= 60 %>
+                <%= (@today_reading_minutes / 60.0).round(1) %> hr
+              <% else %>
+                <%= @today_reading_minutes %> min
+              <% end %>
+              remaining
+            </p>
+            <p class="mt-1 text-sm text-white/80">
+              across <%= @today_quotas.reject(&:effectively_complete?).count %> book<%= @today_quotas.reject(&:effectively_complete?).count == 1 ? '' : 's' %>
+            </p>
+          <% end %>
+        </div>
+        <div class="hidden sm:block">
+          <% if @today_reading_minutes.zero? %>
+            <svg class="h-16 w-16 text-white/30" fill="currentColor" viewBox="0 0 24 24">
+              <path fill-rule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z" clip-rule="evenodd"/>
+            </svg>
+          <% else %>
+            <svg class="h-16 w-16 text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+            </svg>
           <% end %>
         </div>
       </div>
@@ -66,7 +157,7 @@
   <% end %>
 
   <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-    <!-- Currently Reading -->
+    <!-- Currently Reading (with integrated daily goals) -->
     <div class="rounded-lg bg-white shadow">
       <div class="px-4 py-5 sm:p-6">
         <div class="flex items-center justify-between">
@@ -75,8 +166,13 @@
         </div>
         <% if @books_in_progress.any? %>
           <div class="mt-4 space-y-4">
+            <%
+              # Build a lookup of today's quotas by book_id
+              quotas_by_book = @today_quotas.index_by { |q| q.reading_goal.book_id }
+            %>
             <% @books_in_progress.limit(3).each do |book| %>
-              <div class="rounded-lg border border-gray-200 p-4 hover:border-indigo-300 transition-colors">
+              <% quota = quotas_by_book[book.id] %>
+              <div class="rounded-lg border <%= quota ? 'border-indigo-200 bg-indigo-50/30' : 'border-gray-200' %> p-4 hover:border-indigo-300 transition-colors">
                 <div class="flex items-start justify-between">
                   <div class="flex-1 min-w-0">
                     <%= link_to book, class: "hover:text-indigo-600" do %>
@@ -84,26 +180,86 @@
                     <% end %>
                     <p class="text-sm text-gray-500"><%= book.author %></p>
                   </div>
-                  <span class="ml-2 inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-800">
-                    <%= book.progress_percentage %>%
-                  </span>
+                  <%= link_to new_book_reading_session_path(book), class: "ml-2 inline-flex items-center justify-center w-9 h-9 rounded-full bg-indigo-100 text-indigo-600 hover:bg-indigo-200 transition-colors" do %>
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M8 5v14l11-7z"/>
+                    </svg>
+                  <% end %>
                 </div>
-                <div class="mt-3">
-                  <div class="relative pt-1">
-                    <div class="overflow-hidden h-2 text-xs flex rounded bg-gray-200">
-                      <div style="width:<%= book.progress_percentage %>%" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-indigo-500"></div>
+
+                <% if quota %>
+                  <!-- Today's Goal -->
+                  <div class="mt-3 flex items-center justify-between p-2 rounded-md <%= quota.effectively_complete? ? 'bg-green-100' : 'bg-white' %>">
+                    <div class="flex items-center gap-2">
+                      <% if quota.effectively_complete? %>
+                        <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <span class="text-sm font-medium text-green-700">Today's goal complete!</span>
+                      <% else %>
+                        <span class="text-sm text-gray-600">
+                          <span class="font-medium">Today:</span>
+                          read to p. <%= quota.target_page_number %>
+                        </span>
+                      <% end %>
                     </div>
-                  </div>
-                  <div class="flex items-center justify-between mt-2">
-                    <p class="text-xs text-gray-500"><%= book.current_page %> / <%= book.total_pages %> pages &bull; <%= book.formatted_estimated_time %> remaining</p>
-                    <%= link_to new_book_reading_session_path(book), class: "inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-500" do %>
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                      </svg>
-                      Read
+                    <% unless quota.effectively_complete? %>
+                      <span class="text-xs font-medium <%= quota.percentage_complete > 0 ? 'text-indigo-600' : 'text-gray-400' %>">
+                        <%= quota.actual_pages %>/<%= quota.target_pages %> pages
+                      </span>
                     <% end %>
                   </div>
+                <% end %>
+
+                <div class="mt-3 flex items-center gap-4 text-sm">
+                  <div class="flex items-center gap-1.5 text-gray-600">
+                    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    <span>p. <%= book.actual_current_page %></span>
+                  </div>
+                  <div class="flex items-center gap-1.5 text-gray-600">
+                    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    <span><%= book.remaining_pages %> left</span>
+                  </div>
+                  <div class="flex items-center gap-1.5 text-gray-600">
+                    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <span><%= book.formatted_estimated_time %></span>
+                  </div>
+                </div>
+
+                <div class="mt-3">
+                  <% if quota && !quota.effectively_complete? %>
+                    <%
+                      # Calculate progress segments
+                      today_pages = quota.actual_pages
+                      before_today_pages = book.current_page - today_pages
+                      before_today_pct = (before_today_pages.to_f / book.total_pages * 100).clamp(0, 100)
+                      today_pct = (today_pages.to_f / book.total_pages * 100).clamp(0, 100)
+                      target_percentage = ((quota.target_page_number - book.first_page).to_f / book.total_pages * 100).clamp(0, 100)
+                    %>
+                    <!-- Progress bar: before today (indigo) + today's reading (cyan) + target marker -->
+                    <div class="relative">
+                      <div class="overflow-hidden h-1.5 rounded-full bg-gray-200 flex">
+                        <% if before_today_pct > 0 %>
+                          <div style="width:<%= before_today_pct %>%" class="h-full bg-indigo-500"></div>
+                        <% end %>
+                        <% if today_pct > 0 %>
+                          <div style="width:<%= today_pct %>%" class="h-full bg-cyan-400"></div>
+                        <% end %>
+                      </div>
+                      <div class="absolute top-0 h-1.5 w-0.5 bg-indigo-800 rounded" style="left: <%= target_percentage %>%"></div>
+                    </div>
+                  <% else %>
+                    <div class="overflow-hidden h-1.5 rounded-full bg-gray-200">
+                      <div style="width:<%= book.progress_percentage %>%" class="h-full rounded-full <%= quota&.effectively_complete? ? 'bg-green-500' : 'bg-indigo-500' %>"></div>
+                    </div>
+                  <% end %>
                 </div>
               </div>
             <% end %>
