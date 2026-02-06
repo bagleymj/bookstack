@@ -4,7 +4,7 @@
       <h2 class="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight">
         Reading Pipeline
       </h2>
-      <p class="mt-1 text-sm text-gray-500">Your reading commitments visualized over time. Drag to reschedule, resize right edge to adjust end date.</p>
+      <p class="mt-1 text-sm text-gray-500">Your reading commitments visualized over time. Click Edit to drag and resize goals.</p>
     </div>
     <div class="mt-4 flex md:ml-4 md:mt-0">
       <%= link_to new_reading_goal_path, class: "inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500" do %>
@@ -76,12 +76,16 @@
           </div>
 
           <% if goal.today_quota %>
-            <div class="mt-4 p-3 rounded-md bg-gray-50">
+            <div class="mt-4 p-3 rounded-md <%= goal.today_quota.effectively_complete? ? 'bg-green-50' : 'bg-gray-50' %>">
               <div class="flex items-center justify-between">
                 <span class="text-sm text-gray-600">Today's quota</span>
-                <span class="text-sm font-medium <%= goal.today_quota.completed? ? 'text-green-600' : 'text-gray-900' %>">
-                  <%= goal.today_quota.actual_pages %> / <%= goal.today_quota.target_pages %> pages &rarr; p. <%= goal.today_quota.target_page_number %>
-                </span>
+                <% if goal.today_quota.effectively_complete? %>
+                  <span class="text-sm font-medium text-green-600">Complete!</span>
+                <% else %>
+                  <span class="text-sm font-medium text-gray-900">
+                    <%= goal.today_quota.actual_pages %> / <%= goal.today_quota.target_pages %> pages &rarr; p. <%= goal.today_quota.target_page_number %>
+                  </span>
+                <% end %>
               </div>
             </div>
           <% end %>

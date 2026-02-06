@@ -36,18 +36,51 @@ class DailyQuota < ApplicationRecord
   end
 
   def percentage_complete
-    return 100 if completed?
+    return 100 if effectively_complete?
     return 0 if target_pages.zero?
     [(actual_pages.to_f / target_pages * 100).round, 100].min
   end
 
+  # Returns true if the quota is complete - either by status or because
+  # the book's current position is already at or past the target
+  def effectively_complete?
+    return true if completed?
+    return true if book.actual_current_page >= target_page_number
+    false
+  end
+
   # The actual book page number to reach after completing this quota
-  # Current position + cumulative pages from today through this date
+  # Based on start-of-day position + cumulative target pages
   def target_page_number
+    # Get today's quota to determine pages already read today
+    today_quota = reading_goal.daily_quotas.where.not(status: :missed).find_by(date: Date.current)
+
+    # Calculate start-of-day position (current position minus pages read today)
+    # This gives us a stable reference point that doesn't move as you read
+    start_of_today = book.actual_current_page
+    start_of_today -= today_quota.actual_pages if today_quota
+
+    # Sum target pages from today through this quota's date
     cumulative_pages = reading_goal.daily_quotas
                                    .where(date: Date.current..date)
+                                   .where.not(status: :missed)
                                    .sum(:target_pages)
-    book.actual_current_page + cumulative_pages
+
+    start_of_today + cumulative_pages
+  end
+
+  # Estimated minutes to complete remaining pages for this quota
+  def estimated_minutes_remaining
+    return 0 if effectively_complete?
+
+    remaining = pages_remaining
+    return 0 if remaining <= 0
+
+    wpm = book.actual_wpm || (user.effective_reading_speed * book.difficulty_modifier)
+    return 0 if wpm.zero?
+
+    words_remaining = remaining * book.effective_words_per_page
+    (words_remaining / wpm).round
   end
 
   def record_pages!(pages_read)

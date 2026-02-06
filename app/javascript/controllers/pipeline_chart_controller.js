@@ -5,7 +5,8 @@ import * as d3 from "d3"
 export default class extends Controller {
   static values = {
     url: String,
-    compact: { type: Boolean, default: false }
+    compact: { type: Boolean, default: false },
+    editMode: { type: Boolean, default: false }
   }
 
   // Vibrant Breakout-style color palette
@@ -32,6 +33,11 @@ export default class extends Controller {
 
     this.resizeHandler = this.debounce(() => this.render(), 250)
     window.addEventListener("resize", this.resizeHandler)
+  }
+
+  toggleEditMode() {
+    this.editModeValue = !this.editModeValue
+    this.render()
   }
 
   disconnect() {
@@ -75,36 +81,57 @@ export default class extends Controller {
   }
 
   // Compute interlocking brick segments for all goals.
-  // At every transition point (where any book starts or ends, plus
-  // weekday/weekend boundaries), restack the active books so blocks
-  // drop down into gaps. Goals that exclude weekends are not active
-  // on Saturday/Sunday, creating gaps in their blocks.
+  // Past days use actual reading time, future days use planned time.
+  // At every transition point, restack the active books so blocks
+  // drop down into gaps.
   computeSegments(goals) {
-    // Collect all unique transition dates: book start/end boundaries
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const todayTime = today.getTime()
+    const dayMs = 86400000
+    // Format today as YYYY-MM-DD for reliable comparison
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+
+    // Collect all unique transition dates
     const dateSet = new Set()
     goals.forEach(g => {
       dateSet.add(g.startDate.getTime())
       dateSet.add(g.endDate.getTime())
     })
 
-    // Add weekday/weekend boundaries for goals that exclude weekends.
-    // This ensures segments never straddle a Fri->Sat or Sun->Mon edge.
+    // Add today as a key transition (past vs future boundary)
+    dateSet.add(todayTime)
+
+    // Add daily boundaries for PAST days (so each past day is its own segment)
+    // This allows us to show actual reading time per day
+    const earliest = Math.min(...goals.map(g => g.startDate.getTime()))
+    let day = new Date(earliest)
+    while (day.getTime() < todayTime) {
+      dateSet.add(day.getTime())
+      day = new Date(day.getTime() + dayMs)
+    }
+
+    // Add weekday/weekend boundaries for goals that exclude weekends
     const hasWeekendExclusion = goals.some(g => !g.include_weekends)
     if (hasWeekendExclusion) {
-      const earliest = Math.min(...goals.map(g => g.startDate.getTime()))
       const latest = Math.max(...goals.map(g => g.endDate.getTime()))
-      let day = new Date(earliest)
+      day = new Date(earliest)
       while (day.getTime() <= latest) {
         const dow = day.getDay()
-        // Add Saturday start and Monday start as transitions
         if (dow === 6 || dow === 1) {
           dateSet.add(day.getTime())
         }
-        day = new Date(day.getTime() + 86400000)
+        day = new Date(day.getTime() + dayMs)
       }
     }
 
     const transitions = Array.from(dateSet).sort((a, b) => a - b)
+
+    // Helper to get actual minutes for a goal on a specific date
+    const getActualMinutes = (goal, dateStr) => {
+      if (!goal.actual_minutes_by_date) return 0
+      return goal.actual_minutes_by_date[dateStr] || 0
+    }
 
     // For each interval, stack the active goals
     const segmentsByGoal = new Map()
@@ -113,27 +140,53 @@ export default class extends Controller {
     for (let i = 0; i < transitions.length - 1; i++) {
       const segStart = transitions[i]
       const segEnd = transitions[i + 1]
-      const segDay = new Date(segStart).getDay()
-      const isWeekend = segDay === 0 || segDay === 6
+      const segDay = new Date(segStart)
+      const isWeekend = segDay.getDay() === 0 || segDay.getDay() === 6
+      const isPast = segStart < todayTime
+      const dateStr = segDay.toISOString().split('T')[0]
 
       // Which goals are active during this interval?
-      // Skip goals that exclude weekends when the segment is on a weekend.
       const active = goals.filter(g => {
         if (g.startDate.getTime() > segStart || g.endDate.getTime() < segEnd) return false
         if (isWeekend && !g.include_weekends) return false
         return true
       })
 
-      // Stack them: longest duration on bottom (already sorted)
+      // Determine if this is today
+      const isToday = segStart === todayTime
+
+      // For past days, filter to only goals that had actual reading
+      // For future days (including today), include all active goals
+      const goalsWithHeight = active.map(g => {
+        let minutes
+        let todayProgress = 0
+        if (isPast) {
+          // Use actual reading time for past days
+          minutes = getActualMinutes(g, dateStr)
+        } else if (isToday) {
+          // Today: show planned height, but track actual progress
+          minutes = g.minutes_per_day
+          todayProgress = g.today_actual_minutes || 0
+        } else {
+          // Use planned time for future days
+          minutes = g.minutes_per_day
+        }
+        return { goal: g, minutes, isPast, isToday, todayProgress }
+      }).filter(item => item.minutes > 0) // Only include if there's height to show
+
+      // Stack them: longest duration on bottom (already sorted by duration)
       let yOffset = 0
-      active.forEach(g => {
-        segmentsByGoal.get(g.id).push({
+      goalsWithHeight.forEach(({ goal, minutes, isPast, isToday, todayProgress }) => {
+        segmentsByGoal.get(goal.id).push({
           startDate: new Date(segStart),
           endDate: new Date(segEnd),
           yOffset: yOffset,
-          minutes_per_day: g.minutes_per_day
+          minutes_per_day: minutes,
+          isPast: isPast,
+          isToday: isToday,
+          todayProgress: todayProgress
         })
-        yOffset += g.minutes_per_day
+        yOffset += minutes
       })
     }
 
@@ -145,8 +198,13 @@ export default class extends Controller {
       })
     })
 
-    // Merge adjacent segments at the same yOffset into single wider rects.
-    // This eliminates visible seams between segments that are visually contiguous.
+    // Also consider planned minutes_per_day for Y scale (so future doesn't clip)
+    goals.forEach(g => {
+      maxY = Math.max(maxY, g.minutes_per_day)
+    })
+
+    // Merge adjacent segments with same properties (reduces path complexity)
+    // Only merge if: same yOffset, same minutes, same isPast status, contiguous
     segmentsByGoal.forEach((segments, goalId) => {
       if (segments.length <= 1) return
       const merged = [segments[0]]
@@ -155,6 +213,7 @@ export default class extends Controller {
         const curr = segments[i]
         if (curr.yOffset === prev.yOffset &&
             curr.minutes_per_day === prev.minutes_per_day &&
+            curr.isPast === prev.isPast &&
             curr.startDate.getTime() === prev.endDate.getTime()) {
           prev.endDate = curr.endDate
         } else {
@@ -165,6 +224,47 @@ export default class extends Controller {
     })
 
     return { segmentsByGoal, maxY }
+  }
+
+  // Group consecutive segments into runs (no time gap between them)
+  groupIntoRuns(segments) {
+    if (segments.length === 0) return []
+    const runs = []
+    let currentRun = [segments[0]]
+    for (let i = 1; i < segments.length; i++) {
+      if (segments[i].startDate.getTime() === currentRun[currentRun.length - 1].endDate.getTime()) {
+        currentRun.push(segments[i])
+      } else {
+        runs.push(currentRun)
+        currentRun = [segments[i]]
+      }
+    }
+    runs.push(currentRun)
+    return runs
+  }
+
+  // Build SVG path string from runs of segments
+  buildPathFromRuns(runs, xScale, yScale) {
+    let pathD = ""
+    runs.forEach(run => {
+      // Trace top edge left-to-right
+      pathD += `M ${xScale(run[0].startDate)} ${yScale(run[0].yOffset + run[0].minutes_per_day)}`
+      for (let i = 0; i < run.length; i++) {
+        const seg = run[i]
+        const top = yScale(seg.yOffset + seg.minutes_per_day)
+        if (i > 0) pathD += ` V ${top}`
+        pathD += ` H ${xScale(seg.endDate)}`
+      }
+      // Trace bottom edge right-to-left
+      for (let i = run.length - 1; i >= 0; i--) {
+        const seg = run[i]
+        const bottom = yScale(seg.yOffset)
+        pathD += ` V ${bottom}`
+        if (i > 0) pathD += ` H ${xScale(seg.startDate)}`
+      }
+      pathD += ` H ${xScale(run[0].startDate)} Z`
+    })
+    return pathD
   }
 
   render() {
@@ -183,12 +283,14 @@ export default class extends Controller {
     const width = Math.max(containerWidth, this.minWidth) - this.margin.left - this.margin.right
 
     // Parse dates and filter valid goals
+    // Note: endDate is set to the day AFTER target_completion_date so the goal
+    // is active on its last day (segment dates are [start, end) intervals)
     let goals = this.chartData.goals
       .filter(g => g.start_date && g.end_date && g.minutes_per_day > 0)
       .map(g => ({
         ...g,
         startDate: new Date(g.start_date + "T00:00:00"),
-        endDate: new Date(g.end_date + "T00:00:00")
+        endDate: d3.timeDay.offset(new Date(g.end_date + "T00:00:00"), 1)
       }))
 
     if (goals.length === 0) {
@@ -233,6 +335,32 @@ export default class extends Controller {
     const yScale = d3.scaleLinear()
       .domain([0, totalMinutes])
       .range([chartHeight, 0])
+
+    // Edit mode toggle button
+    if (!this.compactValue) {
+      const editToggle = d3.select(this.element)
+        .append("div")
+        .attr("class", "absolute top-2 right-2 z-10")
+
+      editToggle.append("button")
+        .attr("type", "button")
+        .attr("class", () => this.editModeValue
+          ? "inline-flex items-center gap-1.5 rounded-md bg-amber-100 px-2.5 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-200 transition-colors ring-2 ring-amber-300"
+          : "inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-200 transition-colors"
+        )
+        .html(() => this.editModeValue
+          ? `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg> Editing`
+          : `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg> Edit`
+        )
+        .on("click", () => this.toggleEditMode())
+
+      // Show edit mode hint when active
+      if (this.editModeValue) {
+        editToggle.append("div")
+          .attr("class", "mt-1 text-xs text-amber-600")
+          .text("Drag to move, resize right edge")
+      }
+    }
 
     // Create SVG
     const svg = d3.select(this.element)
@@ -368,7 +496,7 @@ export default class extends Controller {
       if (!segments || segments.length === 0) return
 
       const blockGroup = svg.append("g")
-        .attr("class", "pipeline-block cursor-pointer")
+        .attr("class", `pipeline-block ${this.editModeValue ? "cursor-move" : "cursor-pointer"}`)
         .datum(goal)
 
       // Group consecutive segments into runs (no time gap between them)
@@ -406,11 +534,92 @@ export default class extends Controller {
         pathD += ` H ${xScale(run[0].startDate)} Z`
       })
 
+      // Separate past, today, and future segments for different styling
+      const pastSegments = segments.filter(s => s.isPast)
+      const todaySegment = segments.find(s => s.isToday)
+      const futureSegments = segments.filter(s => !s.isPast && !s.isToday)
+
+      // Build path for past segments (actual reading time) - slightly darker
+      if (pastSegments.length > 0) {
+        const pastRuns = this.groupIntoRuns(pastSegments)
+        const pastPathD = this.buildPathFromRuns(pastRuns, xScale, yScale)
+
+        blockGroup.append("path")
+          .attr("class", "block-fill block-past")
+          .attr("d", pastPathD)
+          .style("fill", d3.color(goal.color).darker(0.3))
+          .style("opacity", 0.95)
+      }
+
+      // Build path for today's segment (planned time as background)
+      if (todaySegment) {
+        const todayRuns = [[todaySegment]]
+        const todayPathD = this.buildPathFromRuns(todayRuns, xScale, yScale)
+
+        // Draw planned height as lighter background
+        blockGroup.append("path")
+          .attr("class", "block-fill block-today-planned")
+          .attr("d", todayPathD)
+          .style("fill", goal.color)
+          .style("opacity", 0.85)
+
+        // Draw actual progress filling up from the bottom
+        // Only show progress on TODAY's column, not the entire segment
+        if (todaySegment.todayProgress > 0) {
+          const progressHeight = Math.min(todaySegment.todayProgress, todaySegment.minutes_per_day)
+          const progressTop = yScale(todaySegment.yOffset + progressHeight)
+          const progressBottom = yScale(todaySegment.yOffset)
+
+          // Clip to just today's single day column
+          const todayColumnEnd = d3.timeDay.offset(todaySegment.startDate, 1)
+
+          blockGroup.append("rect")
+            .attr("class", "block-fill block-today-progress")
+            .attr("x", xScale(todaySegment.startDate))
+            .attr("y", progressTop)
+            .attr("width", xScale(todayColumnEnd) - xScale(todaySegment.startDate))
+            .attr("height", progressBottom - progressTop)
+            .style("fill", d3.color(goal.color).darker(0.3))
+            .style("opacity", 0.95)
+
+          // If exceeded planned, show overflow
+          if (todaySegment.todayProgress > todaySegment.minutes_per_day) {
+            const overflowHeight = Math.min(
+              (todaySegment.todayProgress - todaySegment.minutes_per_day),
+              20 // Cap visual overflow
+            )
+            const overflowTop = yScale(todaySegment.yOffset + todaySegment.minutes_per_day + overflowHeight)
+
+            blockGroup.append("rect")
+              .attr("class", "block-fill block-today-overflow")
+              .attr("x", xScale(todaySegment.startDate))
+              .attr("y", overflowTop)
+              .attr("width", xScale(todayColumnEnd) - xScale(todaySegment.startDate))
+              .attr("height", yScale(todaySegment.yOffset + todaySegment.minutes_per_day) - overflowTop)
+              .style("fill", "#22c55e")
+              .style("opacity", 0.9)
+          }
+        }
+      }
+
+      // Build path for future segments (planned time)
+      if (futureSegments.length > 0) {
+        const futureRuns = this.groupIntoRuns(futureSegments)
+        const futurePathD = this.buildPathFromRuns(futureRuns, xScale, yScale)
+
+        blockGroup.append("path")
+          .attr("class", "block-fill block-future")
+          .attr("d", futurePathD)
+          .style("fill", goal.color)
+          .style("opacity", 0.85)
+      }
+
+      // Combined path for interactions (invisible, covers both)
       blockGroup.append("path")
-        .attr("class", "block-fill")
+        .attr("class", "block-fill-interactive")
         .attr("d", pathD)
-        .style("fill", goal.color)
-        .style("opacity", 0.85)
+        .style("fill", "transparent")
+        .style("stroke", "none")
 
       // Progress overlay — clip the same shape to the progress range
       const progressEndDate = new Date(goal.startDate.getTime() + (goal.endDate.getTime() - goal.startDate.getTime()) * (goal.progress / 100))
@@ -489,78 +698,269 @@ export default class extends Controller {
           .text(`${goal.minutes_per_day}m/day`)
       }
 
-      // Resize handle (right edge of the last segment)
+      // Resize handle (right edge of the last segment) - only visible in edit mode
       const lastSeg = segments[segments.length - 1]
-      blockGroup.append("rect")
-        .attr("class", "resize-handle")
-        .attr("x", xScale(lastSeg.endDate) - 5)
-        .attr("y", yScale(lastSeg.yOffset + lastSeg.minutes_per_day))
-        .attr("width", 5)
-        .attr("height", Math.max(yScale(lastSeg.yOffset) - yScale(lastSeg.yOffset + lastSeg.minutes_per_day), 2))
-        .style("fill", "transparent")
-        .style("cursor", "ew-resize")
-        .call(d3.drag()
+      if (this.editModeValue) {
+        // Create resize tooltip
+        const resizeTooltip = d3.select(this.element)
+          .append("div")
+          .attr("class", "resize-tooltip absolute hidden bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-xl pointer-events-none z-50 border border-gray-700")
+
+        blockGroup.append("rect")
+          .attr("class", "resize-handle")
+          .attr("x", xScale(lastSeg.endDate) - 6)
+          .attr("y", yScale(lastSeg.yOffset + lastSeg.minutes_per_day))
+          .attr("width", 8)
+          .attr("height", Math.max(yScale(lastSeg.yOffset) - yScale(lastSeg.yOffset + lastSeg.minutes_per_day), 2))
+          .style("fill", "rgba(255,255,255,0.3)")
+          .style("cursor", "ew-resize")
+          .attr("rx", 2)
+          .call(d3.drag()
+            .on("start", function(event) {
+              goal._resizeStartX = event.x
+              goal._origEndDate = goal.endDate
+
+              // Visual feedback
+              d3.select(this)
+                .style("fill", "rgba(255,255,255,0.7)")
+                .style("width", "10px")
+
+              // Show resize tooltip
+              resizeTooltip
+                .classed("hidden", false)
+                .html(self.formatResizeTooltip(goal._origEndDate, 0))
+            })
+            .on("drag", function(event) {
+              const dx = event.x - goal._resizeStartX
+              const msPerPx = (endDate - startDate) / width
+              const offsetMs = dx * msPerPx
+
+              // Snap to day boundaries
+              const dayMs = 86400000
+              const snappedOffsetMs = Math.round(offsetMs / dayMs) * dayMs
+              const newEnd = new Date(goal._origEndDate.getTime() + snappedOffsetMs)
+
+              if (newEnd > goal.startDate) {
+                goal.endDate = newEnd
+                d3.select(this).attr("x", xScale(goal.endDate) - 6)
+
+                // Calculate days changed
+                const daysChanged = Math.round(snappedOffsetMs / dayMs)
+
+                // Update tooltip
+                resizeTooltip
+                  .html(self.formatResizeTooltip(goal.endDate, daysChanged))
+                  .style("left", `${event.sourceEvent.offsetX + 20}px`)
+                  .style("top", `${event.sourceEvent.offsetY - 40}px`)
+              }
+            })
+            .on("end", function() {
+              d3.select(this)
+                .style("fill", "rgba(255,255,255,0.3)")
+                .style("width", "8px")
+
+              resizeTooltip.classed("hidden", true)
+
+              if (goal.endDate.getTime() !== goal._origEndDate.getTime()) {
+                self.updateGoalDates(goal.id, goal.startDate, goal.endDate)
+              }
+            })
+          )
+      }
+
+      // Drag to move entire block horizontally - only in edit mode
+      if (this.editModeValue) {
+        // Create drag tooltip element (hidden initially)
+        const dragTooltip = d3.select(this.element)
+          .append("div")
+          .attr("class", "drag-tooltip absolute hidden bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-xl pointer-events-none z-50 border border-gray-700")
+          .style("transition", "opacity 0.1s")
+
+        blockGroup.call(d3.drag()
+          .filter(function(event) {
+            return !event.target.classList.contains("resize-handle")
+          })
           .on("start", function(event) {
-            goal._resizeStartX = event.x
+            goal._dragStartX = event.x
+            goal._origStartDate = goal.startDate
             goal._origEndDate = goal.endDate
-            d3.select(this).style("fill", "rgba(255,255,255,0.3)")
+
+            // Determine if goal has past activity that locks the start
+            goal._hasSessionHistory = goal.has_sessions && goal.earliest_session_date
+            if (goal._hasSessionHistory) {
+              goal._earliestSessionDate = new Date(goal.earliest_session_date + "T00:00:00")
+              goal._latestSessionDate = new Date(goal.latest_session_date + "T00:00:00")
+              // Lock point is the day after latest session (or today, whichever is later)
+              const dayAfterLastSession = new Date(goal._latestSessionDate.getTime() + 86400000)
+              goal._lockDate = new Date(Math.max(dayAfterLastSession.getTime(), today.getTime()))
+              goal._isPostponeMode = goal._lockDate <= goal._origEndDate
+            } else {
+              goal._isPostponeMode = false
+            }
+
+            // Create ghost outline at original position
+            const ghostGroup = svg.insert("g", ":first-child")
+              .attr("class", "drag-ghost")
+              .style("pointer-events", "none")
+
+            ghostGroup.append("path")
+              .attr("d", pathD)
+              .style("fill", "none")
+              .style("stroke", goal.color)
+              .style("stroke-width", 2)
+              .style("stroke-dasharray", "6,4")
+              .style("opacity", 0.5)
+
+            goal._ghostGroup = ghostGroup
+
+            // If in postpone mode, highlight the locked portion
+            if (goal._isPostponeMode) {
+              goal._lockedGhost = svg.insert("g", ":first-child")
+                .attr("class", "locked-ghost")
+                .style("pointer-events", "none")
+
+              // Draw locked indicator over past portion
+              const lockedStart = xScale(goal._origStartDate)
+              const lockedEnd = xScale(goal._lockDate)
+              const lockedWidth = lockedEnd - lockedStart
+
+              if (lockedWidth > 0) {
+                goal._lockedGhost
+                  .append("rect")
+                  .attr("x", lockedStart)
+                  .attr("y", 0)
+                  .attr("width", lockedWidth)
+                  .attr("height", chartHeight)
+                  .style("fill", "rgba(34, 197, 94, 0.1)")
+                  .style("stroke", "#22c55e")
+                  .style("stroke-width", 1)
+                  .style("stroke-dasharray", "4,4")
+
+                goal._lockedGhost
+                  .append("text")
+                  .attr("x", lockedStart + lockedWidth / 2)
+                  .attr("y", 12)
+                  .attr("text-anchor", "middle")
+                  .style("fill", "#22c55e")
+                  .style("font-size", "10px")
+                  .style("font-weight", "600")
+                  .text("📌 Locked history")
+              }
+            }
+
+            // Enhance dragging block appearance
+            d3.select(this)
+              .raise()
+              .style("filter", "drop-shadow(0 4px 12px rgba(0,0,0,0.3))")
+              .style("transform", "scale(1.02)")
+              .style("transform-origin", "center")
+
+            d3.select(this).selectAll(".block-fill")
+              .style("opacity", 1)
+              .style("stroke", "#fff")
+              .style("stroke-width", 2)
+
+            // Show drag tooltip
+            const mode = goal._isPostponeMode ? "postpone" : "move"
+            dragTooltip
+              .classed("hidden", false)
+              .html(self.formatDragTooltip(goal._origStartDate, goal._origEndDate, 0, null, mode))
           })
           .on("drag", function(event) {
-            const dx = event.x - goal._resizeStartX
-            const newEnd = new Date(goal._origEndDate.getTime() + dx / width * (endDate - startDate))
-            if (newEnd > goal.startDate) {
-              goal.endDate = newEnd
-              d3.select(this).attr("x", xScale(goal.endDate) - 5)
+            const dx = event.x - goal._dragStartX
+            const msPerPx = (endDate - startDate) / width
+            const offsetMs = dx * msPerPx
+
+            // Snap to day boundaries
+            const dayMs = 86400000
+            const snappedOffsetMs = Math.round(offsetMs / dayMs) * dayMs
+            const daysShifted = Math.round(snappedOffsetMs / dayMs)
+
+            if (goal._isPostponeMode) {
+              // Postpone mode: start stays anchored, only end moves
+              // Calculate new future start (where remaining work will begin)
+              const origDuration = goal._origEndDate.getTime() - goal._lockDate.getTime()
+              goal._newFutureStart = new Date(goal._lockDate.getTime() + snappedOffsetMs)
+              goal.endDate = new Date(goal._newFutureStart.getTime() + origDuration)
+              // Start date stays at original (anchored to history)
+              goal.startDate = goal._origStartDate
+            } else {
+              // Move mode: shift both start and end
+              goal.startDate = new Date(goal._origStartDate.getTime() + snappedOffsetMs)
+              goal.endDate = new Date(goal._origEndDate.getTime() + snappedOffsetMs)
             }
+
+            // Update drag tooltip
+            const mode = goal._isPostponeMode ? "postpone" : "move"
+            dragTooltip
+              .html(self.formatDragTooltip(goal.startDate, goal.endDate, daysShifted, null, mode, goal._newFutureStart))
+              .style("left", `${event.sourceEvent.offsetX + 20}px`)
+              .style("top", `${event.sourceEvent.offsetY - 60}px`)
+
+            // Visual shift - in postpone mode, only shift future elements
+            const shift = goal._isPostponeMode
+              ? xScale(goal._newFutureStart) - xScale(goal._lockDate)
+              : xScale(goal.startDate) - xScale(goal._origStartDate)
+
+            d3.select(this).selectAll("rect").each(function() {
+              const el = d3.select(this)
+              const origX = parseFloat(el.attr("data-orig-x") || el.attr("x"))
+              if (!el.attr("data-orig-x")) el.attr("data-orig-x", el.attr("x"))
+              el.attr("x", origX + shift)
+            })
+            d3.select(this).selectAll("text").each(function() {
+              const el = d3.select(this)
+              const origX = parseFloat(el.attr("data-orig-x") || el.attr("x"))
+              if (!el.attr("data-orig-x")) el.attr("data-orig-x", el.attr("x"))
+              el.attr("x", origX + shift)
+            })
+            d3.select(this).selectAll("path").each(function() {
+              const el = d3.select(this)
+              if (!el.attr("data-orig-transform")) el.attr("data-orig-transform", el.attr("transform") || "")
+              el.attr("transform", `translate(${shift}, 0)`)
+            })
           })
           .on("end", function() {
-            d3.select(this).style("fill", "transparent")
-            if (goal.endDate !== goal._origEndDate) {
-              self.updateGoalDates(goal.id, goal.startDate, goal.endDate)
+            const blockEl = d3.select(this)
+
+            // Remove ghost outlines
+            if (goal._ghostGroup) {
+              goal._ghostGroup.remove()
+              goal._ghostGroup = null
+            }
+            if (goal._lockedGhost) {
+              goal._lockedGhost.remove()
+              goal._lockedGhost = null
+            }
+
+            // Hide drag tooltip
+            dragTooltip.classed("hidden", true)
+
+            // Reset visual enhancements
+            blockEl
+              .style("filter", null)
+              .style("transform", null)
+
+            blockEl.selectAll(".block-fill")
+              .style("opacity", 0.85)
+              .style("stroke", null)
+              .style("stroke-width", null)
+
+            // Check for date changes
+            const hasDateChange = goal.endDate.getTime() !== goal._origEndDate.getTime() ||
+                                  goal.startDate.getTime() !== goal._origStartDate.getTime()
+
+            if (hasDateChange) {
+              // In postpone mode, send the new future start to the API
+              if (goal._isPostponeMode && goal._newFutureStart) {
+                self.updateGoalDates(goal.id, goal._newFutureStart, goal.endDate)
+              } else {
+                self.updateGoalDates(goal.id, goal.startDate, goal.endDate)
+              }
             }
           })
         )
-
-      // Drag to move entire block horizontally
-      blockGroup.call(d3.drag()
-        .filter(function(event) {
-          return !event.target.classList.contains("resize-handle")
-        })
-        .on("start", function(event) {
-          goal._dragStartX = event.x
-          goal._origStartDate = goal.startDate
-          goal._origEndDate = goal.endDate
-          d3.select(this).raise().style("opacity", 0.7)
-        })
-        .on("drag", function(event) {
-          const dx = event.x - goal._dragStartX
-          const msPerPx = (endDate - startDate) / width
-          const offsetMs = dx * msPerPx
-          goal.startDate = new Date(goal._origStartDate.getTime() + offsetMs)
-          goal.endDate = new Date(goal._origEndDate.getTime() + offsetMs)
-
-          // Shift all rects in this group horizontally
-          const shift = xScale(goal.startDate) - xScale(goal._origStartDate)
-          d3.select(this).selectAll("rect").each(function() {
-            const el = d3.select(this)
-            const origX = parseFloat(el.attr("data-orig-x") || el.attr("x"))
-            if (!el.attr("data-orig-x")) el.attr("data-orig-x", el.attr("x"))
-            el.attr("x", origX + shift)
-          })
-          d3.select(this).selectAll("text").each(function() {
-            const el = d3.select(this)
-            const origX = parseFloat(el.attr("data-orig-x") || el.attr("x"))
-            if (!el.attr("data-orig-x")) el.attr("data-orig-x", el.attr("x"))
-            el.attr("x", origX + shift)
-          })
-        })
-        .on("end", function() {
-          d3.select(this).style("opacity", 1)
-          if (goal.startDate.getTime() !== goal._origStartDate.getTime()) {
-            self.updateGoalDates(goal.id, goal.startDate, goal.endDate)
-          }
-        })
-      )
+      }
 
       // Hover effects
       blockGroup.on("mouseenter", function(event) {
@@ -583,18 +983,33 @@ export default class extends Controller {
           daysLine = `${goal.duration_days} day duration${suffix}`
         }
 
+        // Calculate total actual reading time
+        let actualTimeInfo = ""
+        if (goal.actual_minutes_by_date && Object.keys(goal.actual_minutes_by_date).length > 0) {
+          const totalActualMinutes = Object.values(goal.actual_minutes_by_date).reduce((sum, m) => sum + m, 0)
+          const daysWithReading = Object.keys(goal.actual_minutes_by_date).length
+          const avgPerDay = Math.round(totalActualMinutes / daysWithReading)
+          actualTimeInfo = `
+            <div class="mt-1 pt-1 border-t border-gray-700">
+              <div><span class="text-blue-400">Actual read:</span> ${totalActualMinutes}m over ${daysWithReading} days</div>
+              <div><span class="text-blue-400">Avg actual:</span> ${avgPerDay}m/day</div>
+            </div>
+          `
+        }
+
         tooltip
           .html(`
             <div class="font-semibold mb-1">${goal.title}</div>
             <div class="text-gray-300 text-xs">${goal.author || "Unknown author"}</div>
             <div class="mt-2 space-y-1 text-xs">
-              <div><span class="text-gray-400">Minutes/day:</span> ${goal.minutes_per_day}</div>
+              <div><span class="text-gray-400">Planned:</span> ${goal.minutes_per_day}m/day</div>
               <div>${daysLine}</div>
               <div><span class="text-gray-400">Pages:</span> ${goal.total_pages}</div>
               <div><span class="text-gray-400">Progress:</span> ${goal.progress}%</div>
               <div><span class="text-gray-400">Pages/day:</span> ${goal.pages_per_day}</div>
               <div><span class="text-gray-400">Est. remaining:</span> ${(goal.estimated_hours || 0).toFixed(1)}h</div>
               <div>${dataSource}</div>
+              ${actualTimeInfo}
             </div>
           `)
           .classed("hidden", false)
@@ -678,6 +1093,79 @@ export default class extends Controller {
       console.error("Error updating goal:", error)
       this.loadData()
     }
+  }
+
+  formatDragTooltip(startDate, endDate, daysShifted, sessionInfo = null, mode = "move", newFutureStart = null) {
+    const formatDate = d3.timeFormat("%b %d")
+    const startStr = formatDate(startDate)
+    const endStr = formatDate(endDate)
+
+    if (mode === "postpone") {
+      // Postpone mode - show different UI
+      let shiftText = ""
+      if (daysShifted > 0) {
+        shiftText = `<div class="text-amber-400 font-medium">⏸ Postponing ${daysShifted} day${daysShifted !== 1 ? "s" : ""}</div>`
+      } else if (daysShifted < 0) {
+        shiftText = `<div class="text-cyan-400 font-medium">⏩ Moving up ${Math.abs(daysShifted)} day${Math.abs(daysShifted) !== 1 ? "s" : ""}</div>`
+      } else {
+        shiftText = `<div class="text-gray-400">No change</div>`
+      }
+
+      const futureStartStr = newFutureStart ? formatDate(newFutureStart) : formatDate(startDate)
+
+      return `
+        <div class="text-xs space-y-1">
+          <div class="font-semibold text-white">Postponing remaining work:</div>
+          <div class="mt-1 pt-1 border-t border-green-500/30">
+            <div class="text-green-400 text-[10px]">📌 History preserved</div>
+          </div>
+          <div><span class="text-gray-400">Resume on:</span> ${futureStartStr}</div>
+          <div><span class="text-gray-400">Finish by:</span> ${endStr}</div>
+          ${shiftText}
+        </div>
+      `
+    }
+
+    // Move mode - original behavior
+    let shiftText = ""
+    if (daysShifted > 0) {
+      shiftText = `<div class="text-amber-400 font-medium">→ ${daysShifted} day${daysShifted !== 1 ? "s" : ""} later</div>`
+    } else if (daysShifted < 0) {
+      shiftText = `<div class="text-cyan-400 font-medium">← ${Math.abs(daysShifted)} day${Math.abs(daysShifted) !== 1 ? "s" : ""} earlier</div>`
+    } else {
+      shiftText = `<div class="text-gray-400">No change</div>`
+    }
+
+    return `
+      <div class="text-xs space-y-1">
+        <div class="font-semibold text-white">Moving to:</div>
+        <div><span class="text-gray-400">Start:</span> ${startStr}</div>
+        <div><span class="text-gray-400">End:</span> ${endStr}</div>
+        ${shiftText}
+      </div>
+    `
+  }
+
+  formatResizeTooltip(endDate, daysChanged) {
+    const formatDate = d3.timeFormat("%b %d")
+    const endStr = formatDate(endDate)
+
+    let changeText = ""
+    if (daysChanged > 0) {
+      changeText = `<div class="text-amber-400 font-medium">+${daysChanged} day${daysChanged !== 1 ? "s" : ""}</div>`
+    } else if (daysChanged < 0) {
+      changeText = `<div class="text-cyan-400 font-medium">${daysChanged} day${Math.abs(daysChanged) !== 1 ? "s" : ""}</div>`
+    } else {
+      changeText = `<div class="text-gray-400">No change</div>`
+    }
+
+    return `
+      <div class="text-xs space-y-1">
+        <div class="font-semibold text-white">New end date:</div>
+        <div>${endStr}</div>
+        ${changeText}
+      </div>
+    `
   }
 
   debounce(func, wait) {

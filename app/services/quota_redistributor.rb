@@ -1,7 +1,8 @@
 class QuotaRedistributor
-  def initialize(reading_goal)
+  def initialize(reading_goal, from_date: Date.current)
     @goal = reading_goal
     @book = reading_goal.book
+    @from_date = from_date
   end
 
   def redistribute!
@@ -12,18 +13,18 @@ class QuotaRedistributor
   private
 
   def mark_past_incomplete_as_missed!
-    @goal.daily_quotas.past.incomplete.find_each do |quota|
+    # Mark quotas before from_date as missed if incomplete
+    @goal.daily_quotas.where("date < ?", @from_date).incomplete.find_each do |quota|
       quota.update!(status: :missed)
     end
   end
 
   def redistribute_remaining_pages!
-    # Calculate pages still needed
-    completed_pages = @goal.daily_quotas.sum(:actual_pages)
+    # Calculate pages still needed based on current book progress
     pages_remaining = @book.total_pages - @book.current_page
 
-    # Get future quotas (including today)
-    future_quotas = @goal.daily_quotas.where("date >= ?", Date.current).order(:date)
+    # Get quotas from the specified date onwards
+    future_quotas = @goal.daily_quotas.where("date >= ?", @from_date).order(:date)
 
     return if future_quotas.empty? || pages_remaining <= 0
 
