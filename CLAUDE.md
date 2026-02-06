@@ -84,3 +84,9 @@ Uses RSpec with FactoryBot. Factories are in `spec/factories/`. Run specific mod
 ```bash
 bundle exec rspec spec/models/
 ```
+
+## Git Workflow
+
+- **Commit early and often** - Create a commit as soon as a feature or fix is working. Don't accumulate large uncommitted changes.
+- **Group by feature** - When multiple features are pending, create separate commits for each logical change.
+- **Descriptive messages** - Summarize what the change does, not how.
