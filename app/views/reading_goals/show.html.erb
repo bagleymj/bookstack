@@ -17,7 +17,7 @@
           <%= button_to "Catch Up", catch_up_reading_goal_path(@reading_goal), method: :post, data: { turbo_confirm: "This will mark all missed quotas as completed and advance your book position. Continue?" }, class: "inline-flex items-center rounded-md bg-amber-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-500" %>
         <% end %>
         <%= link_to "Edit", edit_reading_goal_path(@reading_goal), class: "inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50" %>
-        <%= button_to "Redistribute", redistribute_reading_goal_path(@reading_goal), method: :post, class: "inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50" %>
+        <%= link_to "Redistribute", redistribute_reading_goal_path(@reading_goal), class: "inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50" %>
         <%= button_to "Mark Complete", mark_completed_reading_goal_path(@reading_goal), method: :post, class: "inline-flex items-center rounded-md bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-500" %>
       <% end %>
     </div>

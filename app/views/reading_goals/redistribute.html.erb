@@ -1,0 +1,109 @@
+<div class="mx-auto max-w-2xl">
+  <div class="md:flex md:items-center md:justify-between">
+    <div class="min-w-0 flex-1">
+      <h2 class="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight">
+        Redistribute Quotas
+      </h2>
+      <p class="mt-1 text-sm text-gray-500">
+        <%= @reading_goal.book.title %>
+      </p>
+    </div>
+  </div>
+
+  <div class="mt-8 rounded-lg bg-white shadow">
+    <div class="px-4 py-5 sm:p-6">
+      <div class="mb-6 rounded-md bg-blue-50 p-4">
+        <div class="flex">
+          <div class="flex-shrink-0">
+            <svg class="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clip-rule="evenodd" />
+            </svg>
+          </div>
+          <div class="ml-3">
+            <p class="text-sm text-blue-700">
+              Redistribution will evenly spread the remaining pages across the days from your start date until the goal's target date (<%= @reading_goal.target_completion_date.strftime("%B %d, %Y") %>).
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <%= form_with url: redistribute_reading_goal_path(@reading_goal), method: :post, class: "space-y-6" do |form| %>
+        <div>
+          <label for="current_page" class="block text-sm font-medium text-gray-700">
+            What page are you on?
+          </label>
+          <div class="mt-2 flex items-center gap-3">
+            <%= form.number_field :current_page,
+                value: @actual_current_page,
+                min: @reading_goal.book.first_page,
+                max: @reading_goal.book.last_page,
+                class: "block w-32 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-lg" %>
+            <span class="text-sm text-gray-500">
+              (pages <%= @reading_goal.book.first_page %> - <%= @reading_goal.book.last_page %>)
+            </span>
+          </div>
+        </div>
+
+        <div>
+          <label for="start_date" class="block text-sm font-medium text-gray-700">
+            Redistribute from
+          </label>
+          <p class="mt-1 text-xs text-gray-500">
+            Quotas before this date will be marked as missed. Remaining pages will be spread from this date onwards.
+          </p>
+          <div class="mt-2">
+            <%= form.date_field :start_date,
+                value: @start_date,
+                min: @min_date,
+                max: @max_date,
+                class: "block rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500" %>
+          </div>
+        </div>
+
+        <!-- Preview calculation -->
+        <div class="rounded-md bg-gray-50 p-4" data-controller="redistribute-preview"
+             data-redistribute-preview-first-page-value="<%= @reading_goal.book.first_page %>"
+             data-redistribute-preview-last-page-value="<%= @reading_goal.book.last_page %>"
+             data-redistribute-preview-target-date-value="<%= @reading_goal.target_completion_date %>"
+             data-redistribute-preview-include-weekends-value="<%= @reading_goal.include_weekends? %>">
+          <h4 class="text-sm font-medium text-gray-900 mb-2">Preview</h4>
+          <dl class="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <dt class="text-gray-500">Pages remaining</dt>
+              <dd class="font-medium text-gray-900" data-redistribute-preview-target="pagesRemaining">
+                <%= @reading_goal.book.last_page - @actual_current_page %>
+              </dd>
+            </div>
+            <div>
+              <dt class="text-gray-500">Days to distribute</dt>
+              <dd class="font-medium text-gray-900" data-redistribute-preview-target="daysRemaining">
+                <%= @reading_goal.reading_days_remaining %>
+              </dd>
+            </div>
+            <div>
+              <dt class="text-gray-500">New pages/day</dt>
+              <dd class="font-medium text-gray-900" data-redistribute-preview-target="pagesPerDay">
+                <% days = @reading_goal.reading_days_remaining %>
+                <% pages = @reading_goal.book.last_page - @actual_current_page %>
+                <%= days > 0 ? (pages.to_f / days).ceil : 0 %>
+              </dd>
+            </div>
+            <div>
+              <dt class="text-gray-500">Est. minutes/day</dt>
+              <dd class="font-medium text-gray-900" data-redistribute-preview-target="minutesPerDay">
+                <% days = @reading_goal.reading_days_remaining %>
+                <% remaining_minutes = @reading_goal.book.effective_reading_time_minutes %>
+                <%= days > 0 ? (remaining_minutes.to_f / days).ceil : 0 %>
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="flex justify-end gap-3 pt-4 border-t border-gray-200">
+          <%= link_to "Cancel", @reading_goal, class: "rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50" %>
+          <%= form.submit "Redistribute Quotas", class: "rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 cursor-pointer" %>
+        </div>
+      <% end %>
+    </div>
+  </div>
+</div>
