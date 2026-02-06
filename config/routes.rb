@@ -44,6 +44,7 @@ Rails.application.routes.draw do
           end
         end
         resources :active_books, only: [:index]
+        resources :book_search, only: [:index]
       end
     end
   end

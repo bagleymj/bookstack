@@ -1,3 +1,39 @@
+<!-- Book Search -->
+<% if book.new_record? %>
+  <div data-controller="book-search" data-book-search-url-value="<%= api_v1_book_search_index_path %>" class="mb-8">
+    <div class="relative">
+      <label class="block text-sm font-medium text-gray-700 mb-1">Search for a book</label>
+      <div class="relative">
+        <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+          <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+        </div>
+        <input type="text"
+               data-book-search-target="input"
+               data-action="input->book-search#search"
+               class="block w-full rounded-lg border-gray-300 pl-10 pr-4 py-3 text-base shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+               placeholder="Search by title or author...">
+      </div>
+
+      <!-- Search Results Dropdown -->
+      <div data-book-search-target="results"
+           class="hidden absolute z-20 mt-1 w-full bg-white rounded-lg shadow-lg border border-gray-200 max-h-96 overflow-y-auto">
+      </div>
+    </div>
+
+    <!-- Divider -->
+    <div class="relative mt-6">
+      <div class="absolute inset-0 flex items-center">
+        <div class="w-full border-t border-gray-200"></div>
+      </div>
+      <div class="relative flex justify-center text-sm">
+        <span class="bg-white px-4 text-gray-500">or enter details manually</span>
+      </div>
+    </div>
+  </div>
+<% end %>
+
 <%= form_with(model: book, class: "space-y-6") do |form| %>
   <% if book.errors.any? %>
     <div class="rounded-md bg-red-50 p-4">
