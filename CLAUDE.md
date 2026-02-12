@@ -85,6 +85,35 @@ Uses RSpec with FactoryBot. Factories are in `spec/factories/`. Run specific mod
 bundle exec rspec spec/models/
 ```
 
+## Database Safety
+
+**CRITICAL: Never run destructive database commands without explicit user confirmation AND a backup.**
+
+Destructive commands that require confirmation:
+- `db:reset`, `db:drop`, `db:schema:load`
+- Any raw SQL with `DELETE`, `TRUNCATE`, or `DROP`
+- `destroy_all`, `delete_all` on models
+- Any migration that drops tables or columns
+
+Before running ANY of the above:
+1. Run `bin/db_backup` to create a backup
+2. Explicitly ask the user for confirmation
+3. Only proceed after receiving explicit "yes"
+
+Backup and restore commands:
+```bash
+# Create a backup
+bin/db_backup
+
+# List available backups
+bin/db_restore
+
+# Restore from a backup
+bin/db_restore bookstack_20260206_120000.sql
+```
+
+Backups are stored in `.postgres/backups/` (last 10 kept automatically).
+
 ## Git Workflow
 
 - **Commit early and often** - Create a commit as soon as a feature or fix is working. Don't accumulate large uncommitted changes.

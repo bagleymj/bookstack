@@ -42,3 +42,4 @@ result
 
 /app/assets/builds/*
 !/app/assets/builds/.keep
+.postgres/backups/
