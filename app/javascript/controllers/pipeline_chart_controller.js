@@ -581,24 +581,6 @@ export default class extends Controller {
             .attr("height", progressBottom - progressTop)
             .style("fill", d3.color(goal.color).darker(0.3))
             .style("opacity", 0.95)
-
-          // If exceeded planned, show overflow
-          if (todaySegment.todayProgress > todaySegment.minutes_per_day) {
-            const overflowHeight = Math.min(
-              (todaySegment.todayProgress - todaySegment.minutes_per_day),
-              20 // Cap visual overflow
-            )
-            const overflowTop = yScale(todaySegment.yOffset + todaySegment.minutes_per_day + overflowHeight)
-
-            blockGroup.append("rect")
-              .attr("class", "block-fill block-today-overflow")
-              .attr("x", xScale(todaySegment.startDate))
-              .attr("y", overflowTop)
-              .attr("width", xScale(todayColumnEnd) - xScale(todaySegment.startDate))
-              .attr("height", yScale(todaySegment.yOffset + todaySegment.minutes_per_day) - overflowTop)
-              .style("fill", "#22c55e")
-              .style("opacity", 0.9)
-          }
         }
       }
 
