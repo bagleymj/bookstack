@@ -99,8 +99,9 @@ export default class extends Controller {
       dateSet.add(g.endDate.getTime())
     })
 
-    // Add today as a key transition (past vs future boundary)
+    // Add today and tomorrow as transitions so today is exactly one day
     dateSet.add(todayTime)
+    dateSet.add(todayTime + dayMs)
 
     // Add daily boundaries for PAST days (so each past day is its own segment)
     // This allows us to show actual reading time per day
