@@ -267,6 +267,7 @@ class ReadingGoal < ApplicationRecord
       uses_actual_data: book.actual_wpm.present?,
       actual_minutes_by_date: actual_reading_minutes_by_date,
       today_actual_minutes: today_reading_minutes,
+      today_remaining_minutes: today_remaining_estimate,
       has_sessions: session_boundaries[:has_sessions],
       earliest_session_date: session_boundaries[:earliest]&.to_s,
       latest_session_date: session_boundaries[:latest]&.to_s,
@@ -298,6 +299,13 @@ class ReadingGoal < ApplicationRecord
                    .where(started_at: Date.current.beginning_of_day..Date.current.end_of_day)
 
     sessions.sum { |s| s.effective_duration_minutes }
+  end
+
+  # Returns estimated minutes remaining for today's quota
+  def today_remaining_estimate
+    quota = today_quota
+    return 0 unless quota
+    quota.estimated_minutes_remaining
   end
 
   # Returns hash of date string -> minutes read for past days within the goal period

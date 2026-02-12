@@ -164,9 +164,10 @@ export default class extends Controller {
           // Use actual reading time for past days
           minutes = getActualMinutes(g, dateStr)
         } else if (isToday) {
-          // Today: show planned height, but track actual progress
-          minutes = g.minutes_per_day
+          // Today: height = actual reading time + estimated remaining time
           todayProgress = g.today_actual_minutes || 0
+          const remaining = g.today_remaining_minutes || 0
+          minutes = todayProgress + remaining
         } else {
           // Use planned time for future days
           minutes = g.minutes_per_day
