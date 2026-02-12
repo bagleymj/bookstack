@@ -33,7 +33,7 @@ class Book < ApplicationRecord
   validates :first_page, presence: true, numericality: { greater_than: 0 }
   validates :last_page, presence: true, numericality: { greater_than: 0 }
   validates :words_per_page, numericality: { greater_than: 0 }, allow_nil: true
-  validates :current_page, numericality: { greater_than_or_equal_to: 0 }
+  validates :current_page, numericality: { greater_than: 0 }
   validates :difficulty, inclusion: { in: difficulties.keys }
   validate :last_page_after_first_page
 
@@ -58,7 +58,7 @@ class Book < ApplicationRecord
   end
 
   def remaining_pages
-    total_pages - current_page
+    last_page - current_page
   end
 
   def remaining_words
@@ -66,14 +66,14 @@ class Book < ApplicationRecord
   end
 
   def progress_percentage
-    return 0 if total_pages.zero?
-    ((current_page.to_f / total_pages) * 100).round(1)
+    range = last_page - first_page
+    return 0 if range.zero?
+    (((current_page - first_page).to_f / range) * 100).round(1)
   end
 
-  # Returns the actual book page number (accounting for first_page offset)
-  # current_page = pages read, so actual position = first_page + pages_read
+  # current_page IS the actual page number - no conversion needed
   def actual_current_page
-    first_page + current_page
+    current_page
   end
 
   def effective_words_per_page
@@ -125,18 +125,18 @@ class Book < ApplicationRecord
   end
 
   def mark_completed!
-    update!(status: :completed, current_page: total_pages)
+    update!(status: :completed, current_page: last_page)
   end
 
   def update_progress!(page_number)
-    update!(current_page: [page_number, total_pages].min)
-    mark_completed! if current_page >= total_pages
+    update!(current_page: [page_number, last_page].min)
+    mark_completed! if current_page >= last_page
   end
 
   private
 
   def set_defaults
-    self.current_page ||= 0
+    self.current_page ||= first_page || 1
     self.difficulty ||= :average
     self.words_per_page ||= user&.default_words_per_page || 250
     self.first_page ||= 1

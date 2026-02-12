@@ -33,11 +33,7 @@ class ReadingSessionsController < ApplicationController
     @reading_session.started_at = Time.current - duration.seconds if duration > 0
     @reading_session.started_at ||= Time.current
 
-    # Convert end_page from actual page number to relative pages
-    if params.dig(:reading_session, :end_page).present?
-      actual_end_page = params[:reading_session][:end_page].to_i
-      @reading_session.end_page = actual_end_page - @book.first_page
-    end
+    # end_page is stored as the actual page number - no conversion needed
 
     if @reading_session.save
       @book.start_reading! if @book.unread?

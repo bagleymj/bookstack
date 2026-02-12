@@ -53,11 +53,9 @@ class BooksController < ApplicationController
   end
 
   def update_progress
-    actual_page = params[:page].to_i
-    # Convert actual book page to pages read (relative to first_page)
-    pages_read = actual_page - @book.first_page
-    @book.update_progress!(pages_read)
-    redirect_to @book, notice: "Progress updated to page #{actual_page}."
+    page = params[:page].to_i
+    @book.update_progress!(page)
+    redirect_to @book, notice: "Progress updated to page #{page}."
   end
 
   private

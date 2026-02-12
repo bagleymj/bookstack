@@ -80,12 +80,9 @@ class ReadingGoalsController < ApplicationController
       actual_page = params[:current_page].to_i
       start_date = Date.parse(params[:start_date]) rescue Date.current
 
-      # Convert actual page number to relative pages read
-      pages_read = actual_page - @reading_goal.book.first_page
-
       # Update book progress if different
-      if pages_read != @reading_goal.book.current_page
-        @reading_goal.book.update!(current_page: pages_read)
+      if actual_page != @reading_goal.book.current_page
+        @reading_goal.book.update!(current_page: actual_page)
       end
 
       # Redistribute from the specified date

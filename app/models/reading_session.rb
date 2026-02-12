@@ -45,14 +45,13 @@ class ReadingSession < ApplicationRecord
     [end_page - start_page, 0].max
   end
 
-  # Returns actual book page numbers (accounting for first_page offset)
+  # Pages are stored as actual page numbers - no conversion needed
   def actual_start_page
-    book.first_page + start_page
+    start_page
   end
 
   def actual_end_page
-    return nil unless end_page
-    book.first_page + end_page
+    end_page
   end
 
   # Returns the duration to use for display/calculations
