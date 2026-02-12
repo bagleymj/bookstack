@@ -205,7 +205,8 @@ export default class extends Controller {
     })
 
     // Merge adjacent segments with same properties (reduces path complexity)
-    // Only merge if: same yOffset, same minutes, same isPast status, contiguous
+    // Only merge if: same yOffset, same minutes, same isPast/isToday status, contiguous
+    // Today is never merged with past or future segments
     segmentsByGoal.forEach((segments, goalId) => {
       if (segments.length <= 1) return
       const merged = [segments[0]]
@@ -215,6 +216,7 @@ export default class extends Controller {
         if (curr.yOffset === prev.yOffset &&
             curr.minutes_per_day === prev.minutes_per_day &&
             curr.isPast === prev.isPast &&
+            curr.isToday === prev.isToday &&
             curr.startDate.getTime() === prev.endDate.getTime()) {
           prev.endDate = curr.endDate
         } else {
