@@ -56,14 +56,19 @@ class ReadingGoal < ApplicationRecord
   # Calculate minutes per day based on actual daily quotas
   # Uses average of remaining quotas' target pages converted to time
   def calculated_minutes_per_day
-    # Get remaining quotas (today and future, not missed)
-    remaining_quotas = daily_quotas.where("date >= ?", Date.current)
-                                   .where.not(status: :missed)
+    # For completed goals, use all quotas (historical data) since there are
+    # no remaining pages or future quotas to calculate from
+    quotas = if completed?
+              daily_quotas.where.not(status: :missed)
+            else
+              daily_quotas.where("date >= ?", Date.current)
+                          .where.not(status: :missed)
+            end
 
-    return fallback_minutes_per_day if remaining_quotas.empty?
+    return fallback_minutes_per_day if quotas.empty?
 
-    # Calculate average target pages across remaining days
-    avg_pages = remaining_quotas.average(:target_pages).to_f
+    # Calculate average target pages across relevant days
+    avg_pages = quotas.average(:target_pages).to_f
     return fallback_minutes_per_day if avg_pages.zero?
 
     # Convert pages to minutes using book's effective WPM
@@ -368,7 +373,18 @@ class ReadingGoal < ApplicationRecord
   def fallback_minutes_per_day
     goal_duration = goal_reading_days
     return 0 if goal_duration.zero?
-    (book.effective_reading_time_minutes.to_f / goal_duration).ceil
+
+    # For completed books, effective_reading_time_minutes is 0 (no remaining pages),
+    # so use total words to compute the reading time the goal originally represented
+    reading_minutes = if completed? && book.remaining_pages.zero?
+                        wpm = book.actual_wpm || (user.effective_reading_speed * book.difficulty_modifier)
+                        return 0 if wpm.zero?
+                        book.total_words.to_f / wpm
+                      else
+                        book.effective_reading_time_minutes.to_f
+                      end
+
+    (reading_minutes / goal_duration).ceil
   end
 
   def generate_daily_quotas
