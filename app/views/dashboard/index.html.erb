@@ -231,7 +231,8 @@
                     <%
                       # Calculate progress segments
                       today_pages = quota.actual_pages
-                      before_today_pages = book.current_page - today_pages
+                      pages_read = book.current_page - book.first_page
+                      before_today_pages = pages_read - today_pages
                       before_today_pct = (before_today_pages.to_f / book.total_pages * 100).clamp(0, 100)
                       today_pct = (today_pages.to_f / book.total_pages * 100).clamp(0, 100)
                       target_percentage = ((quota.target_page_number - book.first_page).to_f / book.total_pages * 100).clamp(0, 100)
