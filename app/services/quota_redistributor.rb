@@ -21,7 +21,7 @@ class QuotaRedistributor
 
   def redistribute_remaining_pages!
     # Calculate pages still needed based on current book progress
-    pages_remaining = @book.total_pages - @book.current_page
+    pages_remaining = @book.remaining_pages
 
     # Get quotas from the specified date onwards
     future_quotas = @goal.daily_quotas.where("date >= ?", @from_date).order(:date)
