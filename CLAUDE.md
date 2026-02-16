@@ -116,6 +116,14 @@ Backups are stored in `.postgres/backups/` (last 10 kept automatically).
 
 ## Git Workflow
 
+**CRITICAL: Always use a feature branch. NEVER commit directly to `main`.**
+- Before making ANY changes, create a feature branch: `git checkout -b claude/<short-description>`
+- Do all work on your branch, committing early and often
+- When done, merge to `main`: `git checkout main && git merge claude/<short-description>`
+- Delete the branch after merging: `git branch -d claude/<short-description>`
+
+This applies to ALL changes, even single-file fixes. No exceptions. Other agents may be working in parallel in separate terminals — always assume that is the case, even if you don't see them.
+
 - **Commit early and often** - Create a commit as soon as a feature or fix is working. Don't accumulate large uncommitted changes.
 - **Group by feature** - When multiple features are pending, create separate commits for each logical change.
 - **Descriptive messages** - Summarize what the change does, not how.
@@ -123,12 +131,6 @@ Backups are stored in `.postgres/backups/` (last 10 kept automatically).
 ## Parallel Development
 
 Multiple Claude Code agents may run simultaneously in separate terminals. To avoid conflicts:
-
-**Branch isolation (required):**
-- Before making ANY changes, create a feature branch: `git checkout -b claude/<short-description>`
-- Do all work on your branch, committing early and often
-- When done, merge to `main`: `git checkout main && git merge claude/<short-description>`
-- Delete the branch after merging: `git branch -d claude/<short-description>`
 
 **Shared resources — don't touch if already running:**
 - Do NOT start/stop `bin/dev`, PostgreSQL, or other services if they're already running (check with `lsof -i :3000` and `pg_isready`)
