@@ -117,12 +117,41 @@ Backups are stored in `.postgres/backups/` (last 10 kept automatically).
 ## Git Workflow
 
 **CRITICAL: Always use a feature branch. NEVER commit directly to `main`.**
-- Before making ANY changes, create a feature branch: `git checkout -b claude/<short-description>`
+
+### Worktree-based workflow (preferred — required when launched in a worktree)
+
+Each agent should work in its own **git worktree** so that branch checkouts are fully isolated. The main repo at `~/dev/bookstack` stays on `main`; agent worktrees live as siblings.
+
+**Creating a worktree (run from the main repo):**
+```bash
+git worktree add ../bookstack-<short-description> -b claude/<short-description>
+```
+This creates `~/dev/bookstack-<short-description>/` checked out to `claude/<short-description>`.
+
+**Working in a worktree:**
+- Do all work inside your worktree directory — it is a full working copy
+- Commit early and often on your branch
+- Run tests from within the worktree: `bundle exec rspec`
+
+**Merging and cleanup (run from the main repo):**
+```bash
+cd ~/dev/bookstack
+git merge claude/<short-description>
+git worktree remove ../bookstack-<short-description>
+git branch -d claude/<short-description>
+```
+
+**If you are already inside a worktree**, just work on the branch that's checked out. Do NOT run `git checkout` to switch branches — that defeats the purpose of worktrees.
+
+### Fallback: branch-only workflow (single-agent use)
+
+If you are the only agent and are working directly in the main repo:
+- Create a feature branch: `git checkout -b claude/<short-description>`
 - Do all work on your branch, committing early and often
 - When done, merge to `main`: `git checkout main && git merge claude/<short-description>`
 - Delete the branch after merging: `git branch -d claude/<short-description>`
 
-This applies to ALL changes, even single-file fixes. No exceptions. Other agents may be working in parallel in separate terminals — always assume that is the case, even if you don't see them.
+### Commit discipline
 
 - **Commit early and often** - Create a commit as soon as a feature or fix is working. Don't accumulate large uncommitted changes.
 - **Group by feature** - When multiple features are pending, create separate commits for each logical change.
@@ -130,13 +159,22 @@ This applies to ALL changes, even single-file fixes. No exceptions. Other agents
 
 ## Parallel Development
 
-Multiple Claude Code agents may run simultaneously in separate terminals. To avoid conflicts:
+Multiple Claude Code agents may run simultaneously in separate worktrees. Worktrees eliminate most git conflicts since each agent has its own working directory and branch. However:
 
 **Shared resources — don't touch if already running:**
 - Do NOT start/stop `bin/dev`, PostgreSQL, or other services if they're already running (check with `lsof -i :3000` and `pg_isready`)
 - Do NOT run `db:migrate` without asking the user — another agent may depend on the current schema
 
-**Avoid collisions:**
-- Before starting work, run `git branch` to see what other agents are working on
-- Avoid modifying files that another branch is actively changing
+**Worktree awareness:**
+- Run `git worktree list` to see what other agents are working on
+- Avoid modifying files that another worktree's branch is actively changing
 - If you encounter a merge conflict when merging to `main`, stop and ask the user for help — do not resolve conflicts autonomously
+
+**Useful commands:**
+```bash
+# List all worktrees and their branches
+git worktree list
+
+# Prune stale worktree references
+git worktree prune
+```
