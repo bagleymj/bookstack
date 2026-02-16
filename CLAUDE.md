@@ -116,40 +116,44 @@ Backups are stored in `.postgres/backups/` (last 10 kept automatically).
 
 ## Git Workflow
 
-**CRITICAL: Always use a feature branch. NEVER commit directly to `main`.**
+**CRITICAL: NEVER commit directly to `main`. NEVER run `git checkout` to switch branches.**
 
-### Worktree-based workflow (preferred — required when launched in a worktree)
+### Before you do ANYTHING else
 
-Each agent should work in its own **git worktree** so that branch checkouts are fully isolated. The main repo at `~/dev/bookstack` stays on `main`; agent worktrees live as siblings.
+Run this check first:
+```bash
+git worktree list
+pwd
+git branch --show-current
+```
 
-**Creating a worktree (run from the main repo):**
+- **If you are in a worktree** (your pwd is NOT `~/dev/bookstack`): You're set. Work on whatever branch is checked out. Do NOT switch branches.
+- **If you are in the main repo** (`~/dev/bookstack`) and on `main`: You MUST create a worktree before making any changes. See below.
+- **If you are in the main repo and on a non-main branch**: Create a worktree for that branch and move your work there, OR ask the user for guidance.
+
+### Creating a worktree
+
+Run from the main repo (`~/dev/bookstack`):
 ```bash
 git worktree add ../bookstack-<short-description> -b claude/<short-description>
 ```
-This creates `~/dev/bookstack-<short-description>/` checked out to `claude/<short-description>`.
+This creates `~/dev/bookstack-<short-description>/` checked out to `claude/<short-description>`. **All subsequent work must happen in that directory.**
 
-**Working in a worktree:**
+### Working in a worktree
+
 - Do all work inside your worktree directory — it is a full working copy
 - Commit early and often on your branch
 - Run tests from within the worktree: `bundle exec rspec`
+- Do NOT run `git checkout` — ever. You are on the right branch already.
 
-**Merging and cleanup (run from the main repo):**
+### Merging and cleanup (run from the main repo)
+
 ```bash
 cd ~/dev/bookstack
 git merge claude/<short-description>
 git worktree remove ../bookstack-<short-description>
 git branch -d claude/<short-description>
 ```
-
-**If you are already inside a worktree**, just work on the branch that's checked out. Do NOT run `git checkout` to switch branches — that defeats the purpose of worktrees.
-
-### Fallback: branch-only workflow (single-agent use)
-
-If you are the only agent and are working directly in the main repo:
-- Create a feature branch: `git checkout -b claude/<short-description>`
-- Do all work on your branch, committing early and often
-- When done, merge to `main`: `git checkout main && git merge claude/<short-description>`
-- Delete the branch after merging: `git branch -d claude/<short-description>`
 
 ### Commit discipline
 
