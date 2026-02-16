@@ -126,6 +126,7 @@ class Book < ApplicationRecord
 
   def mark_completed!
     update!(status: :completed, current_page: last_page)
+    reading_goals.active.find_each(&:mark_completed!)
   end
 
   def update_progress!(page_number)

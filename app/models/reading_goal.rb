@@ -56,9 +56,9 @@ class ReadingGoal < ApplicationRecord
   # Calculate minutes per day based on actual daily quotas
   # Uses average of remaining quotas' target pages converted to time
   def calculated_minutes_per_day
-    # For completed goals, use all quotas (historical data) since there are
-    # no remaining pages or future quotas to calculate from
-    quotas = if completed?
+    # For completed goals or books with no remaining pages, use all quotas
+    # (historical data) since there are no future quotas to calculate from
+    quotas = if completed? || book.remaining_pages.zero?
               daily_quotas.where.not(status: :missed)
             else
               daily_quotas.where("date >= ?", Date.current)
@@ -374,9 +374,9 @@ class ReadingGoal < ApplicationRecord
     goal_duration = goal_reading_days
     return 0 if goal_duration.zero?
 
-    # For completed books, effective_reading_time_minutes is 0 (no remaining pages),
+    # For finished books, effective_reading_time_minutes is 0 (no remaining pages),
     # so use total words to compute the reading time the goal originally represented
-    reading_minutes = if completed? && book.remaining_pages.zero?
+    reading_minutes = if book.remaining_pages.zero?
                         wpm = book.actual_wpm || (user.effective_reading_speed * book.difficulty_modifier)
                         return 0 if wpm.zero?
                         book.total_words.to_f / wpm
