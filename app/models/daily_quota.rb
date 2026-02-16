@@ -78,7 +78,7 @@ class DailyQuota < ApplicationRecord
     return 0 if wpm.zero?
 
     words_remaining = remaining * book.effective_words_per_page
-    (words_remaining / wpm).round
+    (words_remaining / wpm).ceil
   end
 
   def record_pages!(pages_read)
