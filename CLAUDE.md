@@ -118,6 +118,8 @@ Backups are stored in `.postgres/backups/` (last 10 kept automatically).
 
 **CRITICAL: NEVER commit directly to `main`. NEVER run `git checkout` to switch branches.**
 
+**Always assume other agents are running in parallel.** Even if you don't see evidence of them, the user may spin up another agent at any time. This is why worktrees are mandatory, not optional — they guarantee your work is isolated regardless of what other agents do.
+
 ### Before you do ANYTHING else
 
 Run this check first:
@@ -128,7 +130,7 @@ git branch --show-current
 ```
 
 - **If you are in a worktree** (your pwd is NOT `~/dev/bookstack`): You're set. Work on whatever branch is checked out. Do NOT switch branches.
-- **If you are in the main repo** (`~/dev/bookstack`) and on `main`: You MUST create a worktree before making any changes. See below.
+- **If you are in the main repo** (`~/dev/bookstack`) and on `main`: You MUST create a worktree before making any changes. No exceptions.
 - **If you are in the main repo and on a non-main branch**: Create a worktree for that branch and move your work there, OR ask the user for guidance.
 
 ### Creating a worktree
@@ -163,7 +165,7 @@ git branch -d claude/<short-description>
 
 ## Parallel Development
 
-Multiple Claude Code agents may run simultaneously in separate worktrees. Worktrees eliminate most git conflicts since each agent has its own working directory and branch. However:
+**Multiple Claude Code agents run simultaneously.** Always assume this is the case — never assume you are the only agent. The user may launch additional agents at any point during your task. Worktrees ensure your work is fully isolated and cannot interfere with (or be interfered by) other agents. However:
 
 **Shared resources — don't touch if already running:**
 - Do NOT start/stop `bin/dev`, PostgreSQL, or other services if they're already running (check with `lsof -i :3000` and `pg_isready`)
