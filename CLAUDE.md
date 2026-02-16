@@ -119,3 +119,22 @@ Backups are stored in `.postgres/backups/` (last 10 kept automatically).
 - **Commit early and often** - Create a commit as soon as a feature or fix is working. Don't accumulate large uncommitted changes.
 - **Group by feature** - When multiple features are pending, create separate commits for each logical change.
 - **Descriptive messages** - Summarize what the change does, not how.
+
+## Parallel Development
+
+Multiple Claude Code agents may run simultaneously in separate terminals. To avoid conflicts:
+
+**Branch isolation (required):**
+- Before making ANY changes, create a feature branch: `git checkout -b claude/<short-description>`
+- Do all work on your branch, committing early and often
+- When done, merge to `main`: `git checkout main && git merge claude/<short-description>`
+- Delete the branch after merging: `git branch -d claude/<short-description>`
+
+**Shared resources — don't touch if already running:**
+- Do NOT start/stop `bin/dev`, PostgreSQL, or other services if they're already running (check with `lsof -i :3000` and `pg_isready`)
+- Do NOT run `db:migrate` without asking the user — another agent may depend on the current schema
+
+**Avoid collisions:**
+- Before starting work, run `git branch` to see what other agents are working on
+- Avoid modifying files that another branch is actively changing
+- If you encounter a merge conflict when merging to `main`, stop and ask the user for help — do not resolve conflicts autonomously
