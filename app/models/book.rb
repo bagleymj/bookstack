@@ -137,7 +137,7 @@ class Book < ApplicationRecord
   private
 
   def set_defaults
-    self.current_page ||= first_page || 1
+    self.current_page = first_page || 1 if current_page.nil? || current_page.zero?
     self.difficulty ||= :average
     self.words_per_page ||= user&.default_words_per_page || 250
     self.first_page ||= 1
