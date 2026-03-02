@@ -13,6 +13,11 @@ class DashboardController < ApplicationController
     @stats = current_user.user_reading_stats
     @unread_books = current_user.books.unread.limit(5)
 
+    # Yearly book counts (based on reading goals targeted for this year)
+    yearly_goals = current_user.reading_goals.where(target_completion_date: Date.current.all_year)
+    @yearly_books_scheduled = yearly_goals.select(:book_id).distinct.count
+    @yearly_books_completed = yearly_goals.where(status: :completed).select(:book_id).distinct.count
+
     # Calculate total reading time remaining for today's quotas
     @today_reading_minutes = @today_quotas.sum(&:estimated_minutes_remaining)
 

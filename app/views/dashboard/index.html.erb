@@ -91,7 +91,7 @@
 
   <!-- Stats -->
   <% if @stats %>
-    <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+    <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
       <div class="rounded-lg bg-white p-4 shadow">
         <dt class="text-sm font-medium text-gray-500">Reading Speed</dt>
         <dd class="mt-1 text-2xl font-semibold text-gray-900"><%= @stats.average_wpm.round %> WPM</dd>
@@ -107,6 +107,14 @@
       <div class="rounded-lg bg-white p-4 shadow">
         <dt class="text-sm font-medium text-gray-500">Time Reading</dt>
         <dd class="mt-1 text-2xl font-semibold text-gray-900"><%= @stats.total_reading_time_formatted %></dd>
+      </div>
+      <div class="rounded-lg bg-white p-4 shadow">
+        <dt class="text-sm font-medium text-gray-500"><%= Date.current.year %> Books Scheduled</dt>
+        <dd class="mt-1 text-2xl font-semibold text-gray-900"><%= @yearly_books_scheduled %></dd>
+      </div>
+      <div class="rounded-lg bg-white p-4 shadow">
+        <dt class="text-sm font-medium text-gray-500"><%= Date.current.year %> Books Completed</dt>
+        <dd class="mt-1 text-2xl font-semibold text-gray-900"><%= @yearly_books_completed %></dd>
       </div>
     </div>
   <% end %>
