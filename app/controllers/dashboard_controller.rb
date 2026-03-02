@@ -18,10 +18,68 @@ class DashboardController < ApplicationController
     @yearly_books_scheduled = yearly_goals.select(:book_id).distinct.count
     @yearly_books_completed = yearly_goals.where(status: :completed).select(:book_id).distinct.count
 
+    # Daily stats
+    today_sessions = current_user.reading_sessions.completed.for_date(Date.current)
+    @pages_today = today_sessions.sum(:pages_read)
+    @time_today_seconds = today_sessions.sum(&:effective_duration_seconds).to_i
+
+    # Weekly stats (Monday-Sunday)
+    week_sessions = current_user.reading_sessions.completed
+                      .where(started_at: Date.current.beginning_of_week(:monday).beginning_of_day..Date.current.end_of_day)
+    @pages_this_week = week_sessions.sum(:pages_read)
+    @time_this_week_seconds = week_sessions.sum(&:effective_duration_seconds).to_i
+
+    # Derived stats
+    if @stats && @stats.total_sessions > 0
+      wpp = current_user.default_words_per_page
+      @pages_per_hour = ((@stats.average_wpm * 60.0) / wpp).round(1)
+      @avg_pages_per_session = (@stats.total_pages_read.to_f / @stats.total_sessions).round(1)
+      @avg_session_duration_seconds = @stats.total_reading_time_seconds / @stats.total_sessions
+    else
+      @pages_per_hour = 0
+      @avg_pages_per_session = 0
+      @avg_session_duration_seconds = 0
+    end
+
+    @books_completed_all_time = current_user.books.finished.count
+    @reading_streak = calculate_reading_streak
+
     # Calculate total reading time remaining for today's quotas
     @today_reading_minutes = @today_quotas.sum(&:estimated_minutes_remaining)
 
     # Find goals with unresolved discrepancies from yesterday
     @goals_with_discrepancies = @active_goals.select(&:has_unresolved_discrepancy?)
+  end
+
+  private
+
+  def calculate_reading_streak
+    dates = current_user.reading_sessions
+              .completed
+              .where(untracked: false)
+              .pluck(:started_at)
+              .map(&:to_date)
+              .uniq
+              .sort
+              .reverse
+
+    return 0 if dates.empty?
+
+    streak = 0
+    expected_date = Date.current
+
+    # If no session today, check if yesterday starts the streak
+    expected_date = Date.yesterday if dates.first != Date.current
+
+    dates.each do |date|
+      if date == expected_date
+        streak += 1
+        expected_date -= 1.day
+      elsif date < expected_date
+        break
+      end
+    end
+
+    streak
   end
 end
