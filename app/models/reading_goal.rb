@@ -248,12 +248,20 @@ class ReadingGoal < ApplicationRecord
   def as_pipeline_data
     goal_duration = goal_reading_days
     session_boundaries = reading_session_boundaries
+
+    # Use the earlier of started_on or earliest session date as the visual
+    # start so that pre-postponement reading still appears in the pipeline
+    visual_start = started_on
+    if session_boundaries[:earliest] && session_boundaries[:earliest] < started_on
+      visual_start = session_boundaries[:earliest]
+    end
+
     {
       id: id,
       book_id: book.id,
       title: book.title,
       author: book.author,
-      start_date: started_on.to_s,
+      start_date: visual_start.to_s,
       end_date: target_completion_date.to_s,
       progress: progress_percentage,
       status: book.status,
@@ -280,11 +288,12 @@ class ReadingGoal < ApplicationRecord
     }
   end
 
-  # Returns boundaries of reading sessions within the goal period
+  # Returns boundaries of all reading sessions for this book up to the goal's end date.
+  # Includes sessions before started_on so that pre-postponement reading is captured.
   def reading_session_boundaries
     sessions = book.reading_sessions
                    .completed
-                   .where(started_at: started_on.beginning_of_day..target_completion_date.end_of_day)
+                   .where("started_at <= ?", target_completion_date.end_of_day)
 
     return { has_sessions: false, earliest: nil, latest: nil, count: 0 } if sessions.empty?
 
@@ -313,16 +322,18 @@ class ReadingGoal < ApplicationRecord
     quota.estimated_minutes_remaining
   end
 
-  # Returns hash of date string -> minutes read for past days within the goal period
+  # Returns hash of date string -> minutes read for past days up to the goal's end date.
+  # Includes sessions before started_on so that pre-postponement reading is captured.
   def actual_reading_minutes_by_date
     # Only include dates up to yesterday (today is not yet complete)
     end_date = [target_completion_date, Date.current - 1].min
-    return {} if started_on > end_date
 
-    # Get all reading sessions for this book within the goal period
+    # Get all completed reading sessions for this book up to the end date
     sessions = book.reading_sessions
                    .completed
-                   .where(started_at: started_on.beginning_of_day..end_date.end_of_day)
+                   .where("started_at <= ?", end_date.end_of_day)
+
+    return {} if sessions.empty?
 
     # Group by date and sum effective duration
     sessions.each_with_object({}) do |session, hash|
