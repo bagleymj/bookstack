@@ -7,6 +7,7 @@ class ReadingSession < ApplicationRecord
   validates :start_page, presence: true, numericality: { greater_than_or_equal_to: 0 }
   validates :end_page, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validate :end_page_greater_than_start_page, if: :end_page
+  validate :only_one_in_progress_per_user, on: :create
 
   # Scopes
   scope :completed, -> { where.not(ended_at: nil) }
@@ -128,6 +129,12 @@ class ReadingSession < ApplicationRecord
   def end_page_greater_than_start_page
     if end_page && start_page && end_page < start_page
       errors.add(:end_page, "must be greater than or equal to start page")
+    end
+  end
+
+  def only_one_in_progress_per_user
+    if ended_at.nil? && user&.reading_sessions&.in_progress&.where&.not(id: id)&.exists?
+      errors.add(:base, "You already have an active reading session")
     end
   end
 end

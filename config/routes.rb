@@ -13,7 +13,11 @@ Rails.application.routes.draw do
         post :mark_completed
         post :update_progress
       end
-      resources :reading_sessions, only: [:new, :create], shallow: true
+      resources :reading_sessions, only: [:new, :create], shallow: true do
+        collection do
+          post :start
+        end
+      end
     end
 
     resources :reading_sessions, only: [:index, :show, :edit, :update, :destroy] do

@@ -1,6 +1,6 @@
 class ReadingSessionsController < ApplicationController
   before_action :authenticate_user!
-  before_action :set_book, only: [:new, :create]
+  before_action :set_book, only: [:new, :create, :start]
   before_action :set_reading_session, only: [:show, :edit, :update, :destroy, :complete]
 
   def index
@@ -9,6 +9,24 @@ class ReadingSessionsController < ApplicationController
   end
 
   def show
+  end
+
+  def start
+    existing = current_user.reading_sessions.in_progress.includes(:book).first
+    if existing
+      redirect_to existing, alert: "You already have an active reading session for \"#{existing.book.title}\"."
+      return
+    end
+
+    @reading_session = @book.reading_sessions.create!(
+      user: current_user,
+      started_at: Time.current,
+      start_page: @book.current_page
+    )
+
+    @book.start_reading! if @book.unread?
+
+    redirect_to @reading_session, notice: "Reading session started! Your timer is running."
   end
 
   def new

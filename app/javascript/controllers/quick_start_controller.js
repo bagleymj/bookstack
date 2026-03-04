@@ -88,9 +88,13 @@ export default class extends Controller {
       return
     }
 
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || ""
+
     const html = books.map(book => `
-      <a href="/books/${book.id}/reading_sessions/new"
-         class="flex items-center gap-4 p-4 rounded-lg hover:bg-gray-50 active:bg-gray-100 transition-colors">
+      <form method="post" action="/books/${book.id}/reading_sessions/start"
+            class="flex items-center gap-4 p-4 rounded-lg hover:bg-gray-50 active:bg-gray-100 transition-colors cursor-pointer"
+            data-action="click->quick-start#submitForm">
+        <input type="hidden" name="authenticity_token" value="${csrfToken}">
         <div class="flex-shrink-0 w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center">
           <svg class="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
@@ -105,10 +109,15 @@ export default class extends Controller {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
           </svg>
         </div>
-      </a>
+      </form>
     `).join("")
 
     this.bookListTarget.innerHTML = html
+  }
+
+  submitForm(event) {
+    event.preventDefault()
+    event.currentTarget.submit()
   }
 
   escapeHtml(text) {
