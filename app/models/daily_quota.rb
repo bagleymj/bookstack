@@ -51,20 +51,16 @@ class DailyQuota < ApplicationRecord
 
   # The last page number to read to complete this quota
   def target_page_number
-    # Get today's quota to determine pages already read today
-    today_quota = reading_goal.daily_quotas.where.not(status: :missed).find_by(date: Date.current)
+    active_quotas = reading_goal.daily_quotas.where.not(status: :missed)
 
-    # Calculate start-of-day position (actual_current_page is now "page you're on")
-    start_of_day = book.actual_current_page
-    start_of_day -= today_quota.actual_pages if today_quota
+    # Derive the page the book was on when the goal started:
+    # total non-missed target pages = distance from goal start to last page
+    goal_start_page = book.last_page - active_quotas.sum(:target_pages)
 
-    # Sum target pages from today through this quota's date
-    cumulative_pages = reading_goal.daily_quotas
-                                   .where(date: Date.current..date)
-                                   .where.not(status: :missed)
-                                   .sum(:target_pages)
+    # Cumulative target pages from goal start through this quota's date
+    cumulative_pages = active_quotas.where("date <= ?", date).sum(:target_pages)
 
-    start_of_day + cumulative_pages
+    goal_start_page + cumulative_pages
   end
 
   # Estimated minutes to complete remaining pages for this quota
