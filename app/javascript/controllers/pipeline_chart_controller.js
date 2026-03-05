@@ -80,53 +80,20 @@ export default class extends Controller {
     }
   }
 
-  // Compute interlocking brick segments for all goals.
+  // ── Data computation ──────────────────────────────────────────────
+
+  // Compute per-day bricks for all goals. Each day is its own brick.
   // Past days use actual reading time, future days use planned time.
-  // At every transition point, restack the active books so blocks
-  // drop down into gaps.
-  computeSegments(goals) {
+  // Returns { bricks: [...], maxY: number }
+  computeBricks(goals) {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const todayTime = today.getTime()
     const dayMs = 86400000
-    // Format today as YYYY-MM-DD for reliable comparison
-    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
 
-    // Collect all unique transition dates
-    const dateSet = new Set()
-    goals.forEach(g => {
-      dateSet.add(g.startDate.getTime())
-      dateSet.add(g.endDate.getTime())
-    })
-
-    // Add today and tomorrow as transitions so today is exactly one day
-    dateSet.add(todayTime)
-    dateSet.add(todayTime + dayMs)
-
-    // Add daily boundaries for PAST days (so each past day is its own segment)
-    // This allows us to show actual reading time per day
-    const earliest = Math.min(...goals.map(g => g.startDate.getTime()))
-    let day = new Date(earliest)
-    while (day.getTime() < todayTime) {
-      dateSet.add(day.getTime())
-      day = new Date(day.getTime() + dayMs)
-    }
-
-    // Add weekday/weekend boundaries for goals that exclude weekends
-    const hasWeekendExclusion = goals.some(g => !g.include_weekends)
-    if (hasWeekendExclusion) {
-      const latest = Math.max(...goals.map(g => g.endDate.getTime()))
-      day = new Date(earliest)
-      while (day.getTime() <= latest) {
-        const dow = day.getDay()
-        if (dow === 6 || dow === 1) {
-          dateSet.add(day.getTime())
-        }
-        day = new Date(day.getTime() + dayMs)
-      }
-    }
-
-    const transitions = Array.from(dateSet).sort((a, b) => a - b)
+    // Find date range across all goals
+    const earliest = d3.min(goals, g => g.startDate)
+    const latest = d3.max(goals, g => g.endDate)
 
     // Helper to get actual minutes for a goal on a specific date
     const getActualMinutes = (goal, dateStr) => {
@@ -134,142 +101,126 @@ export default class extends Controller {
       return goal.actual_minutes_by_date[dateStr] || 0
     }
 
-    // For each interval, stack the active goals
-    const segmentsByGoal = new Map()
-    goals.forEach(g => segmentsByGoal.set(g.id, []))
+    // Iterate day by day across the full range
+    const bricks = []
+    let maxY = 0
+    let day = new Date(earliest)
 
-    for (let i = 0; i < transitions.length - 1; i++) {
-      const segStart = transitions[i]
-      const segEnd = transitions[i + 1]
-      const segDay = new Date(segStart)
-      const isWeekend = segDay.getDay() === 0 || segDay.getDay() === 6
-      const isPast = segStart < todayTime
-      const dateStr = segDay.toISOString().split('T')[0]
+    while (day < latest) {
+      const dayTime = day.getTime()
+      const nextDay = new Date(dayTime + dayMs)
+      const isWeekend = day.getDay() === 0 || day.getDay() === 6
+      const isPast = dayTime < todayTime
+      const isToday = dayTime === todayTime
+      const dateStr = day.toISOString().split('T')[0]
 
-      // Which goals are active during this interval?
+      // Which goals are active on this day?
       const active = goals.filter(g => {
-        if (g.startDate.getTime() > segStart || g.endDate.getTime() < segEnd) return false
+        if (g.startDate.getTime() > dayTime || g.endDate.getTime() <= dayTime) return false
         if (isWeekend && !g.include_weekends) return false
         return true
       })
 
-      // Determine if this is today
-      const isToday = segStart === todayTime
-
-      // For past days, filter to only goals that had actual reading
-      // For future days (including today), include all active goals
-      const goalsWithHeight = active.map(g => {
+      // Compute height for each active goal on this day
+      let yOffset = 0
+      active.forEach(g => {
         let minutes
         let todayProgress = 0
         if (isPast) {
-          // Use actual reading time for past days
           minutes = getActualMinutes(g, dateStr)
         } else if (isToday) {
-          // Today: height = actual reading time + estimated remaining time
           todayProgress = g.today_actual_minutes || 0
           const remaining = g.today_remaining_minutes || 0
           minutes = todayProgress + remaining
         } else {
-          // Use planned time for future days
           minutes = g.minutes_per_day
         }
-        return { goal: g, minutes, isPast, isToday, todayProgress }
-      }).filter(item => item.minutes > 0) // Only include if there's height to show
 
-      // Stack them: longest duration on bottom (already sorted by duration)
-      let yOffset = 0
-      goalsWithHeight.forEach(({ goal, minutes, isPast, isToday, todayProgress }) => {
-        segmentsByGoal.get(goal.id).push({
-          startDate: new Date(segStart),
-          endDate: new Date(segEnd),
-          yOffset: yOffset,
-          minutes_per_day: minutes,
-          isPast: isPast,
-          isToday: isToday,
-          todayProgress: todayProgress
-        })
-        yOffset += minutes
+        if (minutes > 0) {
+          bricks.push({
+            key: `${g.id}-${dateStr}`,
+            goalId: g.id,
+            goalIndex: g._index,
+            date: new Date(day),
+            nextDate: new Date(nextDay),
+            dateStr,
+            yOffset,
+            minutes,
+            isPast,
+            isToday,
+            todayProgress,
+            color: g.color
+          })
+          yOffset += minutes
+        }
       })
+
+      maxY = Math.max(maxY, yOffset)
+      day = nextDay
     }
 
-    // Compute total Y extent (peak stack height)
-    let maxY = 0
-    segmentsByGoal.forEach(segments => {
-      segments.forEach(s => {
-        maxY = Math.max(maxY, s.yOffset + s.minutes_per_day)
-      })
-    })
+    // Also ensure maxY covers planned minutes_per_day
+    goals.forEach(g => { maxY = Math.max(maxY, g.minutes_per_day) })
 
-    // Also consider planned minutes_per_day for Y scale (so future doesn't clip)
-    goals.forEach(g => {
-      maxY = Math.max(maxY, g.minutes_per_day)
-    })
+    return { bricks, maxY }
+  }
 
-    // Merge adjacent segments with same properties (reduces path complexity)
-    // Only merge if: same yOffset, same minutes, same isPast/isToday status, contiguous
-    // Today is never merged with past or future segments
-    segmentsByGoal.forEach((segments, goalId) => {
-      if (segments.length <= 1) return
-      const merged = [segments[0]]
-      for (let i = 1; i < segments.length; i++) {
-        const prev = merged[merged.length - 1]
-        const curr = segments[i]
-        if (curr.yOffset === prev.yOffset &&
-            curr.minutes_per_day === prev.minutes_per_day &&
-            curr.isPast === prev.isPast &&
-            curr.isToday === prev.isToday &&
-            curr.startDate.getTime() === prev.endDate.getTime()) {
-          prev.endDate = curr.endDate
+  // Compute label positions: find widest contiguous brick run per goal
+  computeLabels(bricks, goals) {
+    const labels = []
+    goals.forEach(goal => {
+      const goalBricks = bricks
+        .filter(b => b.goalId === goal.id)
+        .sort((a, b) => a.date - b.date)
+      if (!goalBricks.length) return
+
+      // Group into contiguous date runs
+      const runs = []
+      let currentRun = [goalBricks[0]]
+      for (let i = 1; i < goalBricks.length; i++) {
+        if (goalBricks[i].date.getTime() === currentRun[currentRun.length - 1].nextDate.getTime()) {
+          currentRun.push(goalBricks[i])
         } else {
-          merged.push(curr)
+          runs.push(currentRun)
+          currentRun = [goalBricks[i]]
         }
       }
-      segmentsByGoal.set(goalId, merged)
+      runs.push(currentRun)
+
+      // Find the run with widest pixel span
+      let widestRun = null
+      let widestWidth = 0
+      runs.forEach(run => {
+        const w = this.xScale(run[run.length - 1].nextDate) - this.xScale(run[0].date)
+        if (w > widestWidth) {
+          widestRun = run
+          widestWidth = w
+        }
+      })
+
+      if (!widestRun) return
+
+      // Use average yOffset and minutes for vertical positioning
+      const avgYOffset = d3.mean(widestRun, d => d.yOffset)
+      const avgMinutes = d3.mean(widestRun, d => d.minutes)
+      const labelHeight = this.yScale(avgYOffset) - this.yScale(avgYOffset + avgMinutes)
+
+      labels.push({
+        goalId: goal.id,
+        x: this.xScale(widestRun[0].date) + 8,
+        xEnd: this.xScale(widestRun[widestRun.length - 1].nextDate) - 8,
+        y: this.yScale(avgYOffset + avgMinutes) + labelHeight / 2,
+        width: widestWidth,
+        height: labelHeight,
+        title: goal.title,
+        minutesPerDay: goal.minutes_per_day,
+        usesActualData: goal.uses_actual_data
+      })
     })
-
-    return { segmentsByGoal, maxY }
+    return labels
   }
 
-  // Group consecutive segments into runs (no time gap between them)
-  groupIntoRuns(segments) {
-    if (segments.length === 0) return []
-    const runs = []
-    let currentRun = [segments[0]]
-    for (let i = 1; i < segments.length; i++) {
-      if (segments[i].startDate.getTime() === currentRun[currentRun.length - 1].endDate.getTime()) {
-        currentRun.push(segments[i])
-      } else {
-        runs.push(currentRun)
-        currentRun = [segments[i]]
-      }
-    }
-    runs.push(currentRun)
-    return runs
-  }
-
-  // Build SVG path string from runs of segments
-  buildPathFromRuns(runs, xScale, yScale) {
-    let pathD = ""
-    runs.forEach(run => {
-      // Trace top edge left-to-right
-      pathD += `M ${xScale(run[0].startDate)} ${yScale(run[0].yOffset + run[0].minutes_per_day)}`
-      for (let i = 0; i < run.length; i++) {
-        const seg = run[i]
-        const top = yScale(seg.yOffset + seg.minutes_per_day)
-        if (i > 0) pathD += ` V ${top}`
-        pathD += ` H ${xScale(seg.endDate)}`
-      }
-      // Trace bottom edge right-to-left
-      for (let i = run.length - 1; i >= 0; i--) {
-        const seg = run[i]
-        const bottom = yScale(seg.yOffset)
-        pathD += ` V ${bottom}`
-        if (i > 0) pathD += ` H ${xScale(seg.startDate)}`
-      }
-      pathD += ` H ${xScale(run[0].startDate)} Z`
-    })
-    return pathD
-  }
+  // ── Rendering ─────────────────────────────────────────────────────
 
   render() {
     if (!this.chartData || !this.chartData.goals.length) {
@@ -283,13 +234,8 @@ export default class extends Controller {
 
     this.element.innerHTML = ""
 
-    const containerWidth = this.element.clientWidth
-    const width = Math.max(containerWidth, this.minWidth) - this.margin.left - this.margin.right
-
-    // Parse dates and filter valid goals
-    // Note: endDate is set to the day AFTER target_completion_date so the goal
-    // is active on its last day (segment dates are [start, end) intervals)
-    let goals = this.chartData.goals
+    // Parse and prepare goals
+    this.goals = this.chartData.goals
       .filter(g => g.start_date && g.end_date && g.minutes_per_day > 0)
       .map(g => ({
         ...g,
@@ -297,7 +243,7 @@ export default class extends Controller {
         endDate: d3.timeDay.offset(new Date(g.end_date + "T00:00:00"), 1)
       }))
 
-    if (goals.length === 0) {
+    if (this.goals.length === 0) {
       this.element.innerHTML = `
         <div class="flex items-center justify-center h-48 text-gray-500">
           <p>Set dates on your reading goals to see them in the pipeline.</p>
@@ -307,39 +253,62 @@ export default class extends Controller {
     }
 
     // Sort by duration descending (longest on bottom = Breakout style)
-    goals.sort((a, b) => b.duration_days - a.duration_days)
+    this.goals.sort((a, b) => b.duration_days - a.duration_days)
 
-    // Assign colors
-    goals.forEach((g, i) => {
+    // Assign colors and indices
+    this.goals.forEach((g, i) => {
       g.color = this.constructor.BLOCK_COLORS[i % this.constructor.BLOCK_COLORS.length]
+      g._index = i
     })
 
-    // Compute interlocking brick segments
-    const { segmentsByGoal, maxY } = this.computeSegments(goals)
-    const totalMinutes = maxY || 1
+    this.setupScales()
+    this.createSvg()
+    this.renderDefs()
+    this.renderGrid()
 
-    // Dynamic chart height based on content
-    const minChartHeight = this.compactValue ? 150 : 250
-    const maxChartHeight = this.compactValue ? 250 : 500
-    const chartHeight = Math.min(Math.max(totalMinutes * 2.5, minChartHeight), maxChartHeight)
+    // Compute and render bricks
+    const { bricks, maxY } = this.computeBricks(this.goals)
+    this.currentBricks = bricks
+    this.renderBricks(bricks, {})
+    const labels = this.computeLabels(bricks, this.goals)
+    this.renderLabels(labels, {})
+
+    this.renderOverlays()
+
+    if (!this.compactValue) {
+      this.renderLegend(this.goals)
+    }
+  }
+
+  setupScales() {
+    const containerWidth = this.element.clientWidth
+    this.width = Math.max(containerWidth, this.minWidth) - this.margin.left - this.margin.right
+
+    // Compute bricks to determine maxY for scale
+    const { bricks, maxY } = this.computeBricks(this.goals)
+    this.totalMinutes = maxY || 1
+
+    // Dynamic chart height
+    const minH = this.compactValue ? 150 : 250
+    const maxH = this.compactValue ? 250 : 500
+    this.chartHeight = Math.min(Math.max(this.totalMinutes * 2.5, minH), maxH)
 
     // Date range with padding
-    const minDate = d3.min(goals, d => d.startDate)
-    const maxDate = d3.max(goals, d => d.endDate)
-    const daysPadding = 3
-    const startDate = d3.timeDay.offset(minDate, -daysPadding)
-    const endDate = d3.timeDay.offset(maxDate, daysPadding)
+    const minDate = d3.min(this.goals, d => d.startDate)
+    const maxDate = d3.max(this.goals, d => d.endDate)
+    this.startDate = d3.timeDay.offset(minDate, -3)
+    this.endDate = d3.timeDay.offset(maxDate, 3)
 
-    // X scale (time/days)
-    const xScale = d3.scaleTime()
-      .domain([startDate, endDate])
-      .range([0, width])
+    this.xScale = d3.scaleTime()
+      .domain([this.startDate, this.endDate])
+      .range([0, this.width])
 
-    // Y scale (minutes — 0 at bottom, totalMinutes at top)
-    const yScale = d3.scaleLinear()
-      .domain([0, totalMinutes])
-      .range([chartHeight, 0])
+    this.yScale = d3.scaleLinear()
+      .domain([0, this.totalMinutes])
+      .range([this.chartHeight, 0])
+  }
 
+  createSvg() {
     // Edit mode toggle button
     if (!this.compactValue) {
       const editToggle = d3.select(this.element)
@@ -358,7 +327,6 @@ export default class extends Controller {
         )
         .on("click", () => this.toggleEditMode())
 
-      // Show edit mode hint when active
       if (this.editModeValue) {
         editToggle.append("div")
           .attr("class", "mt-1 text-xs text-amber-600")
@@ -366,99 +334,157 @@ export default class extends Controller {
       }
     }
 
-    // Create SVG
-    const svg = d3.select(this.element)
+    this.svg = d3.select(this.element)
       .append("svg")
-      .attr("width", width + this.margin.left + this.margin.right)
-      .attr("height", chartHeight + this.margin.top + this.margin.bottom)
+      .attr("width", this.width + this.margin.left + this.margin.right)
+      .attr("height", this.chartHeight + this.margin.top + this.margin.bottom)
       .append("g")
       .attr("transform", `translate(${this.margin.left},${this.margin.top})`)
 
-    // Grid lines (horizontal for minutes)
-    const minuteTicks = this.niceMinuteTicks(totalMinutes)
-    svg.append("g")
-      .attr("class", "grid")
-      .selectAll("line")
+    // Create layers
+    this.gridLayer = this.svg.append("g").attr("class", "layer-grid")
+    this.brickLayer = this.svg.append("g").attr("class", "layer-bricks")
+    this.labelLayer = this.svg.append("g").attr("class", "layer-labels")
+    this.overlayLayer = this.svg.append("g").attr("class", "layer-overlays")
+
+    // Apply group-level drop shadow to brick layer
+    this.brickLayer.style("filter", "drop-shadow(0 1px 2px rgba(0,0,0,0.15))")
+
+    // Tooltip (DOM element, not SVG)
+    this.tooltip = d3.select(this.element)
+      .append("div")
+      .attr("class", "absolute hidden bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg pointer-events-none z-50 max-w-xs")
+      .style("transition", "opacity 0.15s")
+  }
+
+  renderDefs() {
+    const defs = this.svg.append("defs")
+
+    this.goals.forEach((goal, i) => {
+      const states = [
+        { name: "future", color: goal.color, darken: 0, opacity: 0.88 },
+        { name: "past", color: goal.color, darken: 0.3, opacity: 0.95 },
+        { name: "today", color: goal.color, darken: 0, opacity: 0.88 },
+        { name: "today-progress", color: goal.color, darken: 0.3, opacity: 0.95 }
+      ]
+
+      states.forEach(({ name, color, darken, opacity }) => {
+        const base = darken > 0 ? d3.color(color).darker(darken) : d3.color(color)
+        const grad = defs.append("linearGradient")
+          .attr("id", `brick-grad-${i}-${name}`)
+          .attr("x1", "0%").attr("y1", "0%")
+          .attr("x2", "0%").attr("y2", "100%")
+
+        grad.append("stop")
+          .attr("offset", "0%")
+          .attr("stop-color", d3.color(base).brighter(0.25))
+          .attr("stop-opacity", opacity)
+        grad.append("stop")
+          .attr("offset", "100%")
+          .attr("stop-color", d3.color(base).darker(0.2))
+          .attr("stop-opacity", opacity)
+      })
+    })
+  }
+
+  renderGrid() {
+    const g = this.gridLayer
+
+    // Day-column grid: vertical line for each day
+    const days = []
+    let day = d3.timeDay.floor(this.startDate)
+    while (day <= this.endDate) {
+      days.push(new Date(day))
+      day = d3.timeDay.offset(day, 1)
+    }
+
+    // Alternating day-column shading
+    g.selectAll(".day-shade")
+      .data(days.filter((_, i) => i % 2 === 0))
+      .enter()
+      .append("rect")
+      .attr("class", "day-shade")
+      .attr("x", d => this.xScale(d))
+      .attr("y", 0)
+      .attr("width", d => this.xScale(d3.timeDay.offset(d, 1)) - this.xScale(d))
+      .attr("height", this.chartHeight)
+      .style("fill", "rgba(0,0,0,0.018)")
+
+    // Day grid lines
+    g.selectAll(".day-line")
+      .data(days)
+      .enter()
+      .append("line")
+      .attr("class", "day-line")
+      .attr("x1", d => this.xScale(d))
+      .attr("x2", d => this.xScale(d))
+      .attr("y1", 0)
+      .attr("y2", this.chartHeight)
+      .style("stroke", "#e8e8e8")
+      .style("stroke-width", 0.5)
+
+    // Horizontal grid lines (minutes)
+    const minuteTicks = this.niceMinuteTicks(this.totalMinutes)
+    g.selectAll(".minute-line")
       .data(minuteTicks)
       .enter()
       .append("line")
+      .attr("class", "minute-line")
       .attr("x1", 0)
-      .attr("x2", width)
-      .attr("y1", d => yScale(d))
-      .attr("y2", d => yScale(d))
+      .attr("x2", this.width)
+      .attr("y1", d => this.yScale(d))
+      .attr("y2", d => this.yScale(d))
       .style("stroke", "#e5e7eb")
       .style("stroke-dasharray", "2,2")
 
-    // Grid lines (vertical for weeks)
-    svg.append("g")
-      .attr("class", "grid")
-      .attr("transform", `translate(0,${chartHeight})`)
-      .call(
-        d3.axisBottom(xScale)
-          .ticks(d3.timeWeek.every(1))
-          .tickSize(-chartHeight)
-          .tickFormat("")
-      )
-      .selectAll("line")
-      .style("stroke", "#f3f4f6")
-
-    // Weekend shading (if any goal excludes weekends)
-    const hasWeekendExclusion = goals.some(g => !g.include_weekends)
+    // Weekend shading
+    const hasWeekendExclusion = this.goals.some(g => !g.include_weekends)
     if (hasWeekendExclusion) {
-      const weekendDays = []
-      let day = d3.timeDay.floor(startDate)
-      while (day <= endDate) {
-        if (day.getDay() === 0 || day.getDay() === 6) {
-          weekendDays.push(new Date(day))
-        }
-        day = d3.timeDay.offset(day, 1)
-      }
-
-      svg.append("g")
-        .attr("class", "weekend-shading")
-        .selectAll("rect")
+      const weekendDays = days.filter(d => d.getDay() === 0 || d.getDay() === 6)
+      g.selectAll(".weekend-shade")
         .data(weekendDays)
         .enter()
         .append("rect")
-        .attr("x", d => xScale(d))
+        .attr("class", "weekend-shade")
+        .attr("x", d => this.xScale(d))
         .attr("y", 0)
-        .attr("width", d => xScale(d3.timeDay.offset(d, 1)) - xScale(d))
-        .attr("height", chartHeight)
+        .attr("width", d => this.xScale(d3.timeDay.offset(d, 1)) - this.xScale(d))
+        .attr("height", this.chartHeight)
         .style("fill", "#f3f4f6")
         .style("opacity", 0.6)
     }
 
     // X axis
-    const xAxis = d3.axisBottom(xScale)
-      .ticks(d3.timeWeek.every(1))
-      .tickFormat(d3.timeFormat("%b %d"))
-
-    svg.append("g")
+    g.append("g")
       .attr("class", "x-axis")
-      .attr("transform", `translate(0,${chartHeight})`)
-      .call(xAxis)
+      .attr("transform", `translate(0,${this.chartHeight})`)
+      .call(
+        d3.axisBottom(this.xScale)
+          .ticks(d3.timeWeek.every(1))
+          .tickFormat(d3.timeFormat("%b %d"))
+      )
       .selectAll("text")
       .style("font-size", "11px")
       .style("fill", "#6b7280")
 
-    // Y axis (minutes per day)
-    const yAxis = d3.axisLeft(yScale)
-      .tickValues(minuteTicks)
-      .tickFormat(d => `${d}m`)
-
-    svg.append("g")
+    // Y axis
+    g.append("g")
       .attr("class", "y-axis")
-      .call(yAxis)
+      .call(
+        d3.axisLeft(this.yScale)
+          .tickValues(minuteTicks)
+          .tickFormat(d => `${d}m`)
+      )
       .selectAll("text")
       .style("font-size", "11px")
       .style("fill", "#6b7280")
 
     // Y axis label
     if (!this.compactValue) {
-      svg.append("text")
+      g.append("text")
         .attr("transform", "rotate(-90)")
         .attr("y", -this.margin.left + 14)
-        .attr("x", -chartHeight / 2)
+        .attr("x", -this.chartHeight / 2)
         .attr("text-anchor", "middle")
         .style("fill", "#9ca3af")
         .style("font-size", "12px")
@@ -466,19 +492,19 @@ export default class extends Controller {
     }
 
     // Today marker
-    const today = new Date()
-    if (today >= startDate && today <= endDate) {
-      svg.append("line")
-        .attr("x1", xScale(today))
-        .attr("x2", xScale(today))
+    const todayDate = new Date()
+    if (todayDate >= this.startDate && todayDate <= this.endDate) {
+      g.append("line")
+        .attr("x1", this.xScale(todayDate))
+        .attr("x2", this.xScale(todayDate))
         .attr("y1", 0)
-        .attr("y2", chartHeight)
+        .attr("y2", this.chartHeight)
         .style("stroke", "#ef4444")
         .style("stroke-width", 2)
         .style("stroke-dasharray", "4,4")
 
-      svg.append("text")
-        .attr("x", xScale(today))
+      g.append("text")
+        .attr("x", this.xScale(todayDate))
         .attr("y", -8)
         .attr("text-anchor", "middle")
         .style("fill", "#ef4444")
@@ -486,218 +512,331 @@ export default class extends Controller {
         .style("font-weight", "500")
         .text("Today")
     }
+  }
 
-    // Tooltip
-    const tooltip = d3.select(this.element)
-      .append("div")
-      .attr("class", "absolute hidden bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg pointer-events-none z-50 max-w-xs")
-      .style("transition", "opacity 0.15s")
+  renderBricks(bricks, opts = {}) {
+    const gap = 1
+    const t = opts.transition
+      ? d3.transition().duration(opts.duration || 80).ease(d3.easeCubicOut)
+      : null
 
-    // Draw interlocking brick segments for each goal
+    // ── Main brick rects ──
+    const join = this.brickLayer.selectAll(".brick")
+      .data(bricks, d => d.key)
+
+    join.exit().remove()
+
+    const enter = join.enter()
+      .append("rect")
+      .attr("class", "brick")
+      .attr("rx", 2)
+      .attr("ry", 2)
+
+    const merged = enter.merge(join)
+    const applyAttrs = (sel) => {
+      sel
+        .attr("x", d => this.xScale(d.date) + gap / 2)
+        .attr("y", d => this.yScale(d.yOffset + d.minutes) + gap / 2)
+        .attr("width", d => Math.max(this.xScale(d.nextDate) - this.xScale(d.date) - gap, 1))
+        .attr("height", d => Math.max(this.yScale(d.yOffset) - this.yScale(d.yOffset + d.minutes) - gap, 1))
+        .attr("fill", d => {
+          const state = d.isPast ? "past" : d.isToday ? "today" : "future"
+          return `url(#brick-grad-${d.goalIndex}-${state})`
+        })
+    }
+
+    if (t) {
+      applyAttrs(merged.transition(t))
+    } else {
+      applyAttrs(merged)
+    }
+
+    // ── Today progress overlay bricks ──
+    const todayBricks = bricks.filter(b => b.isToday && b.todayProgress > 0)
+
+    const progressJoin = this.brickLayer.selectAll(".brick-today-progress")
+      .data(todayBricks, d => d.key + "-progress")
+
+    progressJoin.exit().remove()
+
+    const progressEnter = progressJoin.enter()
+      .append("rect")
+      .attr("class", "brick-today-progress")
+      .attr("rx", 2)
+      .attr("ry", 2)
+
+    const progressMerged = progressEnter.merge(progressJoin)
+    const applyProgress = (sel) => {
+      sel
+        .attr("x", d => this.xScale(d.date) + gap / 2)
+        .attr("y", d => {
+          const progressHeight = Math.min(d.todayProgress, d.minutes)
+          return this.yScale(d.yOffset + progressHeight) + gap / 2
+        })
+        .attr("width", d => Math.max(this.xScale(d.nextDate) - this.xScale(d.date) - gap, 1))
+        .attr("height", d => {
+          const progressHeight = Math.min(d.todayProgress, d.minutes)
+          return Math.max(this.yScale(d.yOffset) - this.yScale(d.yOffset + progressHeight) - gap, 0)
+        })
+        .attr("fill", d => `url(#brick-grad-${d.goalIndex}-today-progress)`)
+    }
+
+    if (t) {
+      applyProgress(progressMerged.transition(t))
+    } else {
+      applyProgress(progressMerged)
+    }
+
+    // ── Highlight lines (top edge bevel) ──
+    const highlightJoin = this.brickLayer.selectAll(".brick-highlight")
+      .data(bricks, d => d.key + "-hl")
+
+    highlightJoin.exit().remove()
+
+    const hlEnter = highlightJoin.enter()
+      .append("line")
+      .attr("class", "brick-highlight")
+      .style("stroke", "rgba(255,255,255,0.3)")
+      .style("stroke-width", 0.5)
+      .style("pointer-events", "none")
+
+    const hlMerged = hlEnter.merge(highlightJoin)
+    const applyHighlight = (sel) => {
+      sel
+        .attr("x1", d => this.xScale(d.date) + gap / 2 + 1)
+        .attr("x2", d => this.xScale(d.nextDate) - gap / 2 - 1)
+        .attr("y1", d => this.yScale(d.yOffset + d.minutes) + gap / 2 + 0.5)
+        .attr("y2", d => this.yScale(d.yOffset + d.minutes) + gap / 2 + 0.5)
+    }
+
+    if (t) {
+      applyHighlight(hlMerged.transition(t))
+    } else {
+      applyHighlight(hlMerged)
+    }
+  }
+
+  renderLabels(labels, opts = {}) {
+    const t = opts.transition
+      ? d3.transition().duration(opts.duration || 80).ease(d3.easeCubicOut)
+      : null
+
+    // Title labels
+    const titleJoin = this.labelLayer.selectAll(".label-title")
+      .data(labels.filter(l => l.width >= 60 && l.height >= 16), d => d.goalId + "-title")
+
+    titleJoin.exit().remove()
+
+    const titleEnter = titleJoin.enter()
+      .append("text")
+      .attr("class", "label-title")
+      .style("fill", "#fff")
+      .style("font-weight", "600")
+      .style("text-shadow", "0 1px 2px rgba(0,0,0,0.4)")
+      .style("pointer-events", "none")
+      .attr("dy", "0.35em")
+
+    const titleMerged = titleEnter.merge(titleJoin)
+    const applyTitle = (sel) => {
+      sel
+        .attr("x", d => d.x)
+        .attr("y", d => d.y)
+        .style("font-size", d => d.height >= 28 ? "12px" : "10px")
+        .text(d => {
+          const maxChars = Math.floor((d.width - 16) / 7)
+          return d.title.length > maxChars ? d.title.substring(0, maxChars - 1) + "\u2026" : d.title
+        })
+    }
+
+    if (t) {
+      applyTitle(titleMerged.transition(t))
+    } else {
+      applyTitle(titleMerged)
+    }
+
+    // Minutes/day labels
+    if (!this.compactValue) {
+      const mpdJoin = this.labelLayer.selectAll(".label-mpd")
+        .data(labels.filter(l => l.width >= 80 && l.height >= 16), d => d.goalId + "-mpd")
+
+      mpdJoin.exit().remove()
+
+      const mpdEnter = mpdJoin.enter()
+        .append("text")
+        .attr("class", "label-mpd")
+        .attr("text-anchor", "end")
+        .style("fill", "rgba(255,255,255,0.8)")
+        .style("font-size", "10px")
+        .style("font-weight", "500")
+        .style("text-shadow", "0 1px 2px rgba(0,0,0,0.4)")
+        .style("pointer-events", "none")
+        .attr("dy", "0.35em")
+
+      const mpdMerged = mpdEnter.merge(mpdJoin)
+      const applyMpd = (sel) => {
+        sel
+          .attr("x", d => d.xEnd)
+          .attr("y", d => d.y)
+          .text(d => `${d.minutesPerDay}m/day`)
+      }
+
+      if (t) {
+        applyMpd(mpdMerged.transition(t))
+      } else {
+        applyMpd(mpdMerged)
+      }
+    }
+
+    // Estimate indicators (dashed border on widest run for goals without actual data)
+    const estimateLabels = labels.filter(l => !l.usesActualData && l.width > 20 && l.height > 4)
+    const estJoin = this.labelLayer.selectAll(".estimate-indicator")
+      .data(estimateLabels, d => d.goalId + "-est")
+
+    estJoin.exit().remove()
+
+    const estEnter = estJoin.enter()
+      .append("rect")
+      .attr("class", "estimate-indicator")
+      .attr("rx", 2)
+      .style("fill", "none")
+      .style("stroke", "rgba(255,255,255,0.3)")
+      .style("stroke-width", 1)
+      .style("stroke-dasharray", "3,3")
+      .style("pointer-events", "none")
+
+    const estMerged = estEnter.merge(estJoin)
+    const applyEst = (sel) => {
+      sel
+        .attr("x", d => d.x - 7)
+        .attr("y", d => d.y - d.height / 2 + 1)
+        .attr("width", d => Math.max(d.width - 2, 4))
+        .attr("height", d => Math.max(d.height - 2, 1))
+    }
+
+    if (t) {
+      applyEst(estMerged.transition(t))
+    } else {
+      applyEst(estMerged)
+    }
+  }
+
+  // ── Overlays (hover, drag, resize, click) ─────────────────────────
+
+  renderOverlays() {
     const self = this
-    goals.forEach(goal => {
-      const segments = segmentsByGoal.get(goal.id)
-      if (!segments || segments.length === 0) return
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
 
-      const blockGroup = svg.append("g")
-        .attr("class", `pipeline-block ${this.editModeValue ? "cursor-move" : "cursor-pointer"}`)
-        .datum(goal)
+    this.goals.forEach(goal => {
+      const goalBricks = this.currentBricks.filter(b => b.goalId === goal.id)
+      if (!goalBricks.length) return
 
-      // Group consecutive segments into runs (no time gap between them)
-      // and draw each run as a single SVG path tracing the staircase outline.
-      const runs = []
-      let currentRun = [segments[0]]
-      for (let i = 1; i < segments.length; i++) {
-        if (segments[i].startDate.getTime() === currentRun[currentRun.length - 1].endDate.getTime()) {
-          currentRun.push(segments[i])
-        } else {
-          runs.push(currentRun)
-          currentRun = [segments[i]]
-        }
-      }
-      runs.push(currentRun)
+      // Compute bounding box for this goal's bricks
+      const minX = d3.min(goalBricks, b => this.xScale(b.date))
+      const maxX = d3.max(goalBricks, b => this.xScale(b.nextDate))
+      const minY = d3.min(goalBricks, b => this.yScale(b.yOffset + b.minutes))
+      const maxY = d3.max(goalBricks, b => this.yScale(b.yOffset))
 
-      // Build a single path string for all runs
-      let pathD = ""
-      runs.forEach(run => {
-        // Trace top edge left-to-right
-        pathD += `M ${xScale(run[0].startDate)} ${yScale(run[0].yOffset + run[0].minutes_per_day)}`
-        for (let i = 0; i < run.length; i++) {
-          const seg = run[i]
-          const top = yScale(seg.yOffset + seg.minutes_per_day)
-          if (i > 0) pathD += ` V ${top}`
-          pathD += ` H ${xScale(seg.endDate)}`
-        }
-        // Trace bottom edge right-to-left
-        for (let i = run.length - 1; i >= 0; i--) {
-          const seg = run[i]
-          const bottom = yScale(seg.yOffset)
-          pathD += ` V ${bottom}`
-          if (i > 0) pathD += ` H ${xScale(seg.startDate)}`
-        }
-        pathD += ` H ${xScale(run[0].startDate)} Z`
-      })
-
-      // Separate past, today, and future segments for different styling
-      const pastSegments = segments.filter(s => s.isPast)
-      const todaySegment = segments.find(s => s.isToday)
-      const futureSegments = segments.filter(s => !s.isPast && !s.isToday)
-
-      // Build path for past segments (actual reading time) - slightly darker
-      if (pastSegments.length > 0) {
-        const pastRuns = this.groupIntoRuns(pastSegments)
-        const pastPathD = this.buildPathFromRuns(pastRuns, xScale, yScale)
-
-        blockGroup.append("path")
-          .attr("class", "block-fill block-past")
-          .attr("d", pastPathD)
-          .style("fill", d3.color(goal.color).darker(0.3))
-          .style("opacity", 0.95)
-      }
-
-      // Build path for today's segment (planned time as background)
-      if (todaySegment) {
-        const todayRuns = [[todaySegment]]
-        const todayPathD = this.buildPathFromRuns(todayRuns, xScale, yScale)
-
-        // Draw planned height as lighter background
-        blockGroup.append("path")
-          .attr("class", "block-fill block-today-planned")
-          .attr("d", todayPathD)
-          .style("fill", goal.color)
-          .style("opacity", 0.85)
-
-        // Draw actual progress filling up from the bottom
-        // Only show progress on TODAY's column, not the entire segment
-        if (todaySegment.todayProgress > 0) {
-          const progressHeight = Math.min(todaySegment.todayProgress, todaySegment.minutes_per_day)
-          const progressTop = yScale(todaySegment.yOffset + progressHeight)
-          const progressBottom = yScale(todaySegment.yOffset)
-
-          // Clip to just today's single day column
-          const todayColumnEnd = d3.timeDay.offset(todaySegment.startDate, 1)
-
-          blockGroup.append("rect")
-            .attr("class", "block-fill block-today-progress")
-            .attr("x", xScale(todaySegment.startDate))
-            .attr("y", progressTop)
-            .attr("width", xScale(todayColumnEnd) - xScale(todaySegment.startDate))
-            .attr("height", progressBottom - progressTop)
-            .style("fill", d3.color(goal.color).darker(0.3))
-            .style("opacity", 0.95)
-        }
-      }
-
-      // Build path for future segments (planned time)
-      if (futureSegments.length > 0) {
-        const futureRuns = this.groupIntoRuns(futureSegments)
-        const futurePathD = this.buildPathFromRuns(futureRuns, xScale, yScale)
-
-        blockGroup.append("path")
-          .attr("class", "block-fill block-future")
-          .attr("d", futurePathD)
-          .style("fill", goal.color)
-          .style("opacity", 0.85)
-      }
-
-      // Combined path for interactions (invisible, covers both)
-      blockGroup.append("path")
-        .attr("class", "block-fill-interactive")
-        .attr("d", pathD)
+      // Invisible hit target covering all bricks for this goal
+      const hitTarget = this.overlayLayer.append("rect")
+        .attr("class", `overlay-hit ${this.editModeValue ? "cursor-move" : "cursor-pointer"}`)
+        .attr("x", minX)
+        .attr("y", minY)
+        .attr("width", maxX - minX)
+        .attr("height", maxY - minY)
         .style("fill", "transparent")
         .style("stroke", "none")
+        .datum(goal)
 
-      // Progress overlay — clip the same shape to the progress range
-      const progressEndDate = new Date(goal.startDate.getTime() + (goal.endDate.getTime() - goal.startDate.getTime()) * (goal.progress / 100))
-      if (goal.progress > 0) {
-        const clipId = `clip-progress-${goal.id}`
-        svg.append("defs").append("clipPath").attr("id", clipId)
-          .append("rect")
-          .attr("x", xScale(goal.startDate))
-          .attr("y", 0)
-          .attr("width", xScale(progressEndDate) - xScale(goal.startDate))
-          .attr("height", chartHeight)
+      // ── Hover tooltip ──
+      hitTarget.on("mouseenter", (event) => {
+        // Highlight bricks
+        this.brickLayer.selectAll(".brick")
+          .filter(d => d.goalId === goal.id)
+          .style("filter", "brightness(1.1)")
 
-        blockGroup.append("path")
-          .attr("class", "block-progress")
-          .attr("d", pathD)
-          .attr("clip-path", `url(#${clipId})`)
-          .style("fill", d3.color(goal.color).darker(0.5))
-          .style("opacity", 0.4)
-      }
+        const dataSource = goal.uses_actual_data
+          ? '<span class="text-green-400">Based on actual reading speed</span>'
+          : '<span class="text-gray-400">Estimated from difficulty</span>'
 
-      // Estimate indicator (dashed inner border on widest segment)
-      if (!goal.uses_actual_data) {
-        const widest = segments.reduce((a, b) =>
-          (xScale(b.endDate) - xScale(b.startDate)) > (xScale(a.endDate) - xScale(a.startDate)) ? b : a
-        )
-        const wx = xScale(widest.startDate) + 1
-        const wy = yScale(widest.yOffset + widest.minutes_per_day) + 1
-        const ww = Math.max(xScale(widest.endDate) - xScale(widest.startDate) - 2, 4)
-        const wh = Math.max(yScale(widest.yOffset) - yScale(widest.yOffset + widest.minutes_per_day) - 2, 1)
+        let daysLine
+        if (goal.goal_status === "completed") {
+          daysLine = '<span class="text-green-400">Completed</span>'
+        } else if (goal.goal_status === "abandoned") {
+          daysLine = '<span class="text-red-400">Abandoned</span>'
+        } else if (goal.days_remaining > 0 && goal.startDate <= new Date()) {
+          const suffix = !goal.include_weekends ? ` <span class="text-gray-500">(${goal.calendar_days} calendar)</span>` : ""
+          daysLine = `${goal.days_remaining} days remaining${suffix}`
+        } else {
+          const suffix = !goal.include_weekends ? ` <span class="text-gray-500">(${goal.calendar_days} calendar)</span>` : ""
+          daysLine = `${goal.duration_days} day duration${suffix}`
+        }
 
-        blockGroup.append("rect")
-          .attr("x", wx).attr("y", wy)
-          .attr("width", ww).attr("height", wh)
-          .attr("rx", 2)
-          .style("fill", "none")
-          .style("stroke", "rgba(255,255,255,0.3)")
-          .style("stroke-width", 1)
-          .style("stroke-dasharray", "3,3")
-      }
+        let actualTimeInfo = ""
+        if (goal.actual_minutes_by_date && Object.keys(goal.actual_minutes_by_date).length > 0) {
+          const totalActualMinutes = Object.values(goal.actual_minutes_by_date).reduce((sum, m) => sum + m, 0)
+          const daysWithReading = Object.keys(goal.actual_minutes_by_date).length
+          const avgPerDay = Math.round(totalActualMinutes / daysWithReading)
+          actualTimeInfo = `
+            <div class="mt-1 pt-1 border-t border-gray-700">
+              <div><span class="text-blue-400">Actual read:</span> ${totalActualMinutes}m over ${daysWithReading} days</div>
+              <div><span class="text-blue-400">Avg actual:</span> ${avgPerDay}m/day</div>
+            </div>
+          `
+        }
 
-      // Book title label — placed on the widest merged segment
-      const widestSeg = segments.reduce((a, b) =>
-        (xScale(b.endDate) - xScale(b.startDate)) > (xScale(a.endDate) - xScale(a.startDate)) ? b : a
-      )
-      const labelWidth = xScale(widestSeg.endDate) - xScale(widestSeg.startDate)
-      const labelHeight = yScale(widestSeg.yOffset) - yScale(widestSeg.yOffset + widestSeg.minutes_per_day)
+        this.tooltip
+          .html(`
+            <div class="font-semibold mb-1">${goal.title}</div>
+            <div class="text-gray-300 text-xs">${goal.author || "Unknown author"}</div>
+            <div class="mt-2 space-y-1 text-xs">
+              <div><span class="text-gray-400">Planned:</span> ${goal.minutes_per_day}m/day</div>
+              <div>${daysLine}</div>
+              <div><span class="text-gray-400">Pages:</span> ${goal.total_pages}</div>
+              <div><span class="text-gray-400">Progress:</span> ${goal.progress}%</div>
+              <div><span class="text-gray-400">Pages/day:</span> ${goal.pages_per_day}</div>
+              <div><span class="text-gray-400">Est. remaining:</span> ${(goal.estimated_hours || 0).toFixed(1)}h</div>
+              <div>${dataSource}</div>
+              ${actualTimeInfo}
+            </div>
+          `)
+          .classed("hidden", false)
+          .style("left", `${event.offsetX + 15}px`)
+          .style("top", `${event.offsetY - 10}px`)
+      })
 
-      if (labelWidth >= 60 && labelHeight >= 18) {
-        const maxChars = Math.floor((labelWidth - 16) / 7)
-        const title = goal.title.length > maxChars ? goal.title.substring(0, maxChars - 1) + "\u2026" : goal.title
+      hitTarget.on("mousemove", (event) => {
+        this.tooltip
+          .style("left", `${event.offsetX + 15}px`)
+          .style("top", `${event.offsetY - 10}px`)
+      })
 
-        blockGroup.append("text")
-          .attr("x", xScale(widestSeg.startDate) + 8)
-          .attr("y", yScale(widestSeg.yOffset + widestSeg.minutes_per_day) + labelHeight / 2)
-          .attr("dy", "0.35em")
-          .style("fill", "#fff")
-          .style("font-size", labelHeight >= 28 ? "12px" : "10px")
-          .style("font-weight", "600")
-          .style("text-shadow", "0 1px 2px rgba(0,0,0,0.3)")
-          .style("pointer-events", "none")
-          .text(title)
-      }
+      hitTarget.on("mouseleave", () => {
+        this.brickLayer.selectAll(".brick")
+          .filter(d => d.goalId === goal.id)
+          .style("filter", null)
+        this.tooltip.classed("hidden", true)
+      })
 
-      // Minutes/day label on widest segment
-      if (!this.compactValue && labelHeight >= 18 && labelWidth >= 80) {
-        blockGroup.append("text")
-          .attr("x", xScale(widestSeg.endDate) - 8)
-          .attr("y", yScale(widestSeg.yOffset + widestSeg.minutes_per_day) + labelHeight / 2)
-          .attr("dy", "0.35em")
-          .attr("text-anchor", "end")
-          .style("fill", "rgba(255,255,255,0.8)")
-          .style("font-size", "10px")
-          .style("font-weight", "500")
-          .style("text-shadow", "0 1px 2px rgba(0,0,0,0.3)")
-          .style("pointer-events", "none")
-          .text(`${goal.minutes_per_day}m/day`)
-      }
+      // ── Click to navigate ──
+      hitTarget.on("click", (event) => {
+        if (event.defaultPrevented) return
+        window.location.href = `/reading_goals/${goal.id}`
+      })
 
-      // Resize handle (right edge of the last segment) - only visible in edit mode
-      const lastSeg = segments[segments.length - 1]
+      // ── Edit mode: resize handle ──
       if (this.editModeValue) {
-        // Create resize tooltip
+        const lastBrick = goalBricks[goalBricks.length - 1]
         const resizeTooltip = d3.select(this.element)
           .append("div")
           .attr("class", "resize-tooltip absolute hidden bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-xl pointer-events-none z-50 border border-gray-700")
 
-        blockGroup.append("rect")
+        this.overlayLayer.append("rect")
           .attr("class", "resize-handle")
-          .attr("x", xScale(lastSeg.endDate) - 6)
-          .attr("y", yScale(lastSeg.yOffset + lastSeg.minutes_per_day))
+          .attr("x", this.xScale(lastBrick.nextDate) - 6)
+          .attr("y", minY)
           .attr("width", 8)
-          .attr("height", Math.max(yScale(lastSeg.yOffset) - yScale(lastSeg.yOffset + lastSeg.minutes_per_day), 2))
+          .attr("height", Math.max(maxY - minY, 2))
           .style("fill", "rgba(255,255,255,0.3)")
           .style("cursor", "ew-resize")
           .attr("rx", 2)
@@ -706,34 +845,29 @@ export default class extends Controller {
               goal._resizeStartX = event.x
               goal._origEndDate = goal.endDate
 
-              // Visual feedback
               d3.select(this)
                 .style("fill", "rgba(255,255,255,0.7)")
                 .style("width", "10px")
 
-              // Show resize tooltip
               resizeTooltip
                 .classed("hidden", false)
                 .html(self.formatResizeTooltip(goal._origEndDate, 0))
             })
             .on("drag", function(event) {
               const dx = event.x - goal._resizeStartX
-              const msPerPx = (endDate - startDate) / width
+              const msPerPx = (self.endDate - self.startDate) / self.width
               const offsetMs = dx * msPerPx
-
-              // Snap to day boundaries
               const dayMs = 86400000
               const snappedOffsetMs = Math.round(offsetMs / dayMs) * dayMs
               const newEnd = new Date(goal._origEndDate.getTime() + snappedOffsetMs)
 
               if (newEnd > goal.startDate) {
                 goal.endDate = newEnd
-                d3.select(this).attr("x", xScale(goal.endDate) - 6)
-
-                // Calculate days changed
                 const daysChanged = Math.round(snappedOffsetMs / dayMs)
 
-                // Update tooltip
+                // Live reflow
+                self.updateBricksForDrag()
+
                 resizeTooltip
                   .html(self.formatResizeTooltip(goal.endDate, daysChanged))
                   .style("left", `${event.sourceEvent.offsetX + 20}px`)
@@ -754,15 +888,14 @@ export default class extends Controller {
           )
       }
 
-      // Drag to move entire block horizontally - only in edit mode
+      // ── Edit mode: drag to move/postpone ──
       if (this.editModeValue) {
-        // Create drag tooltip element (hidden initially)
         const dragTooltip = d3.select(this.element)
           .append("div")
           .attr("class", "drag-tooltip absolute hidden bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-xl pointer-events-none z-50 border border-gray-700")
           .style("transition", "opacity 0.1s")
 
-        blockGroup.call(d3.drag()
+        hitTarget.call(d3.drag()
           .filter(function(event) {
             return !event.target.classList.contains("resize-handle")
           })
@@ -771,12 +904,11 @@ export default class extends Controller {
             goal._origStartDate = goal.startDate
             goal._origEndDate = goal.endDate
 
-            // Determine if goal has past activity that locks the start
+            // Determine move vs postpone mode
             goal._hasSessionHistory = goal.has_sessions && goal.earliest_session_date
             if (goal._hasSessionHistory) {
               goal._earliestSessionDate = new Date(goal.earliest_session_date + "T00:00:00")
               goal._latestSessionDate = new Date(goal.latest_session_date + "T00:00:00")
-              // Lock point is the day after latest session (or today, whichever is later)
               const dayAfterLastSession = new Date(goal._latestSessionDate.getTime() + 86400000)
               goal._lockDate = new Date(Math.max(dayAfterLastSession.getTime(), today.getTime()))
               goal._isPostponeMode = goal._lockDate <= goal._origEndDate
@@ -784,67 +916,59 @@ export default class extends Controller {
               goal._isPostponeMode = false
             }
 
-            // Create ghost outline at original position
-            const ghostGroup = svg.insert("g", ":first-child")
+            // Ghost outline: draw original brick positions as outlines
+            goal._ghostGroup = self.svg.insert("g", ".layer-bricks")
               .attr("class", "drag-ghost")
               .style("pointer-events", "none")
 
-            ghostGroup.append("path")
-              .attr("d", pathD)
+            const ghostBricks = self.currentBricks.filter(b => b.goalId === goal.id)
+            const gap = 1
+            goal._ghostGroup.selectAll(".ghost-brick")
+              .data(ghostBricks)
+              .enter()
+              .append("rect")
+              .attr("x", d => self.xScale(d.date) + gap / 2)
+              .attr("y", d => self.yScale(d.yOffset + d.minutes) + gap / 2)
+              .attr("width", d => Math.max(self.xScale(d.nextDate) - self.xScale(d.date) - gap, 1))
+              .attr("height", d => Math.max(self.yScale(d.yOffset) - self.yScale(d.yOffset + d.minutes) - gap, 1))
+              .attr("rx", 2)
               .style("fill", "none")
               .style("stroke", goal.color)
-              .style("stroke-width", 2)
-              .style("stroke-dasharray", "6,4")
+              .style("stroke-width", 1.5)
+              .style("stroke-dasharray", "4,3")
               .style("opacity", 0.5)
 
-            goal._ghostGroup = ghostGroup
-
-            // If in postpone mode, highlight the locked portion
+            // Postpone mode: locked history indicator
             if (goal._isPostponeMode) {
-              goal._lockedGhost = svg.insert("g", ":first-child")
-                .attr("class", "locked-ghost")
-                .style("pointer-events", "none")
-
-              // Draw locked indicator over past portion
-              const lockedStart = xScale(goal._origStartDate)
-              const lockedEnd = xScale(goal._lockDate)
+              const lockedStart = self.xScale(goal._origStartDate)
+              const lockedEnd = self.xScale(goal._lockDate)
               const lockedWidth = lockedEnd - lockedStart
 
               if (lockedWidth > 0) {
-                goal._lockedGhost
-                  .append("rect")
+                goal._lockedGhost = self.svg.insert("g", ".layer-bricks")
+                  .attr("class", "locked-ghost")
+                  .style("pointer-events", "none")
+
+                goal._lockedGhost.append("rect")
                   .attr("x", lockedStart)
                   .attr("y", 0)
                   .attr("width", lockedWidth)
-                  .attr("height", chartHeight)
+                  .attr("height", self.chartHeight)
                   .style("fill", "rgba(34, 197, 94, 0.1)")
                   .style("stroke", "#22c55e")
                   .style("stroke-width", 1)
                   .style("stroke-dasharray", "4,4")
 
-                goal._lockedGhost
-                  .append("text")
+                goal._lockedGhost.append("text")
                   .attr("x", lockedStart + lockedWidth / 2)
                   .attr("y", 12)
                   .attr("text-anchor", "middle")
                   .style("fill", "#22c55e")
                   .style("font-size", "10px")
                   .style("font-weight", "600")
-                  .text("📌 Locked history")
+                  .text("\ud83d\udccc Locked history")
               }
             }
-
-            // Enhance dragging block appearance
-            d3.select(this)
-              .raise()
-              .style("filter", "drop-shadow(0 4px 12px rgba(0,0,0,0.3))")
-              .style("transform", "scale(1.02)")
-              .style("transform-origin", "center")
-
-            d3.select(this).selectAll(".block-fill")
-              .style("opacity", 1)
-              .style("stroke", "#fff")
-              .style("stroke-width", 2)
 
             // Show drag tooltip
             const mode = goal._isPostponeMode ? "postpone" : "move"
@@ -854,24 +978,18 @@ export default class extends Controller {
           })
           .on("drag", function(event) {
             const dx = event.x - goal._dragStartX
-            const msPerPx = (endDate - startDate) / width
+            const msPerPx = (self.endDate - self.startDate) / self.width
             const offsetMs = dx * msPerPx
-
-            // Snap to day boundaries
             const dayMs = 86400000
             const snappedOffsetMs = Math.round(offsetMs / dayMs) * dayMs
             const daysShifted = Math.round(snappedOffsetMs / dayMs)
 
             if (goal._isPostponeMode) {
-              // Postpone mode: start stays anchored, only end moves
-              // Calculate new future start (where remaining work will begin)
               const origDuration = goal._origEndDate.getTime() - goal._lockDate.getTime()
               goal._newFutureStart = new Date(goal._lockDate.getTime() + snappedOffsetMs)
               goal.endDate = new Date(goal._newFutureStart.getTime() + origDuration)
-              // Start date stays at original (anchored to history)
               goal.startDate = goal._origStartDate
             } else {
-              // Move mode: shift both start and end
               goal.startDate = new Date(goal._origStartDate.getTime() + snappedOffsetMs)
               goal.endDate = new Date(goal._origEndDate.getTime() + snappedOffsetMs)
             }
@@ -883,33 +1001,17 @@ export default class extends Controller {
               .style("left", `${event.sourceEvent.offsetX + 20}px`)
               .style("top", `${event.sourceEvent.offsetY - 60}px`)
 
-            // Visual shift - in postpone mode, only shift future elements
-            const shift = goal._isPostponeMode
-              ? xScale(goal._newFutureStart) - xScale(goal._lockDate)
-              : xScale(goal.startDate) - xScale(goal._origStartDate)
-
-            d3.select(this).selectAll("rect").each(function() {
-              const el = d3.select(this)
-              const origX = parseFloat(el.attr("data-orig-x") || el.attr("x"))
-              if (!el.attr("data-orig-x")) el.attr("data-orig-x", el.attr("x"))
-              el.attr("x", origX + shift)
-            })
-            d3.select(this).selectAll("text").each(function() {
-              const el = d3.select(this)
-              const origX = parseFloat(el.attr("data-orig-x") || el.attr("x"))
-              if (!el.attr("data-orig-x")) el.attr("data-orig-x", el.attr("x"))
-              el.attr("x", origX + shift)
-            })
-            d3.select(this).selectAll("path").each(function() {
-              const el = d3.select(this)
-              if (!el.attr("data-orig-transform")) el.attr("data-orig-transform", el.attr("transform") || "")
-              el.attr("transform", `translate(${shift}, 0)`)
-            })
+            // Live reflow (throttled to rAF)
+            if (!self._dragRafPending) {
+              self._dragRafPending = true
+              requestAnimationFrame(() => {
+                self.updateBricksForDrag()
+                self._dragRafPending = false
+              })
+            }
           })
           .on("end", function() {
-            const blockEl = d3.select(this)
-
-            // Remove ghost outlines
+            // Remove ghosts
             if (goal._ghostGroup) {
               goal._ghostGroup.remove()
               goal._ghostGroup = null
@@ -919,120 +1021,38 @@ export default class extends Controller {
               goal._lockedGhost = null
             }
 
-            // Hide drag tooltip
             dragTooltip.classed("hidden", true)
 
-            // Reset visual enhancements
-            blockEl
-              .style("filter", null)
-              .style("transform", null)
-
-            blockEl.selectAll(".block-fill")
-              .style("opacity", 0.85)
-              .style("stroke", null)
-              .style("stroke-width", null)
-
-            // Check for date changes
             const hasDateChange = goal.endDate.getTime() !== goal._origEndDate.getTime() ||
                                   goal.startDate.getTime() !== goal._origStartDate.getTime()
 
             if (hasDateChange) {
-              // In postpone mode, send the new future start to the API
               if (goal._isPostponeMode && goal._newFutureStart) {
                 self.updateGoalDates(goal.id, goal._newFutureStart, goal.endDate)
               } else {
                 self.updateGoalDates(goal.id, goal.startDate, goal.endDate)
               }
+            } else {
+              // Snap back — re-render with original data
+              self.updateBricksForDrag()
             }
           })
         )
       }
-
-      // Hover effects
-      blockGroup.on("mouseenter", function(event) {
-        d3.select(this).selectAll(".block-fill").style("opacity", 1)
-
-        const dataSource = goal.uses_actual_data
-          ? '<span class="text-green-400">Based on actual reading speed</span>'
-          : '<span class="text-gray-400">Estimated from difficulty</span>'
-
-        let daysLine
-        if (goal.goal_status === "completed") {
-          daysLine = '<span class="text-green-400">Completed</span>'
-        } else if (goal.goal_status === "abandoned") {
-          daysLine = '<span class="text-red-400">Abandoned</span>'
-        } else if (goal.days_remaining > 0 && goal.startDate <= new Date()) {
-          const suffix = !goal.include_weekends ? ` <span class="text-gray-500">(${goal.calendar_days} calendar)</span>` : ""
-          daysLine = `${goal.days_remaining} days remaining${suffix}`
-        } else {
-          const suffix = !goal.include_weekends ? ` <span class="text-gray-500">(${goal.calendar_days} calendar)</span>` : ""
-          daysLine = `${goal.duration_days} day duration${suffix}`
-        }
-
-        // Calculate total actual reading time
-        let actualTimeInfo = ""
-        if (goal.actual_minutes_by_date && Object.keys(goal.actual_minutes_by_date).length > 0) {
-          const totalActualMinutes = Object.values(goal.actual_minutes_by_date).reduce((sum, m) => sum + m, 0)
-          const daysWithReading = Object.keys(goal.actual_minutes_by_date).length
-          const avgPerDay = Math.round(totalActualMinutes / daysWithReading)
-          actualTimeInfo = `
-            <div class="mt-1 pt-1 border-t border-gray-700">
-              <div><span class="text-blue-400">Actual read:</span> ${totalActualMinutes}m over ${daysWithReading} days</div>
-              <div><span class="text-blue-400">Avg actual:</span> ${avgPerDay}m/day</div>
-            </div>
-          `
-        }
-
-        tooltip
-          .html(`
-            <div class="font-semibold mb-1">${goal.title}</div>
-            <div class="text-gray-300 text-xs">${goal.author || "Unknown author"}</div>
-            <div class="mt-2 space-y-1 text-xs">
-              <div><span class="text-gray-400">Planned:</span> ${goal.minutes_per_day}m/day</div>
-              <div>${daysLine}</div>
-              <div><span class="text-gray-400">Pages:</span> ${goal.total_pages}</div>
-              <div><span class="text-gray-400">Progress:</span> ${goal.progress}%</div>
-              <div><span class="text-gray-400">Pages/day:</span> ${goal.pages_per_day}</div>
-              <div><span class="text-gray-400">Est. remaining:</span> ${(goal.estimated_hours || 0).toFixed(1)}h</div>
-              <div>${dataSource}</div>
-              ${actualTimeInfo}
-            </div>
-          `)
-          .classed("hidden", false)
-          .style("left", `${event.offsetX + 15}px`)
-          .style("top", `${event.offsetY - 10}px`)
-      })
-
-      blockGroup.on("mousemove", function(event) {
-        tooltip
-          .style("left", `${event.offsetX + 15}px`)
-          .style("top", `${event.offsetY - 10}px`)
-      })
-
-      blockGroup.on("mouseleave", function() {
-        d3.select(this).selectAll(".block-fill").style("opacity", 0.85)
-        tooltip.classed("hidden", true)
-      })
-
-      blockGroup.on("click", (event) => {
-        if (event.defaultPrevented) return
-        window.location.href = `/reading_goals/${goal.id}`
-      })
     })
-
-    // Legend (color blocks matching each book)
-    if (!this.compactValue) {
-      this.renderLegend(goals)
-    }
   }
 
-  niceMinuteTicks(totalMinutes) {
-    if (totalMinutes <= 30) return d3.range(0, totalMinutes + 1, 5)
-    if (totalMinutes <= 60) return d3.range(0, totalMinutes + 1, 10)
-    if (totalMinutes <= 120) return d3.range(0, totalMinutes + 1, 15)
-    if (totalMinutes <= 240) return d3.range(0, totalMinutes + 1, 30)
-    return d3.range(0, totalMinutes + 1, 60)
+  // ── Live reflow during drag ───────────────────────────────────────
+
+  updateBricksForDrag() {
+    const { bricks } = this.computeBricks(this.goals)
+    this.currentBricks = bricks
+    const labels = this.computeLabels(bricks, this.goals)
+    this.renderBricks(bricks, { transition: true, duration: 80 })
+    this.renderLabels(labels, { transition: true, duration: 80 })
   }
+
+  // ── Legend ────────────────────────────────────────────────────────
 
   renderLegend(goals) {
     const legend = d3.select(this.element)
@@ -1050,6 +1070,8 @@ export default class extends Controller {
         ${!d.uses_actual_data ? '<span class="text-gray-400 text-xs">(est.)</span>' : ''}
       `)
   }
+
+  // ── API ───────────────────────────────────────────────────────────
 
   async updateGoalDates(goalId, startDate, endDate) {
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
@@ -1073,7 +1095,6 @@ export default class extends Controller {
       if (!response.ok) {
         console.error("Failed to update goal dates")
       }
-      // Always reload to get recalculated layout
       this.loadData()
     } catch (error) {
       console.error("Error updating goal:", error)
@@ -1081,18 +1102,19 @@ export default class extends Controller {
     }
   }
 
+  // ── Tooltip formatting ────────────────────────────────────────────
+
   formatDragTooltip(startDate, endDate, daysShifted, sessionInfo = null, mode = "move", newFutureStart = null) {
     const formatDate = d3.timeFormat("%b %d")
     const startStr = formatDate(startDate)
     const endStr = formatDate(endDate)
 
     if (mode === "postpone") {
-      // Postpone mode - show different UI
       let shiftText = ""
       if (daysShifted > 0) {
-        shiftText = `<div class="text-amber-400 font-medium">⏸ Postponing ${daysShifted} day${daysShifted !== 1 ? "s" : ""}</div>`
+        shiftText = `<div class="text-amber-400 font-medium">\u23f8 Postponing ${daysShifted} day${daysShifted !== 1 ? "s" : ""}</div>`
       } else if (daysShifted < 0) {
-        shiftText = `<div class="text-cyan-400 font-medium">⏩ Moving up ${Math.abs(daysShifted)} day${Math.abs(daysShifted) !== 1 ? "s" : ""}</div>`
+        shiftText = `<div class="text-cyan-400 font-medium">\u23e9 Moving up ${Math.abs(daysShifted)} day${Math.abs(daysShifted) !== 1 ? "s" : ""}</div>`
       } else {
         shiftText = `<div class="text-gray-400">No change</div>`
       }
@@ -1103,7 +1125,7 @@ export default class extends Controller {
         <div class="text-xs space-y-1">
           <div class="font-semibold text-white">Postponing remaining work:</div>
           <div class="mt-1 pt-1 border-t border-green-500/30">
-            <div class="text-green-400 text-[10px]">📌 History preserved</div>
+            <div class="text-green-400 text-[10px]">\ud83d\udccc History preserved</div>
           </div>
           <div><span class="text-gray-400">Resume on:</span> ${futureStartStr}</div>
           <div><span class="text-gray-400">Finish by:</span> ${endStr}</div>
@@ -1112,12 +1134,11 @@ export default class extends Controller {
       `
     }
 
-    // Move mode - original behavior
     let shiftText = ""
     if (daysShifted > 0) {
-      shiftText = `<div class="text-amber-400 font-medium">→ ${daysShifted} day${daysShifted !== 1 ? "s" : ""} later</div>`
+      shiftText = `<div class="text-amber-400 font-medium">\u2192 ${daysShifted} day${daysShifted !== 1 ? "s" : ""} later</div>`
     } else if (daysShifted < 0) {
-      shiftText = `<div class="text-cyan-400 font-medium">← ${Math.abs(daysShifted)} day${Math.abs(daysShifted) !== 1 ? "s" : ""} earlier</div>`
+      shiftText = `<div class="text-cyan-400 font-medium">\u2190 ${Math.abs(daysShifted)} day${Math.abs(daysShifted) !== 1 ? "s" : ""} earlier</div>`
     } else {
       shiftText = `<div class="text-gray-400">No change</div>`
     }
@@ -1152,6 +1173,16 @@ export default class extends Controller {
         ${changeText}
       </div>
     `
+  }
+
+  // ── Utilities ─────────────────────────────────────────────────────
+
+  niceMinuteTicks(totalMinutes) {
+    if (totalMinutes <= 30) return d3.range(0, totalMinutes + 1, 5)
+    if (totalMinutes <= 60) return d3.range(0, totalMinutes + 1, 10)
+    if (totalMinutes <= 120) return d3.range(0, totalMinutes + 1, 15)
+    if (totalMinutes <= 240) return d3.range(0, totalMinutes + 1, 30)
+    return d3.range(0, totalMinutes + 1, 60)
   }
 
   debounce(func, wait) {
