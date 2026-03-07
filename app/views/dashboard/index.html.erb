@@ -89,6 +89,55 @@
     </div>
   <% end %>
 
+  <!-- Reading Goal Progress -->
+  <% if @reading_goal_progress %>
+    <% progress = @reading_goal_progress %>
+    <% percentage = progress[:target] > 0 ? [(progress[:current].to_f / progress[:target] * 100).round, 100].min : 0 %>
+    <% diff = progress[:current] - progress[:expected].to_f %>
+    <div class="rounded-lg bg-white shadow">
+      <div class="px-4 py-5 sm:p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-medium leading-6 text-gray-900">Reading Goal</h3>
+          <%= link_to "Edit", profile_path, class: "text-sm text-indigo-600 hover:text-indigo-500" %>
+        </div>
+        <div class="flex items-center gap-6">
+          <!-- Progress ring -->
+          <div class="flex-shrink-0 relative w-24 h-24">
+            <svg class="w-24 h-24 transform -rotate-90" viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" fill="none" stroke-width="8" class="stroke-gray-200"/>
+              <circle cx="50" cy="50" r="42" fill="none" stroke-width="8"
+                      class="<%= percentage >= 100 ? 'stroke-green-500' : 'stroke-indigo-600' %>"
+                      stroke-linecap="round"
+                      stroke-dasharray="<%= (2 * Math::PI * 42).round(1) %>"
+                      stroke-dashoffset="<%= ((1 - percentage / 100.0) * 2 * Math::PI * 42).round(1) %>"/>
+            </svg>
+            <div class="absolute inset-0 flex items-center justify-center">
+              <span class="text-xl font-bold text-gray-900"><%= percentage %>%</span>
+            </div>
+          </div>
+          <!-- Details -->
+          <div class="flex-1 min-w-0">
+            <p class="text-2xl font-bold text-gray-900">
+              <%= progress[:current] %> <span class="text-base font-normal text-gray-500">of <%= progress[:target] %> <%= current_user.reading_goal_label %></span>
+            </p>
+            <p class="mt-1 text-sm text-gray-600"><%= progress[:period].capitalize %></p>
+            <% if diff.abs >= 0.5 %>
+              <p class="mt-1 text-sm font-medium <%= diff >= 0 ? 'text-green-600' : 'text-amber-600' %>">
+                <% if diff > 0 %>
+                  <%= diff.round(1) %> ahead of pace
+                <% elsif diff < 0 %>
+                  <%= diff.abs.round(1) %> behind pace
+                <% end %>
+              </p>
+            <% else %>
+              <p class="mt-1 text-sm font-medium text-green-600">On track</p>
+            <% end %>
+          </div>
+        </div>
+      </div>
+    </div>
+  <% end %>
+
   <!-- Stats -->
   <% if @stats %>
     <div data-controller="stat-cards"
