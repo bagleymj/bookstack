@@ -740,67 +740,82 @@ export default class extends Controller {
         .style("stroke", "none")
         .datum(goal)
 
-      // ── Hover tooltip ──
-      hitTarget.on("mouseenter", (event) => {
-        // Highlight bricks
-        this.brickLayer.selectAll(".brick")
-          .filter(d => d.goalId === goal.id)
-          .style("filter", "brightness(1.1)")
+      // ── Hover tooltip (only when mouse is over an actual brick) ──
+      const isOverBrick = (event) => {
+        const [mx, my] = d3.pointer(event, self.svg.node())
+        const gap = 1
+        return goalBricks.some(b => {
+          const bx = self.xScale(b.date) + gap / 2
+          const by = self.yScale(b.yOffset + b.minutes) + gap / 2
+          const bw = Math.max(self.xScale(b.nextDate) - self.xScale(b.date) - gap, 1)
+          const bh = Math.max(self.yScale(b.yOffset) - self.yScale(b.yOffset + b.minutes) - gap, 1)
+          return mx >= bx && mx <= bx + bw && my >= by && my <= by + bh
+        })
+      }
 
-        const dataSource = goal.uses_actual_data
-          ? '<span class="text-green-400">Based on actual reading speed</span>'
-          : '<span class="text-gray-400">Estimated from difficulty</span>'
+      // Precompute tooltip HTML (goal-level info doesn't change)
+      const dataSource = goal.uses_actual_data
+        ? '<span class="text-green-400">Based on actual reading speed</span>'
+        : '<span class="text-gray-400">Estimated from difficulty</span>'
 
-        let daysLine
-        if (goal.goal_status === "completed") {
-          daysLine = '<span class="text-green-400">Completed</span>'
-        } else if (goal.goal_status === "abandoned") {
-          daysLine = '<span class="text-red-400">Abandoned</span>'
-        } else if (goal.days_remaining > 0 && goal.startDate <= new Date()) {
-          const suffix = !goal.include_weekends ? ` <span class="text-gray-500">(${goal.calendar_days} calendar)</span>` : ""
-          daysLine = `${goal.days_remaining} days remaining${suffix}`
-        } else {
-          const suffix = !goal.include_weekends ? ` <span class="text-gray-500">(${goal.calendar_days} calendar)</span>` : ""
-          daysLine = `${goal.duration_days} day duration${suffix}`
-        }
+      let daysLine
+      if (goal.goal_status === "completed") {
+        daysLine = '<span class="text-green-400">Completed</span>'
+      } else if (goal.goal_status === "abandoned") {
+        daysLine = '<span class="text-red-400">Abandoned</span>'
+      } else if (goal.days_remaining > 0 && goal.startDate <= new Date()) {
+        const suffix = !goal.include_weekends ? ` <span class="text-gray-500">(${goal.calendar_days} calendar)</span>` : ""
+        daysLine = `${goal.days_remaining} days remaining${suffix}`
+      } else {
+        const suffix = !goal.include_weekends ? ` <span class="text-gray-500">(${goal.calendar_days} calendar)</span>` : ""
+        daysLine = `${goal.duration_days} day duration${suffix}`
+      }
 
-        let actualTimeInfo = ""
-        if (goal.actual_minutes_by_date && Object.keys(goal.actual_minutes_by_date).length > 0) {
-          const totalActualMinutes = Object.values(goal.actual_minutes_by_date).reduce((sum, m) => sum + m, 0)
-          const daysWithReading = Object.keys(goal.actual_minutes_by_date).length
-          const avgPerDay = Math.round(totalActualMinutes / daysWithReading)
-          actualTimeInfo = `
-            <div class="mt-1 pt-1 border-t border-gray-700">
-              <div><span class="text-blue-400">Actual read:</span> ${totalActualMinutes}m over ${daysWithReading} days</div>
-              <div><span class="text-blue-400">Avg actual:</span> ${avgPerDay}m/day</div>
-            </div>
-          `
-        }
+      let actualTimeInfo = ""
+      if (goal.actual_minutes_by_date && Object.keys(goal.actual_minutes_by_date).length > 0) {
+        const totalActualMinutes = Object.values(goal.actual_minutes_by_date).reduce((sum, m) => sum + m, 0)
+        const daysWithReading = Object.keys(goal.actual_minutes_by_date).length
+        const avgPerDay = Math.round(totalActualMinutes / daysWithReading)
+        actualTimeInfo = `
+          <div class="mt-1 pt-1 border-t border-gray-700">
+            <div><span class="text-blue-400">Actual read:</span> ${totalActualMinutes}m over ${daysWithReading} days</div>
+            <div><span class="text-blue-400">Avg actual:</span> ${avgPerDay}m/day</div>
+          </div>
+        `
+      }
 
-        this.tooltip
-          .html(`
-            <div class="font-semibold mb-1">${goal.title}</div>
-            <div class="text-gray-300 text-xs">${goal.author || "Unknown author"}</div>
-            <div class="mt-2 space-y-1 text-xs">
-              <div><span class="text-gray-400">Planned:</span> ${goal.minutes_per_day}m/day</div>
-              <div>${daysLine}</div>
-              <div><span class="text-gray-400">Pages:</span> ${goal.total_pages}</div>
-              <div><span class="text-gray-400">Progress:</span> ${goal.progress}%</div>
-              <div><span class="text-gray-400">Pages/day:</span> ${goal.pages_per_day}</div>
-              <div><span class="text-gray-400">Est. remaining:</span> ${(goal.estimated_hours || 0).toFixed(1)}h</div>
-              <div>${dataSource}</div>
-              ${actualTimeInfo}
-            </div>
-          `)
-          .classed("hidden", false)
-          .style("left", `${event.offsetX + 15}px`)
-          .style("top", `${event.offsetY - 10}px`)
-      })
+      const tooltipHtml = `
+        <div class="font-semibold mb-1">${goal.title}</div>
+        <div class="text-gray-300 text-xs">${goal.author || "Unknown author"}</div>
+        <div class="mt-2 space-y-1 text-xs">
+          <div><span class="text-gray-400">Planned:</span> ${goal.minutes_per_day}m/day</div>
+          <div>${daysLine}</div>
+          <div><span class="text-gray-400">Pages:</span> ${goal.total_pages}</div>
+          <div><span class="text-gray-400">Progress:</span> ${goal.progress}%</div>
+          <div><span class="text-gray-400">Pages/day:</span> ${goal.pages_per_day}</div>
+          <div><span class="text-gray-400">Est. remaining:</span> ${(goal.estimated_hours || 0).toFixed(1)}h</div>
+          <div>${dataSource}</div>
+          ${actualTimeInfo}
+        </div>
+      `
 
       hitTarget.on("mousemove", (event) => {
-        this.tooltip
-          .style("left", `${event.offsetX + 15}px`)
-          .style("top", `${event.offsetY - 10}px`)
+        if (isOverBrick(event)) {
+          if (this.tooltip.classed("hidden")) {
+            this.brickLayer.selectAll(".brick")
+              .filter(d => d.goalId === goal.id)
+              .style("filter", "brightness(1.1)")
+            this.tooltip.html(tooltipHtml).classed("hidden", false)
+          }
+          this.tooltip
+            .style("left", `${event.offsetX + 15}px`)
+            .style("top", `${event.offsetY - 10}px`)
+        } else {
+          this.brickLayer.selectAll(".brick")
+            .filter(d => d.goalId === goal.id)
+            .style("filter", null)
+          this.tooltip.classed("hidden", true)
+        }
       })
 
       hitTarget.on("mouseleave", () => {
@@ -810,9 +825,10 @@ export default class extends Controller {
         this.tooltip.classed("hidden", true)
       })
 
-      // ── Click to navigate ──
+      // ── Click to navigate (only when over a brick) ──
       hitTarget.on("click", (event) => {
         if (event.defaultPrevented) return
+        if (!isOverBrick(event)) return
         window.location.href = `/reading_goals/${goal.id}`
       })
 
