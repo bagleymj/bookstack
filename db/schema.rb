@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_03_07_180355) do
+ActiveRecord::Schema[7.1].define(version: 2026_03_07_190736) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -58,8 +58,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_07_180355) do
   create_table "reading_goals", force: :cascade do |t|
     t.bigint "user_id", null: false
     t.bigint "book_id", null: false
-    t.date "target_completion_date", null: false
-    t.date "started_on", null: false
+    t.date "target_completion_date"
+    t.date "started_on"
     t.boolean "include_weekends", default: true
     t.integer "status", default: 0
     t.datetime "created_at", null: false
