@@ -13,12 +13,19 @@ class User < ApplicationRecord
   # Validations
   validates :default_words_per_page, numericality: { greater_than: 0 }
   validates :default_reading_speed_wpm, numericality: { greater_than: 0 }
+  validates :max_concurrent_books, numericality: { greater_than: 0 }
+  validates :weekday_reading_minutes, numericality: { greater_than_or_equal_to: 0 }
+  validates :weekend_reading_minutes, numericality: { greater_than_or_equal_to: 0 }
 
   # Callbacks
   after_create :create_reading_stats
 
   def effective_reading_speed
     user_reading_stats&.average_wpm || default_reading_speed_wpm
+  end
+
+  def includes_weekends?
+    weekend_reading_minutes > 0
   end
 
   private

@@ -39,6 +39,7 @@ Rails.application.routes.draw do
     end
 
     resource :pipeline, only: [:show], controller: "pipeline"
+    resource :profile, only: [:show, :update]
 
     namespace :api do
       namespace :v1 do
