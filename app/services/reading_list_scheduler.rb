@@ -57,10 +57,13 @@ class ReadingListScheduler
     total.to_f / @user.max_concurrent_books
   end
 
-  # Build initial slot availability from locked goals (goals with sessions)
+  # Build initial slot availability from locked goals (goals with sessions).
+  # Empty slots are staggered by the pace interval so books spread out
+  # over time instead of all starting on the same day.
   def build_slot_timeline
     max_slots = @user.max_concurrent_books
-    slots = Array.new(max_slots) { { free_date: Date.current } }
+    stagger = pace_stagger_days
+    slots = Array.new(max_slots) { |i| { free_date: Date.current + (i * stagger) } }
 
     locked_goals = @user.reading_goals
                         .active
@@ -79,6 +82,34 @@ class ReadingListScheduler
     end
 
     slots
+  end
+
+  # How many days to stagger between slots, derived from the user's pace.
+  # With 50 books/year → 7 days between each slot opening.
+  # With 1 concurrent book → no stagger needed.
+  def pace_stagger_days
+    return 0 if @user.max_concurrent_books <= 1
+
+    interval = pace_completion_interval
+    return 0 if interval <= 0
+
+    interval
+  end
+
+  # Days between finishing one book and the next, based on pace setting.
+  def pace_completion_interval
+    return 0 unless @user.reading_pace_value&.positive?
+
+    case @user.reading_pace_type
+    when "books_per_year"
+      (365.0 / @user.reading_pace_value).round
+    when "books_per_month"
+      (30.0 / @user.reading_pace_value).round
+    when "books_per_week"
+      (7.0 / @user.reading_pace_value).round
+    else
+      0
+    end
   end
 
   # Schedulable = queued + active auto_scheduled without sessions, ordered by position
