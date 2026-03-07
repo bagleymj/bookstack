@@ -12,11 +12,12 @@ class ReadingListScheduler
 
     schedulable_goals.each do |goal|
       earliest_slot = slots.min_by { |s| s[:free_date] }
-      start_date = [earliest_slot[:free_date], Date.current].max
+      earliest_date = [earliest_slot[:free_date], Date.current].max
 
       total_minutes = estimate_total_minutes(goal.book)
       raw_days = per_slot_minutes > 0 ? (total_minutes.to_f / per_slot_minutes).ceil : 7
       snapped_days = snap_to_period(raw_days)
+      start_date = snap_start_date(earliest_date, snapped_days)
       end_date = start_date + snapped_days - 1
 
       goal.update!(
@@ -49,6 +50,38 @@ class ReadingListScheduler
     end
 
     SNAP_PERIODS.last
+  end
+
+  # Snap a start date to a clean boundary based on the book's duration:
+  #   Weekend reads (2 days) → Saturday
+  #   Weekly reads (7/14 days) → Monday
+  #   Monthly+ reads (30/90/180 days) → 1st of the month
+  # If earliest_date is already on the right boundary, use it.
+  # Otherwise advance to the next valid start day.
+  # Exception: if earliest_date is today, start today regardless.
+  def snap_start_date(earliest_date, snapped_days)
+    return earliest_date if earliest_date == Date.current
+
+    case snapped_days
+    when 2
+      next_weekday(earliest_date, :saturday)
+    when 7, 14
+      next_weekday(earliest_date, :monday)
+    else # 30, 90, 180
+      next_first_of_month(earliest_date)
+    end
+  end
+
+  def next_weekday(date, day)
+    target_wday = day == :monday ? 1 : 6
+    return date if date.wday == target_wday
+    days_ahead = (target_wday - date.wday) % 7
+    date + days_ahead
+  end
+
+  def next_first_of_month(date)
+    return date if date.day == 1
+    date.next_month.beginning_of_month
   end
 
   def effective_daily_minutes_per_slot
