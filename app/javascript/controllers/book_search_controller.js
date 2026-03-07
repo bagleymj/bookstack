@@ -8,6 +8,7 @@ export default class extends Controller {
     this.debounceTimer = null
     this.abortController = null
     this.searchMode = "all"
+    this.hideOwned = false
     this.lastResults = []
 
     // Close results on click outside
@@ -87,6 +88,16 @@ export default class extends Controller {
     }
   }
 
+  toggleHideOwned(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    this.hideOwned = !this.hideOwned
+    // Re-render from cached results (no new API call needed)
+    if (this.lastResults.length > 0) {
+      this.renderResults(this.lastResults)
+    }
+  }
+
   search() {
     const query = this.inputTarget.value.trim()
 
@@ -153,7 +164,7 @@ export default class extends Controller {
     this.bindFilterChips()
   }
 
-  renderFilterChips() {
+  renderFilterChips(hasOwned = false) {
     const modes = [
       { value: "all", label: "All" },
       { value: "title", label: "Title" },
@@ -170,24 +181,41 @@ export default class extends Controller {
       return `<button type="button" data-mode="${m.value}" data-filter-chip class="${baseClasses} ${colorClasses}">${m.label}</button>`
     }).join("")
 
-    return `<div class="sticky top-0 z-10 flex gap-1.5 px-3 py-2 bg-gray-50 border-b border-gray-200 rounded-t-lg">${chips}</div>`
+    // Only show "Hide owned" toggle when there are owned books in results
+    let ownedToggle = ""
+    if (hasOwned) {
+      const baseClasses = "px-3 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer ml-auto"
+      const colorClasses = this.hideOwned
+        ? "bg-amber-100 text-amber-700 border-amber-300"
+        : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:border-gray-300"
+      ownedToggle = `<button type="button" data-hide-owned-chip class="${baseClasses} ${colorClasses}">Hide owned</button>`
+    }
+
+    return `<div class="sticky top-0 z-10 flex gap-1.5 px-3 py-2 bg-gray-50 border-b border-gray-200 rounded-t-lg">${chips}${ownedToggle}</div>`
   }
 
   bindFilterChips() {
     this.resultsTarget.querySelectorAll("[data-filter-chip]").forEach(chip => {
       chip.addEventListener("click", (e) => this.setMode(e))
     })
+    const ownedChip = this.resultsTarget.querySelector("[data-hide-owned-chip]")
+    if (ownedChip) {
+      ownedChip.addEventListener("click", (e) => this.toggleHideOwned(e))
+    }
   }
 
   renderResults(results) {
     this.selectedIndex = -1
 
-    if (results.length === 0) {
+    const hasOwned = results.some(b => b.in_collection)
+    const displayResults = this.hideOwned ? results.filter(b => !b.in_collection) : results
+
+    if (displayResults.length === 0) {
       this.resultsTarget.innerHTML = `
-        ${this.renderFilterChips()}
+        ${this.renderFilterChips(hasOwned)}
         <div class="p-4 text-center text-gray-500">
-          <p>No books found</p>
-          <p class="text-sm mt-1">Try a different search or filter above</p>
+          <p>${this.hideOwned && results.length > 0 ? "All results are in your collection" : "No books found"}</p>
+          <p class="text-sm mt-1">${this.hideOwned && results.length > 0 ? "Toggle \"Hide owned\" to see them" : "Try a different search or filter above"}</p>
         </div>
       `
       this.bindFilterChips()
@@ -195,7 +223,7 @@ export default class extends Controller {
     }
 
     const amazonTag = this.amazonTagValue
-    const bookHtml = results.map((book, index) => `
+    const bookHtml = displayResults.map((book, index) => `
       <button type="button"
               data-book-result
               data-action="click->book-search#selectResult"
@@ -205,7 +233,7 @@ export default class extends Controller {
               data-book-isbn="${this.escapeAttr(book.isbn || "")}"
               data-book-cover="${this.escapeAttr(book.cover_url || "")}"
               data-book-publisher="${this.escapeAttr(book.publisher || "")}"
-              class="w-full flex items-center gap-3 p-3 text-left hover:bg-indigo-50 transition-colors border-b border-gray-100 last:border-0">
+              class="w-full flex items-center gap-3 p-3 text-left hover:bg-indigo-50 transition-colors border-b border-gray-100 last:border-0${book.in_collection ? " opacity-60" : ""}">
         ${book.cover_url_small
           ? `<img src="${this.escapeAttr(book.cover_url_small)}" alt="" class="w-10 h-14 object-cover rounded shadow-sm flex-shrink-0" onerror="this.style.display='none'">`
           : `<div class="w-10 h-14 bg-gray-100 rounded flex items-center justify-center flex-shrink-0">
@@ -215,7 +243,10 @@ export default class extends Controller {
              </div>`
         }
         <div class="flex-1 min-w-0">
-          <p class="font-medium text-gray-900 truncate">${this.escapeHtml(book.title)}</p>
+          <p class="font-medium text-gray-900 truncate">
+            ${this.escapeHtml(book.title)}
+            ${book.in_collection ? `<span class="inline-flex items-center ml-1.5 px-1.5 py-0.5 text-xs font-medium rounded bg-green-100 text-green-700">In collection</span>` : ""}
+          </p>
           <p class="text-sm text-gray-500 truncate">
             ${book.author ? this.escapeHtml(book.author) : "Unknown author"}
             ${book.year ? `<span class="text-gray-400">(${book.year})</span>` : ""}
@@ -233,7 +264,7 @@ export default class extends Controller {
       </button>
     `).join("")
 
-    this.resultsTarget.innerHTML = this.renderFilterChips() + bookHtml
+    this.resultsTarget.innerHTML = this.renderFilterChips(hasOwned) + bookHtml
     this.resultsTarget.classList.remove("hidden")
     this.bindFilterChips()
   }
@@ -266,6 +297,7 @@ export default class extends Controller {
     // Clear search and hide results
     this.inputTarget.value = ""
     this.searchMode = "all"
+    this.hideOwned = false
     this.hideResults()
 
     // Focus the first empty required field
