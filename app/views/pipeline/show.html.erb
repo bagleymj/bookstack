@@ -1,4 +1,4 @@
-<div class="space-y-6">
+<div class="space-y-6" data-controller="pipeline-drop" data-pipeline-drop-create-url-value="<%= reading_goals_path(format: :json) %>">
   <div class="md:flex md:items-center md:justify-between">
     <div class="min-w-0 flex-1">
       <h2 class="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight">
@@ -16,8 +16,10 @@
     </div>
   </div>
 
-  <!-- Pipeline Chart -->
-  <div class="rounded-lg bg-white shadow">
+  <!-- Pipeline Chart (Drop Zone) -->
+  <div class="rounded-lg bg-white shadow transition-all duration-200"
+       data-pipeline-drop-target="dropZone"
+       data-action="dragover->pipeline-drop#dragOver dragenter->pipeline-drop#dragEnter dragleave->pipeline-drop#dragLeave drop->pipeline-drop#drop">
     <div class="px-4 py-5 sm:p-6">
       <div data-controller="pipeline-chart"
            data-pipeline-chart-url-value="<%= api_v1_pipeline_index_path %>"
@@ -29,6 +31,43 @@
       </div>
     </div>
   </div>
+
+  <!-- Available Books (Draggable) -->
+  <% if @available_books.any? %>
+    <div class="space-y-4">
+      <div class="flex items-center gap-2">
+        <h3 class="text-lg font-medium text-gray-900">Available Books</h3>
+        <span class="text-sm text-gray-500">Drag onto the pipeline to create a goal</span>
+      </div>
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <% @available_books.each do |book| %>
+          <div class="rounded-lg bg-white p-4 shadow cursor-grab active:cursor-grabbing hover:shadow-md transition-all select-none"
+               draggable="true"
+               data-pipeline-drop-target="bookCard"
+               data-book-id="<%= book.id %>"
+               data-book-title="<%= book.title %>"
+               data-action="dragstart->pipeline-drop#dragStart dragend->pipeline-drop#dragEnd">
+            <div class="flex items-center gap-3">
+              <div class="flex-shrink-0">
+                <svg class="h-8 w-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                </svg>
+              </div>
+              <div class="min-w-0 flex-1">
+                <h4 class="text-sm font-medium text-gray-900 truncate"><%= book.title %></h4>
+                <p class="text-xs text-gray-500"><%= book.remaining_pages %> pages remaining</p>
+              </div>
+              <div class="flex-shrink-0 text-gray-300">
+                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
 
   <!-- Active Goals -->
   <% if @active_goals.any? %>
@@ -134,4 +173,63 @@
       </div>
     </div>
   <% end %>
+
+  <!-- Goal Creation Modal -->
+  <div class="hidden fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50"
+       data-pipeline-drop-target="modal"
+       data-action="click->pipeline-drop#backdropClick keydown->pipeline-drop#modalKeydown">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-medium text-gray-900">Create Reading Goal</h3>
+        <button type="button" data-action="pipeline-drop#closeModal" class="text-gray-400 hover:text-gray-500">
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <p class="text-sm font-medium text-indigo-600 mb-4" data-pipeline-drop-target="modalTitle"></p>
+
+      <!-- Errors -->
+      <div class="hidden mb-4">
+        <ul class="text-sm text-red-600 list-disc pl-5" data-pipeline-drop-target="modalErrors"></ul>
+      </div>
+
+      <form data-action="submit->pipeline-drop#submitGoal">
+        <input type="hidden" data-pipeline-drop-target="bookIdField">
+
+        <div class="space-y-4">
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+              <input type="date" data-pipeline-drop-target="startedOn"
+                     class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Target Date</label>
+              <input type="date" data-pipeline-drop-target="targetDate" required
+                     class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+            </div>
+          </div>
+
+          <div class="flex items-center">
+            <input type="checkbox" data-pipeline-drop-target="includeWeekends"
+                   class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+            <label class="ml-2 block text-sm text-gray-700">Include weekends</label>
+          </div>
+        </div>
+
+        <div class="mt-6 flex justify-end gap-3">
+          <button type="button" data-action="pipeline-drop#closeModal"
+                  class="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50">
+            Cancel
+          </button>
+          <button type="submit"
+                  class="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500">
+            Create Goal
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>

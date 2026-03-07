@@ -17,10 +17,18 @@ class ReadingGoalsController < ApplicationController
     @reading_goal = current_user.reading_goals.build(reading_goal_params)
 
     if @reading_goal.save
-      redirect_to @reading_goal, notice: "Reading goal created! Daily quotas have been generated."
+      respond_to do |format|
+        format.html { redirect_to @reading_goal, notice: "Reading goal created! Daily quotas have been generated." }
+        format.json { render json: { id: @reading_goal.id, message: "Reading goal created!" }, status: :created }
+      end
     else
-      @books = current_user.books.where.not(status: :completed)
-      render :new, status: :unprocessable_entity
+      respond_to do |format|
+        format.html do
+          @books = current_user.books.where.not(status: :completed)
+          render :new, status: :unprocessable_entity
+        end
+        format.json { render json: { errors: @reading_goal.errors.full_messages }, status: :unprocessable_entity }
+      end
     end
   end
 
