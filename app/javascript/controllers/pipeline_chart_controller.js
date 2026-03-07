@@ -719,41 +719,8 @@ export default class extends Controller {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
+    // Precompute tooltip HTML for each goal
     this.goals.forEach(goal => {
-      const goalBricks = this.currentBricks.filter(b => b.goalId === goal.id)
-      if (!goalBricks.length) return
-
-      // Compute bounding box for this goal's bricks
-      const minX = d3.min(goalBricks, b => this.xScale(b.date))
-      const maxX = d3.max(goalBricks, b => this.xScale(b.nextDate))
-      const minY = d3.min(goalBricks, b => this.yScale(b.yOffset + b.minutes))
-      const maxY = d3.max(goalBricks, b => this.yScale(b.yOffset))
-
-      // Invisible hit target covering all bricks for this goal
-      const hitTarget = this.overlayLayer.append("rect")
-        .attr("class", `overlay-hit ${this.editModeValue ? "cursor-move" : "cursor-pointer"}`)
-        .attr("x", minX)
-        .attr("y", minY)
-        .attr("width", maxX - minX)
-        .attr("height", maxY - minY)
-        .style("fill", "transparent")
-        .style("stroke", "none")
-        .datum(goal)
-
-      // ── Hover tooltip (only when mouse is over an actual brick) ──
-      const isOverBrick = (event) => {
-        const [mx, my] = d3.pointer(event, self.svg.node())
-        const gap = 1
-        return goalBricks.some(b => {
-          const bx = self.xScale(b.date) + gap / 2
-          const by = self.yScale(b.yOffset + b.minutes) + gap / 2
-          const bw = Math.max(self.xScale(b.nextDate) - self.xScale(b.date) - gap, 1)
-          const bh = Math.max(self.yScale(b.yOffset) - self.yScale(b.yOffset + b.minutes) - gap, 1)
-          return mx >= bx && mx <= bx + bw && my >= by && my <= by + bh
-        })
-      }
-
-      // Precompute tooltip HTML (goal-level info doesn't change)
       const dataSource = goal.uses_actual_data
         ? '<span class="text-green-400">Based on actual reading speed</span>'
         : '<span class="text-gray-400">Estimated from difficulty</span>'
@@ -784,7 +751,7 @@ export default class extends Controller {
         `
       }
 
-      const tooltipHtml = `
+      goal._tooltipHtml = `
         <div class="font-semibold mb-1">${goal.title}</div>
         <div class="text-gray-300 text-xs">${goal.author || "Unknown author"}</div>
         <div class="mt-2 space-y-1 text-xs">
@@ -798,38 +765,82 @@ export default class extends Controller {
           ${actualTimeInfo}
         </div>
       `
+    })
 
+    this._hoveredGoalId = null
+
+    this.goals.forEach(goal => {
+      const goalBricks = this.currentBricks.filter(b => b.goalId === goal.id)
+      if (!goalBricks.length) return
+
+      // Compute bounding box for this goal's bricks
+      const minX = d3.min(goalBricks, b => this.xScale(b.date))
+      const maxX = d3.max(goalBricks, b => this.xScale(b.nextDate))
+      const minY = d3.min(goalBricks, b => this.yScale(b.yOffset + b.minutes))
+      const maxY = d3.max(goalBricks, b => this.yScale(b.yOffset))
+
+      // Invisible hit target covering all bricks for this goal
+      const hitTarget = this.overlayLayer.append("rect")
+        .attr("class", `overlay-hit ${this.editModeValue ? "cursor-move" : "cursor-pointer"}`)
+        .attr("x", minX)
+        .attr("y", minY)
+        .attr("width", maxX - minX)
+        .attr("height", maxY - minY)
+        .style("fill", "transparent")
+        .style("stroke", "none")
+        .datum(goal)
+
+      // ── Hover tooltip (checks ALL goals' bricks, not just this overlay's) ──
       hitTarget.on("mousemove", (event) => {
-        if (isOverBrick(event)) {
-          if (this.tooltip.classed("hidden")) {
-            this.brickLayer.selectAll(".brick")
-              .filter(d => d.goalId === goal.id)
+        const [mx, my] = d3.pointer(event, self.svg.node())
+        const hitGoal = self.findGoalAtPoint(mx, my)
+
+        if (hitGoal) {
+          if (self._hoveredGoalId !== hitGoal.id) {
+            // Clear previous highlight
+            if (self._hoveredGoalId) {
+              self.brickLayer.selectAll(".brick")
+                .filter(d => d.goalId === self._hoveredGoalId)
+                .style("filter", null)
+            }
+            self._hoveredGoalId = hitGoal.id
+            self.brickLayer.selectAll(".brick")
+              .filter(d => d.goalId === hitGoal.id)
               .style("filter", "brightness(1.1)")
-            this.tooltip.html(tooltipHtml).classed("hidden", false)
+            self.tooltip.html(hitGoal._tooltipHtml).classed("hidden", false)
           }
-          this.tooltip
+          self.tooltip
             .style("left", `${event.offsetX + 15}px`)
             .style("top", `${event.offsetY - 10}px`)
         } else {
-          this.brickLayer.selectAll(".brick")
-            .filter(d => d.goalId === goal.id)
-            .style("filter", null)
-          this.tooltip.classed("hidden", true)
+          if (self._hoveredGoalId) {
+            self.brickLayer.selectAll(".brick")
+              .filter(d => d.goalId === self._hoveredGoalId)
+              .style("filter", null)
+            self._hoveredGoalId = null
+          }
+          self.tooltip.classed("hidden", true)
         }
       })
 
       hitTarget.on("mouseleave", () => {
-        this.brickLayer.selectAll(".brick")
-          .filter(d => d.goalId === goal.id)
-          .style("filter", null)
-        this.tooltip.classed("hidden", true)
+        if (self._hoveredGoalId) {
+          self.brickLayer.selectAll(".brick")
+            .filter(d => d.goalId === self._hoveredGoalId)
+            .style("filter", null)
+          self._hoveredGoalId = null
+        }
+        self.tooltip.classed("hidden", true)
       })
 
-      // ── Click to navigate (only when over a brick) ──
+      // ── Click to navigate (checks ALL goals' bricks) ──
       hitTarget.on("click", (event) => {
         if (event.defaultPrevented) return
-        if (!isOverBrick(event)) return
-        window.location.href = `/reading_goals/${goal.id}`
+        const [mx, my] = d3.pointer(event, self.svg.node())
+        const hitGoal = self.findGoalAtPoint(mx, my)
+        if (hitGoal) {
+          window.location.href = `/reading_goals/${hitGoal.id}`
+        }
       })
 
       // ── Edit mode: resize handles (left + right edges) ──
@@ -1095,6 +1106,24 @@ export default class extends Controller {
         )
       }
     })
+  }
+
+  // ── Hit testing ─────────────────────────────────────────────────
+
+  findGoalAtPoint(mx, my) {
+    const gap = 1
+    // Check bricks in reverse order (topmost visually = last appended)
+    for (let i = this.currentBricks.length - 1; i >= 0; i--) {
+      const b = this.currentBricks[i]
+      const bx = this.xScale(b.date) + gap / 2
+      const by = this.yScale(b.yOffset + b.minutes) + gap / 2
+      const bw = Math.max(this.xScale(b.nextDate) - this.xScale(b.date) - gap, 1)
+      const bh = Math.max(this.yScale(b.yOffset) - this.yScale(b.yOffset + b.minutes) - gap, 1)
+      if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+        return this.goals.find(g => g.id === b.goalId)
+      }
+    }
+    return null
   }
 
   // ── Live reflow during drag ───────────────────────────────────────
