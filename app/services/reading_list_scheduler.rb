@@ -8,15 +8,25 @@ class ReadingListScheduler
   def schedule!
     slots = build_slot_timeline
     schedulable_goals = gather_schedulable_goals
+    default_duration = pace_book_duration
     per_slot_minutes = effective_daily_minutes_per_slot
 
     schedulable_goals.each do |goal|
       earliest_slot = slots.min_by { |s| s[:free_date] }
       earliest_date = [earliest_slot[:free_date], Date.current].max
 
+      # Start with pace-derived duration. Every book gets the same window
+      # so the plan projects to the target pace.
+      snapped_days = default_duration
+
+      # Extend for books that physically can't fit — if the reading time
+      # exceeds the slot's daily budget × duration, bump to the next period.
       total_minutes = estimate_total_minutes(goal.book)
-      raw_days = per_slot_minutes > 0 ? (total_minutes.to_f / per_slot_minutes).ceil : 7
-      snapped_days = snap_to_period(raw_days)
+      min_days = per_slot_minutes > 0 ? (total_minutes.to_f / per_slot_minutes).ceil : snapped_days
+      while snapped_days < min_days && snapped_days < SNAP_PERIODS.last
+        snapped_days = next_snap_period(snapped_days)
+      end
+
       start_date = snap_start_date(earliest_date, snapped_days)
       end_date = start_date + snapped_days - 1
 
@@ -36,6 +46,25 @@ class ReadingListScheduler
   end
 
   private
+
+  # The standard duration each book gets, derived from the pace target.
+  # With 50 books/year and 3 concurrent: interval=7, duration=7*3=21 → snap to 14.
+  # This ensures the plan projects to ~50 completions/year.
+  def pace_book_duration
+    interval = pace_completion_interval
+    if interval > 0
+      snap_to_period(interval * @user.max_concurrent_books)
+    else
+      # minutes_per_day pace: fall back to reading-speed estimate
+      7
+    end
+  end
+
+  def next_snap_period(current)
+    idx = SNAP_PERIODS.index(current)
+    return SNAP_PERIODS.last if idx.nil? || idx >= SNAP_PERIODS.length - 1
+    SNAP_PERIODS[idx + 1]
+  end
 
   # Snap raw_days to the nearest period, biased toward gentler (longer).
   # Uses a 40% threshold: snap down only if raw_days falls in the bottom 40%
