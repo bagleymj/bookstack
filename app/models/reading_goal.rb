@@ -7,22 +7,24 @@ class ReadingGoal < ApplicationRecord
   enum :status, {
     active: 0,
     completed: 1,
-    abandoned: 2
+    abandoned: 2,
+    queued: 3
   }
 
   # Validations
-  validates :target_completion_date, presence: true
-  validates :started_on, presence: true
-  validate :target_date_after_start_date
+  validates :target_completion_date, presence: true, unless: :queued?
+  validates :started_on, presence: true, unless: :queued?
+  validate :target_date_after_start_date, unless: :queued?
   validate :one_active_goal_per_book, on: :create
 
   # Scopes
   scope :current, -> { active.where("target_completion_date >= ?", Date.current) }
-  scope :pipeline_visible, -> { where(status: [:active, :completed]).or(where("started_on > ?", Date.current)) }
+  scope :pipeline_visible, -> { where(status: [:active, :completed, :queued]).or(where("started_on > ?", Date.current)) }
   scope :ordered_by_start, -> { order(:started_on, :target_completion_date) }
+  scope :in_reading_list, -> { where(status: [:active, :queued]).where.not(position: nil).order(:position) }
 
   # Callbacks
-  after_create :generate_daily_quotas
+  after_create :generate_daily_quotas, unless: :queued?
 
   def remaining_pages
     book.remaining_pages
@@ -33,6 +35,7 @@ class ReadingGoal < ApplicationRecord
   end
 
   def reading_days_remaining
+    return 0 if queued?
     return 0 if target_completion_date < Date.current
 
     (Date.current..target_completion_date).count do |date|
@@ -42,6 +45,7 @@ class ReadingGoal < ApplicationRecord
 
   # Total reading days across the full goal span (start to end)
   def goal_reading_days
+    return 0 if queued? || started_on.nil? || target_completion_date.nil?
     days = (started_on..target_completion_date).count do |date|
       include_weekends? || !date.on_weekend?
     end
@@ -246,6 +250,8 @@ class ReadingGoal < ApplicationRecord
   end
 
   def as_pipeline_data
+    return queued_pipeline_data if queued?
+
     goal_duration = goal_reading_days
     session_boundaries = reading_session_boundaries
 
@@ -284,13 +290,21 @@ class ReadingGoal < ApplicationRecord
       has_sessions: session_boundaries[:has_sessions],
       earliest_session_date: session_boundaries[:earliest]&.to_s,
       latest_session_date: session_boundaries[:latest]&.to_s,
-      session_count: session_boundaries[:count]
+      session_count: session_boundaries[:count],
+      position: position,
+      auto_scheduled: auto_scheduled
     }
+  end
+
+  def has_reading_sessions?
+    book.reading_sessions.completed.exists?
   end
 
   # Returns boundaries of all reading sessions for this book up to the goal's end date.
   # Includes sessions before started_on so that pre-postponement reading is captured.
   def reading_session_boundaries
+    return { has_sessions: false, earliest: nil, latest: nil, count: 0 } if target_completion_date.nil?
+
     sessions = book.reading_sessions
                    .completed
                    .where("started_at <= ?", target_completion_date.end_of_day)
@@ -344,6 +358,41 @@ class ReadingGoal < ApplicationRecord
   end
 
   private
+
+  def queued_pipeline_data
+    {
+      id: id,
+      book_id: book.id,
+      title: book.title,
+      author: book.author,
+      start_date: nil,
+      end_date: nil,
+      progress: book.progress_percentage,
+      status: book.status,
+      difficulty: book.difficulty,
+      total_pages: book.total_pages,
+      estimated_hours: book.estimated_reading_time_hours,
+      estimated_minutes: book.effective_reading_time_minutes,
+      minutes_per_day: 0,
+      duration_days: 0,
+      days_remaining: 0,
+      calendar_days: 0,
+      include_weekends: true,
+      goal_status: status,
+      on_track: false,
+      pages_per_day: 0,
+      uses_actual_data: false,
+      actual_minutes_by_date: {},
+      today_actual_minutes: 0,
+      today_remaining_minutes: 0,
+      has_sessions: false,
+      earliest_session_date: nil,
+      latest_session_date: nil,
+      session_count: 0,
+      position: position,
+      auto_scheduled: auto_scheduled
+    }
+  end
 
   def resolve_discrepancy_redistribute!(discrepancy)
     if discrepancy[:type] == :behind
@@ -410,8 +459,8 @@ class ReadingGoal < ApplicationRecord
   end
 
   def one_active_goal_per_book
-    if user.reading_goals.active.where(book: book).exists?
-      errors.add(:book, "already has an active reading goal")
+    if user.reading_goals.where(status: [:active, :queued]).where(book: book).exists?
+      errors.add(:book, "already has an active or queued reading goal")
     end
   end
 end
