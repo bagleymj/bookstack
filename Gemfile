@@ -31,7 +31,7 @@ gem "jbuilder"
 
 # Authentication [https://github.com/heartcombo/devise]
 gem "devise", "~> 4.9"
-gem "devise-jwt", "~> 0.12"
+gem "devise-jwt", "~> 0.12", require: "devise/jwt"
 
 # API support
 gem "rack-cors"
