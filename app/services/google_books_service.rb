@@ -8,13 +8,20 @@ class GoogleBooksService
   class ApiError < StandardError; end
 
   # Search for books by title/author query
-  # Returns array of book hashes with normalized fields
+  # Supports "by Author Name" prefix for explicit author search.
+  # Also auto-detects initials (e.g. "C.S. Lewis") as author searches.
   def search(query, limit: 8)
     return [] if query.blank?
 
+    author_mode, clean_query = detect_author_search(query)
+    search_query = author_mode ? "inauthor:#{clean_query}" : clean_query
+
+    # Request extra results for author searches since we'll post-filter
+    api_limit = author_mode ? [limit * 3, 40].min : limit
+
     params = {
-      q: query,
-      maxResults: limit,
+      q: search_query,
+      maxResults: api_limit,
       printType: "books"
     }
 
@@ -23,7 +30,13 @@ class GoogleBooksService
     response = get("/books/v1/volumes", params)
     items = response["items"] || []
 
-    items.map { |item| normalize(item) }.compact
+    results = items.map { |item| normalize(item) }.compact
+
+    if author_mode
+      results = filter_by_author(results, clean_query)
+    end
+
+    results.first(limit)
   rescue ApiError, Net::TimeoutError, JSON::ParserError => e
     Rails.logger.error("GoogleBooks search error: #{e.message}")
     []
@@ -108,5 +121,44 @@ class GoogleBooksService
   def add_api_key(params)
     api_key = Rails.application.credentials.dig(:google_books, :api_key)
     params[:key] = api_key if api_key.present?
+  end
+
+  # Detect whether the query is an author search.
+  # Returns [author_mode, cleaned_query].
+  #
+  # Triggers on:
+  #   - Explicit "by " prefix: "by David McCullough" → author search for "David McCullough"
+  #   - Initials pattern: "C.S. Lewis", "J.R.R. Tolkien" → unambiguously author names
+  def detect_author_search(query)
+    stripped = query.strip
+
+    # Explicit "by " prefix
+    if stripped.match?(/\Aby\s+/i)
+      return [true, stripped.sub(/\Aby\s+/i, "")]
+    end
+
+    # Query contains initials like "C.S." or "J.K." or "J.R.R."
+    words = stripped.split(/\s+/)
+    if words.length >= 2 && words.any? { |w| w.match?(/\A([A-Z]\.){1,3}\z/) }
+      return [true, stripped]
+    end
+
+    [false, stripped]
+  end
+
+  # Keep only results where the author field matches the query name
+  def filter_by_author(results, author_query)
+    # Extract meaningful name parts (strip initials' dots, ignore short fragments)
+    query_parts = author_query.downcase.tr(".", "").split(/\s+/).select { |p| p.length >= 2 }
+    return results if query_parts.empty?
+
+    # The last name is the strongest signal
+    last_name = query_parts.last
+
+    results.select do |book|
+      next false unless book[:author]
+      author_lower = book[:author].downcase
+      author_lower.include?(last_name)
+    end
   end
 end
