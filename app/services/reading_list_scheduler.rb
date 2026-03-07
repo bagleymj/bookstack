@@ -1,4 +1,6 @@
 class ReadingListScheduler
+  SNAP_PERIODS = [2, 7, 14, 30, 90, 180].freeze
+
   def initialize(user)
     @user = user
   end
@@ -6,22 +8,24 @@ class ReadingListScheduler
   def schedule!
     slots = build_slot_timeline
     schedulable_goals = gather_schedulable_goals
+    per_slot_minutes = effective_daily_minutes_per_slot
 
     schedulable_goals.each do |goal|
       earliest_slot = slots.min_by { |s| s[:free_date] }
       start_date = [earliest_slot[:free_date], Date.current].max
 
       total_minutes = estimate_total_minutes(goal.book)
-      end_date = walk_calendar(start_date, total_minutes)
+      raw_days = per_slot_minutes > 0 ? (total_minutes.to_f / per_slot_minutes).ceil : 7
+      snapped_days = snap_to_period(raw_days)
+      end_date = start_date + snapped_days - 1
 
       goal.update!(
         started_on: start_date,
         target_completion_date: end_date,
         include_weekends: @user.includes_weekends?,
-        status: start_date <= Date.current ? :active : :active
+        status: :active
       )
 
-      # Regenerate quotas
       goal.daily_quotas.destroy_all
       goal.daily_quotas.reload
       ProfileAwareQuotaCalculator.new(goal, @user).generate_quotas!
@@ -31,6 +35,27 @@ class ReadingListScheduler
   end
 
   private
+
+  # Snap raw_days to the nearest period, biased toward gentler (longer).
+  # Uses a 40% threshold: snap down only if raw_days falls in the bottom 40%
+  # of the gap between two snap points. Otherwise snap up.
+  def snap_to_period(raw_days)
+    return SNAP_PERIODS.first if raw_days <= SNAP_PERIODS.first
+
+    SNAP_PERIODS.each_cons(2) do |lower, upper|
+      next if raw_days > upper
+      midpoint = lower + (upper - lower) * 0.4
+      return raw_days > midpoint ? upper : lower
+    end
+
+    SNAP_PERIODS.last
+  end
+
+  def effective_daily_minutes_per_slot
+    total = @user.derive_daily_minutes_from_pace
+    total ||= (@user.weekday_reading_minutes * 5 + @user.weekend_reading_minutes * 2) / 7.0
+    total.to_f / @user.max_concurrent_books
+  end
 
   # Build initial slot availability from locked goals (goals with sessions)
   def build_slot_timeline
@@ -72,36 +97,5 @@ class ReadingListScheduler
     return 60 if wpm.zero? # fallback: 1 hour
 
     (book.remaining_words.to_f / wpm).ceil
-  end
-
-  # Walk calendar from start_date, subtracting available minutes per day
-  # until total_minutes is consumed. Returns the end date.
-  def walk_calendar(start_date, total_minutes)
-    remaining = total_minutes.to_f
-    current_date = start_date
-
-    loop do
-      minutes_today = daily_available_minutes(current_date)
-
-      if minutes_today > 0
-        remaining -= minutes_today
-        return current_date if remaining <= 0
-      end
-
-      current_date += 1.day
-
-      # Safety: cap at 2 years out
-      break if current_date > start_date + 730.days
-    end
-
-    current_date
-  end
-
-  def daily_available_minutes(date)
-    if date.on_weekend?
-      @user.weekend_reading_minutes
-    else
-      @user.weekday_reading_minutes
-    end
   end
 end

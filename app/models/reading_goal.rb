@@ -3,6 +3,11 @@ class ReadingGoal < ApplicationRecord
   belongs_to :book
   has_many :daily_quotas, dependent: :destroy
 
+  SNAP_PERIOD_LABELS = {
+    2 => "Weekend read", 7 => "1-week read", 14 => "2-week read",
+    30 => "1-month read", 90 => "3-month read", 180 => "6-month read"
+  }.freeze
+
   # Enums
   enum :status, {
     active: 0,
@@ -294,12 +299,19 @@ class ReadingGoal < ApplicationRecord
       latest_session_date: session_boundaries[:latest]&.to_s,
       session_count: session_boundaries[:count],
       position: position,
-      auto_scheduled: auto_scheduled
+      auto_scheduled: auto_scheduled,
+      snap_label: snap_period_label
     }
   end
 
   def has_reading_sessions?
     book.reading_sessions.completed.exists?
+  end
+
+  def snap_period_label
+    return nil unless started_on && target_completion_date
+    calendar_days = (target_completion_date - started_on).to_i + 1
+    SNAP_PERIOD_LABELS[calendar_days]
   end
 
   # Returns boundaries of all reading sessions for this book up to the goal's end date.
