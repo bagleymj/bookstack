@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html class="h-full bg-gradient-to-br from-indigo-50 via-white to-purple-50">
+  <head>
+    <title>BookStack — Setup</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <%= stylesheet_link_tag "tailwind", "data-turbo-track": "reload" %>
+    <%= stylesheet_link_tag "application", "data-turbo-track": "reload" %>
+    <%= javascript_importmap_tags %>
+  </head>
+
+  <body class="h-full">
+    <div class="min-h-full flex flex-col">
+      <!-- Minimal header -->
+      <div class="pt-8 px-4 text-center">
+        <div class="inline-flex items-center gap-2 text-indigo-600">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+          </svg>
+          <span class="text-xl font-bold">BookStack</span>
+        </div>
+      </div>
+
+      <!-- Flash messages -->
+      <% if alert %>
+        <div class="mx-auto max-w-lg px-4 mt-4">
+          <div class="rounded-md bg-red-50 p-4">
+            <p class="text-sm font-medium text-red-800"><%= alert %></p>
+          </div>
+        </div>
+      <% end %>
+
+      <!-- Main content -->
+      <main class="flex-1 flex items-start justify-center px-4 py-8">
+        <div class="w-full max-w-lg">
+          <%= yield %>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,304 @@
+<div data-controller="onboarding">
+  <!-- Skip link -->
+  <div class="flex justify-end mb-4">
+    <%= button_to "Skip setup", skip_onboarding_path, method: :post, class: "text-sm text-gray-400 hover:text-gray-600 transition-colors" %>
+  </div>
+
+  <!-- Progress bar -->
+  <div class="flex justify-center gap-2 mb-8">
+    <div data-onboarding-target="indicator" class="w-8 h-1 rounded-full bg-indigo-600"></div>
+    <div data-onboarding-target="indicator" class="w-8 h-1 rounded-full bg-gray-200"></div>
+    <div data-onboarding-target="indicator" class="w-8 h-1 rounded-full bg-gray-200"></div>
+    <div data-onboarding-target="indicator" class="w-8 h-1 rounded-full bg-gray-200"></div>
+  </div>
+
+  <%= form_with model: current_user, url: onboarding_path, method: :patch, data: { onboarding_target: "form" } do |form| %>
+    <!-- Step 1: Welcome -->
+    <div data-onboarding-target="step">
+      <div class="text-center mb-8">
+        <h1 class="text-3xl font-bold text-gray-900">Welcome to BookStack!</h1>
+        <p class="mt-2 text-gray-600">Let's set up your reading profile in a few quick steps.</p>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <label class="block text-sm font-medium text-gray-700 mb-1">What's your name?</label>
+        <%= form.text_field :name,
+            class: "block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-lg px-4 py-3",
+            placeholder: "Your name",
+            autofocus: true %>
+      </div>
+    </div>
+
+    <!-- Step 2: Reading Preferences -->
+    <div data-onboarding-target="step" class="hidden">
+      <div class="text-center mb-8">
+        <h1 class="text-3xl font-bold text-gray-900">Reading Preferences</h1>
+        <p class="mt-2 text-gray-600">These help us estimate how long books will take you.</p>
+      </div>
+
+      <div class="space-y-6">
+        <!-- Words per page -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Words per page</label>
+          <p class="text-xs text-gray-500 mb-3">Most books average around 250 words per page. Adjust if you read books with denser text.</p>
+          <%= form.number_field :default_words_per_page, min: 50, max: 500,
+              class: "block w-32 rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" %>
+        </div>
+
+        <!-- Reading speed -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <label class="block text-sm font-medium text-gray-700 mb-3">How fast do you read?</label>
+          <div class="flex flex-wrap gap-3">
+            <button type="button" data-action="click->onboarding#selectSpeed" data-value="150"
+                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+              Casual <span class="text-gray-400 text-xs">150 WPM</span>
+            </button>
+            <button type="button" data-action="click->onboarding#selectSpeed" data-value="200"
+                    class="px-4 py-2.5 rounded-lg border border-gray-200 ring-2 ring-indigo-600 bg-indigo-50 text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+              Average <span class="text-gray-400 text-xs">200 WPM</span>
+            </button>
+            <button type="button" data-action="click->onboarding#selectSpeed" data-value="300"
+                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+              Fast <span class="text-gray-400 text-xs">300 WPM</span>
+            </button>
+            <button type="button" data-action="click->onboarding#selectSpeedCustom"
+                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+              Custom
+            </button>
+          </div>
+          <div data-onboarding-target="speedCustom" class="hidden mt-3">
+            <div class="flex items-center gap-2">
+              <input type="number" min="50" max="1000" placeholder="WPM"
+                     data-action="input->onboarding#syncSpeedInput"
+                     class="block w-24 rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+              <span class="text-sm text-gray-500">words per minute</span>
+            </div>
+          </div>
+          <%= form.hidden_field :default_reading_speed_wpm %>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Daily Schedule -->
+    <div data-onboarding-target="step" class="hidden">
+      <div class="text-center mb-8">
+        <h1 class="text-3xl font-bold text-gray-900">Daily Schedule</h1>
+        <p class="mt-2 text-gray-600">How much time do you want to spend reading each day?</p>
+      </div>
+
+      <div class="space-y-6">
+        <!-- Weekday minutes -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <label class="block text-sm font-medium text-gray-700 mb-3">Weekday reading time</label>
+          <div class="flex flex-wrap gap-3">
+            <button type="button" data-action="click->onboarding#selectWeekday" data-value="15"
+                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+              15 min
+            </button>
+            <button type="button" data-action="click->onboarding#selectWeekday" data-value="30"
+                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+              30 min
+            </button>
+            <button type="button" data-action="click->onboarding#selectWeekday" data-value="60"
+                    class="px-4 py-2.5 rounded-lg border border-gray-200 ring-2 ring-indigo-600 bg-indigo-50 text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+              1 hour
+            </button>
+            <button type="button" data-action="click->onboarding#selectWeekday" data-value="90"
+                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+              1.5 hours
+            </button>
+            <button type="button" data-action="click->onboarding#selectWeekdayCustom"
+                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+              Custom
+            </button>
+          </div>
+          <div data-onboarding-target="weekdayCustom" class="hidden mt-3">
+            <div class="flex items-center gap-2">
+              <input type="number" min="0" max="480" placeholder="minutes"
+                     data-action="input->onboarding#syncWeekdayInput"
+                     class="block w-24 rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+              <span class="text-sm text-gray-500">minutes per day</span>
+            </div>
+          </div>
+          <%= form.hidden_field :weekday_reading_minutes %>
+        </div>
+
+        <!-- Weekend minutes -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <label class="block text-sm font-medium text-gray-700 mb-3">Weekend reading time</label>
+          <div class="flex flex-wrap gap-3">
+            <button type="button" data-action="click->onboarding#selectWeekend" data-value="15"
+                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+              15 min
+            </button>
+            <button type="button" data-action="click->onboarding#selectWeekend" data-value="30"
+                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+              30 min
+            </button>
+            <button type="button" data-action="click->onboarding#selectWeekend" data-value="60"
+                    class="px-4 py-2.5 rounded-lg border border-gray-200 ring-2 ring-indigo-600 bg-indigo-50 text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+              1 hour
+            </button>
+            <button type="button" data-action="click->onboarding#selectWeekend" data-value="90"
+                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+              1.5 hours
+            </button>
+            <button type="button" data-action="click->onboarding#selectWeekendCustom"
+                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+              Custom
+            </button>
+          </div>
+          <div data-onboarding-target="weekendCustom" class="hidden mt-3">
+            <div class="flex items-center gap-2">
+              <input type="number" min="0" max="480" placeholder="minutes"
+                     data-action="input->onboarding#syncWeekendInput"
+                     class="block w-24 rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+              <span class="text-sm text-gray-500">minutes per day</span>
+            </div>
+          </div>
+          <%= form.hidden_field :weekend_reading_minutes %>
+        </div>
+
+        <!-- Max concurrent books -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Max concurrent books</label>
+          <p class="text-xs text-gray-500 mb-3">How many books do you want to read at the same time?</p>
+          <div class="flex gap-3">
+            <% [1, 2, 3].each do |n| %>
+              <button type="button" data-action="click->onboarding#selectConcurrent" data-value="<%= n %>"
+                      class="w-12 h-12 rounded-lg border border-gray-200 <%= n == 1 ? 'ring-2 ring-indigo-600 bg-indigo-50' : 'bg-white' %> text-lg font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+                <%= n %>
+              </button>
+            <% end %>
+          </div>
+          <%= form.hidden_field :max_concurrent_books %>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 4: Reading Goal -->
+    <div data-onboarding-target="step" class="hidden">
+      <div class="text-center mb-8">
+        <h1 class="text-3xl font-bold text-gray-900">Set a Reading Goal</h1>
+        <p class="mt-2 text-gray-600">Optional — set an overarching target to keep yourself on track.</p>
+      </div>
+
+      <div class="space-y-4">
+        <!-- Goal type cards -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button type="button" data-action="click->onboarding#selectGoalType" data-type="books_per_year"
+                  class="group bg-white rounded-xl shadow-sm border border-gray-200 p-5 text-left hover:border-indigo-300 transition-colors">
+            <div class="flex items-center gap-3 mb-2">
+              <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600 group-[.selected]:bg-indigo-600 group-[.selected]:text-white">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
+              </div>
+              <div>
+                <p class="font-medium text-gray-900">Books per year</p>
+                <p class="text-xs text-gray-500">e.g. 52 books = 1 per week</p>
+              </div>
+            </div>
+          </button>
+
+          <button type="button" data-action="click->onboarding#selectGoalType" data-type="books_per_month"
+                  class="group bg-white rounded-xl shadow-sm border border-gray-200 p-5 text-left hover:border-indigo-300 transition-colors">
+            <div class="flex items-center gap-3 mb-2">
+              <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-100 text-purple-600 group-[.selected]:bg-purple-600 group-[.selected]:text-white">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                </svg>
+              </div>
+              <div>
+                <p class="font-medium text-gray-900">Books per month</p>
+                <p class="text-xs text-gray-500">e.g. 4 books per month</p>
+              </div>
+            </div>
+          </button>
+
+          <button type="button" data-action="click->onboarding#selectGoalType" data-type="books_per_week"
+                  class="group bg-white rounded-xl shadow-sm border border-gray-200 p-5 text-left hover:border-indigo-300 transition-colors">
+            <div class="flex items-center gap-3 mb-2">
+              <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600 group-[.selected]:bg-emerald-600 group-[.selected]:text-white">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+              </div>
+              <div>
+                <p class="font-medium text-gray-900">Books per week</p>
+                <p class="text-xs text-gray-500">e.g. 1 book per week</p>
+              </div>
+            </div>
+          </button>
+
+          <button type="button" data-action="click->onboarding#selectGoalType" data-type="minutes_per_day"
+                  class="group bg-white rounded-xl shadow-sm border border-gray-200 p-5 text-left hover:border-indigo-300 transition-colors">
+            <div class="flex items-center gap-3 mb-2">
+              <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100 text-amber-600 group-[.selected]:bg-amber-600 group-[.selected]:text-white">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                </svg>
+              </div>
+              <div>
+                <p class="font-medium text-gray-900">Minutes per day</p>
+                <p class="text-xs text-gray-500">e.g. 30 minutes daily</p>
+              </div>
+            </div>
+          </button>
+        </div>
+
+        <!-- Goal value input (shown after selecting type) -->
+        <div data-onboarding-target="goalValuePanel" class="hidden">
+          <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <label data-onboarding-target="goalValueLabel" class="block text-sm font-medium text-gray-700 mb-3">How many?</label>
+
+            <!-- Presets (contextual per type) -->
+            <div data-onboarding-target="goalPresets" class="flex flex-wrap gap-3 mb-3">
+            </div>
+
+            <!-- Custom input -->
+            <div data-onboarding-target="goalCustom" class="hidden">
+              <div class="flex items-center gap-2">
+                <input type="number" min="1" max="365" data-onboarding-target="goalCustomInput"
+                       data-action="input->onboarding#syncGoalInput"
+                       class="block w-24 rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                <span data-onboarding-target="goalUnit" class="text-sm text-gray-500"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- No goal option -->
+        <button type="button" data-action="click->onboarding#clearGoal"
+                class="w-full text-center py-3 text-sm text-gray-500 hover:text-gray-700 transition-colors">
+          Skip — I don't want to set a goal right now
+        </button>
+      </div>
+
+      <%= form.hidden_field :reading_goal_type %>
+      <%= form.hidden_field :reading_goal_value %>
+    </div>
+
+    <!-- Navigation buttons -->
+    <div class="flex justify-between mt-8">
+      <button type="button" data-action="click->onboarding#back" data-onboarding-target="backButton"
+              class="invisible inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+        Back
+      </button>
+
+      <button type="button" data-action="click->onboarding#next" data-onboarding-target="nextButton"
+              class="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 transition-colors">
+        Next
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        </svg>
+      </button>
+
+      <%= form.submit "Get Started", data: { onboarding_target: "submitButton" },
+          class: "hidden inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 cursor-pointer transition-colors" %>
+    </div>
+  <% end %>
+</div>

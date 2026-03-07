@@ -121,7 +121,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_07_163937) do
     t.integer "weekday_reading_minutes", default: 60, null: false
     t.integer "weekend_reading_minutes", default: 60, null: false
     t.datetime "onboarding_completed_at"
-    t.integer "yearly_book_goal"
+    t.string "reading_goal_type"
+    t.integer "reading_goal_value"
     t.index ["email"], name: "index_users_on_email", unique: true
     t.index ["reset_password_token"], name: "index_users_on_reset_password_token", unique: true
   end

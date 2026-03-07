@@ -8,6 +8,13 @@ Rails.application.routes.draw do
     post "sign_up", to: "api/v1/auth/registrations#create", as: :api_sign_up
   end
 
+  # Onboarding
+  authenticate :user do
+    resource :onboarding, only: [:show, :update], controller: "onboarding" do
+      post :skip
+    end
+  end
+
   # Authenticated routes
   authenticate :user do
     root "dashboard#index", as: :authenticated_root
