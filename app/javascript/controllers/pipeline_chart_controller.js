@@ -843,6 +843,49 @@ export default class extends Controller {
         }
       })
 
+      // ── Edit mode: remove button ──
+      if (this.editModeValue) {
+        const removeSize = 16
+        const removePad = 3
+        const removeX = maxX - removeSize - removePad
+        const removeY = minY + removePad
+
+        const removeGroup = this.overlayLayer.append("g")
+          .attr("class", "remove-btn")
+          .style("cursor", "pointer")
+          .on("click", (event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            const action = goal.has_sessions ? "abandon" : "delete"
+            const message = goal.has_sessions
+              ? `Abandon "${goal.title}"? You can create a new goal for this book later.`
+              : `Delete "${goal.title}"? This cannot be undone.`
+            if (confirm(message)) {
+              self.removeGoal(goal.id, action)
+            }
+          })
+
+        removeGroup.append("circle")
+          .attr("cx", removeX + removeSize / 2)
+          .attr("cy", removeY + removeSize / 2)
+          .attr("r", removeSize / 2)
+          .style("fill", "rgba(0,0,0,0.4)")
+          .style("transition", "fill 0.15s")
+
+        removeGroup.append("line")
+          .attr("x1", removeX + 4).attr("y1", removeY + 4)
+          .attr("x2", removeX + removeSize - 4).attr("y2", removeY + removeSize - 4)
+          .style("stroke", "#fff").style("stroke-width", 1.5).style("stroke-linecap", "round")
+        removeGroup.append("line")
+          .attr("x1", removeX + removeSize - 4).attr("y1", removeY + 4)
+          .attr("x2", removeX + 4).attr("y2", removeY + removeSize - 4)
+          .style("stroke", "#fff").style("stroke-width", 1.5).style("stroke-linecap", "round")
+
+        removeGroup
+          .on("mouseenter", () => removeGroup.select("circle").style("fill", "rgba(220,38,38,0.8)"))
+          .on("mouseleave", () => removeGroup.select("circle").style("fill", "rgba(0,0,0,0.4)"))
+      }
+
       // ── Edit mode: resize handles (left + right edges) ──
       if (this.editModeValue) {
         const firstBrick = goalBricks[0]
@@ -1163,6 +1206,35 @@ export default class extends Controller {
   }
 
   // ── API ───────────────────────────────────────────────────────────
+
+  async removeGoal(goalId, action) {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
+
+    try {
+      const url = action === "abandon"
+        ? `/reading_goals/${goalId}/mark_abandoned`
+        : `/reading_goals/${goalId}`
+      const method = action === "abandon" ? "POST" : "DELETE"
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          "X-CSRF-Token": csrfToken,
+          "X-Requested-With": "XMLHttpRequest",
+          "Accept": "application/json"
+        },
+        credentials: "same-origin"
+      })
+
+      if (!response.ok) {
+        console.error("Failed to remove goal")
+      }
+      this.loadData()
+    } catch (error) {
+      console.error("Error removing goal:", error)
+      this.loadData()
+    }
+  }
 
   async updateGoalDates(goalId, startDate, endDate) {
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content

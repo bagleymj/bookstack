@@ -41,20 +41,31 @@
               <h4 class="text-lg font-medium text-gray-900"><%= goal.book.title %></h4>
               <p class="text-sm text-gray-500">Target: <%= goal.target_completion_date.strftime("%B %d, %Y") %></p>
             </div>
-            <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium
-              <% if goal.not_started? %>
-                bg-gray-100 text-gray-800">Not Started
-              <% elsif goal.tracking_status == :caught_up %>
-                bg-green-100 text-green-800">Caught Up
-              <% elsif goal.tracking_status == :reading_due %>
-                bg-blue-100 text-blue-800">Reading Due
-              <% else %>
-                bg-yellow-100 text-yellow-800">Behind
+            <div class="flex items-center gap-2">
+              <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium
+                <% if goal.not_started? %>
+                  bg-gray-100 text-gray-800">Not Started
+                <% elsif goal.tracking_status == :caught_up %>
+                  bg-green-100 text-green-800">Caught Up
+                <% elsif goal.tracking_status == :reading_due %>
+                  bg-blue-100 text-blue-800">Reading Due
+                <% else %>
+                  bg-yellow-100 text-yellow-800">Behind
+                <% end %>
+              </span>
+              <% if goal.tracking_status == :behind %>
+                <%= button_to "Catch Up", catch_up_reading_goal_path(goal), method: :post, data: { turbo_confirm: "This will mark all missed quotas as completed and advance your book position. Continue?" }, class: "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 hover:bg-amber-200" %>
               <% end %>
-            </span>
-            <% if goal.tracking_status == :behind %>
-              <%= button_to "Catch Up", catch_up_reading_goal_path(goal), method: :post, data: { turbo_confirm: "This will mark all missed quotas as completed and advance your book position. Continue?" }, class: "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 hover:bg-amber-200" %>
-            <% end %>
+              <% if goal.reading_session_boundaries[:has_sessions] %>
+                <%= button_to mark_abandoned_reading_goal_path(goal), method: :post, data: { turbo_confirm: "Abandon this goal? You can create a new goal for this book later." }, class: "inline-flex items-center rounded-full p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors", title: "Abandon goal" do %>
+                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                <% end %>
+              <% else %>
+                <%= button_to reading_goal_path(goal), method: :delete, data: { turbo_confirm: "Delete this reading goal?" }, class: "inline-flex items-center rounded-full p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors", title: "Delete goal" do %>
+                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                <% end %>
+              <% end %>
+            </div>
           </div>
 
           <div class="mt-4">

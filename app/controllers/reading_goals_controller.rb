@@ -53,7 +53,10 @@ class ReadingGoalsController < ApplicationController
 
   def destroy
     @reading_goal.destroy
-    redirect_to pipeline_path, notice: "Reading goal deleted."
+    respond_to do |format|
+      format.html { redirect_to pipeline_path, notice: "Reading goal deleted." }
+      format.json { head :no_content }
+    end
   end
 
   def mark_completed
@@ -63,7 +66,10 @@ class ReadingGoalsController < ApplicationController
 
   def mark_abandoned
     @reading_goal.mark_abandoned!
-    redirect_to pipeline_path, notice: "Reading goal marked as abandoned."
+    respond_to do |format|
+      format.html { redirect_to pipeline_path, notice: "Reading goal marked as abandoned." }
+      format.json { head :no_content }
+    end
   end
 
   def redistribute
