@@ -81,17 +81,21 @@ class ReadingListScheduler
     SNAP_PERIODS.last
   end
 
-  # Snap a start date to a clean boundary based on the book's duration:
-  #   Weekend reads (2 days) → Saturday
-  #   Weekly reads (7/14 days) → Monday
-  #   Monthly+ reads (30/90/180 days) → 1st of the month
-  def snap_start_date(earliest_date, snapped_days)
-    case snapped_days
-    when 2
+  # Snap a start date to a clean boundary based on the pace rhythm:
+  #   ≤2-day interval → Saturday (weekend pace)
+  #   ≤14-day interval → Monday (weekly/biweekly pace)
+  #   >14-day interval → 1st of the month (monthly pace)
+  # The pace rhythm — not individual book duration — determines when
+  # books start so that staggered slots land on consistent boundaries.
+  def snap_start_date(earliest_date, _snapped_days)
+    interval = pace_completion_interval
+
+    case interval
+    when 0..2
       next_weekday(earliest_date, :saturday)
-    when 7, 14
+    when 3..14
       next_weekday(earliest_date, :monday)
-    else # 30, 90, 180
+    else
       next_first_of_month(earliest_date)
     end
   end
