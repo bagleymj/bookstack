@@ -532,7 +532,6 @@ export default class extends Controller {
       .attr("rx", 2)
       .attr("ry", 2)
 
-    const merged = enter.merge(join)
     const applyAttrs = (sel) => {
       sel
         .attr("x", d => this.xScale(d.date) + gap / 2)
@@ -545,10 +544,13 @@ export default class extends Controller {
         })
     }
 
+    // Position enter elements immediately (no transition from 0,0)
+    applyAttrs(enter)
+
     if (t) {
-      applyAttrs(merged.transition(t))
+      applyAttrs(join.transition(t))
     } else {
-      applyAttrs(merged)
+      applyAttrs(join)
     }
 
     // ── Today progress overlay bricks ──
@@ -565,7 +567,6 @@ export default class extends Controller {
       .attr("rx", 2)
       .attr("ry", 2)
 
-    const progressMerged = progressEnter.merge(progressJoin)
     const applyProgress = (sel) => {
       sel
         .attr("x", d => this.xScale(d.date) + gap / 2)
@@ -581,10 +582,12 @@ export default class extends Controller {
         .attr("fill", d => `url(#brick-grad-${d.goalIndex}-today-progress)`)
     }
 
+    applyProgress(progressEnter)
+
     if (t) {
-      applyProgress(progressMerged.transition(t))
+      applyProgress(progressJoin.transition(t))
     } else {
-      applyProgress(progressMerged)
+      applyProgress(progressJoin)
     }
 
     // ── Highlight lines (top edge bevel) ──
@@ -600,7 +603,6 @@ export default class extends Controller {
       .style("stroke-width", 0.5)
       .style("pointer-events", "none")
 
-    const hlMerged = hlEnter.merge(highlightJoin)
     const applyHighlight = (sel) => {
       sel
         .attr("x1", d => this.xScale(d.date) + gap / 2 + 1)
@@ -609,10 +611,12 @@ export default class extends Controller {
         .attr("y2", d => this.yScale(d.yOffset + d.minutes) + gap / 2 + 0.5)
     }
 
+    applyHighlight(hlEnter)
+
     if (t) {
-      applyHighlight(hlMerged.transition(t))
+      applyHighlight(highlightJoin.transition(t))
     } else {
-      applyHighlight(hlMerged)
+      applyHighlight(highlightJoin)
     }
   }
 
@@ -636,7 +640,6 @@ export default class extends Controller {
       .style("pointer-events", "none")
       .attr("dy", "0.35em")
 
-    const titleMerged = titleEnter.merge(titleJoin)
     const applyTitle = (sel) => {
       sel
         .attr("x", d => d.x)
@@ -648,10 +651,12 @@ export default class extends Controller {
         })
     }
 
+    applyTitle(titleEnter)
+
     if (t) {
-      applyTitle(titleMerged.transition(t))
+      applyTitle(titleJoin.transition(t))
     } else {
-      applyTitle(titleMerged)
+      applyTitle(titleJoin)
     }
 
     // Minutes/day labels
@@ -672,7 +677,6 @@ export default class extends Controller {
         .style("pointer-events", "none")
         .attr("dy", "0.35em")
 
-      const mpdMerged = mpdEnter.merge(mpdJoin)
       const applyMpd = (sel) => {
         sel
           .attr("x", d => d.xEnd)
@@ -680,10 +684,12 @@ export default class extends Controller {
           .text(d => `${d.minutesPerDay}m/day`)
       }
 
+      applyMpd(mpdEnter)
+
       if (t) {
-        applyMpd(mpdMerged.transition(t))
+        applyMpd(mpdJoin.transition(t))
       } else {
-        applyMpd(mpdMerged)
+        applyMpd(mpdJoin)
       }
     }
 
@@ -704,7 +710,6 @@ export default class extends Controller {
       .style("stroke-dasharray", "3,3")
       .style("pointer-events", "none")
 
-    const estMerged = estEnter.merge(estJoin)
     const applyEst = (sel) => {
       sel
         .attr("x", d => d.x - 7)
@@ -713,10 +718,12 @@ export default class extends Controller {
         .attr("height", d => Math.max(d.height - 2, 1))
     }
 
+    applyEst(estEnter)
+
     if (t) {
-      applyEst(estMerged.transition(t))
+      applyEst(estJoin.transition(t))
     } else {
-      applyEst(estMerged)
+      applyEst(estJoin)
     }
   }
 
