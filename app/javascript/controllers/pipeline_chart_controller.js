@@ -225,8 +225,12 @@ export default class extends Controller {
   render() {
     if (!this.chartData || !this.chartData.goals.length) {
       this.element.innerHTML = `
-        <div class="flex items-center justify-center h-48 text-gray-500">
-          <p>Create a reading goal to see your pipeline.</p>
+        <div class="flex flex-col items-center justify-center h-48 text-gray-500">
+          <svg class="w-10 h-10 text-gray-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/>
+          </svg>
+          <p class="text-sm">No reading goals in the pipeline yet.</p>
+          <a href="/reading_goals/new" class="mt-2 text-sm text-indigo-600 hover:text-indigo-500 font-medium">Create a reading goal</a>
         </div>
       `
       return
