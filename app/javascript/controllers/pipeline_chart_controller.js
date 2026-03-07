@@ -149,7 +149,8 @@ export default class extends Controller {
             isPast,
             isToday,
             todayProgress,
-            color: g.color
+            color: g.color,
+            isQueued: g._isQueued
           })
           yOffset += minutes
         }
@@ -263,6 +264,7 @@ export default class extends Controller {
     this.goals.forEach((g, i) => {
       g.color = this.constructor.BLOCK_COLORS[i % this.constructor.BLOCK_COLORS.length]
       g._index = i
+      g._isQueued = g.goal_status === "queued"
     })
 
     this.setupScales()
@@ -365,11 +367,12 @@ export default class extends Controller {
     const defs = this.svg.append("defs")
 
     this.goals.forEach((goal, i) => {
+      const queuedDim = goal._isQueued ? 0.5 : 1.0
       const states = [
-        { name: "future", color: goal.color, darken: 0, opacity: 0.88 },
-        { name: "past", color: goal.color, darken: 0.3, opacity: 0.95 },
-        { name: "today", color: goal.color, darken: 0, opacity: 0.88 },
-        { name: "today-progress", color: goal.color, darken: 0.3, opacity: 0.95 }
+        { name: "future", color: goal.color, darken: 0, opacity: 0.88 * queuedDim },
+        { name: "past", color: goal.color, darken: 0.3, opacity: 0.95 * queuedDim },
+        { name: "today", color: goal.color, darken: 0, opacity: 0.88 * queuedDim },
+        { name: "today-progress", color: goal.color, darken: 0.3, opacity: 0.95 * queuedDim }
       ]
 
       states.forEach(({ name, color, darken, opacity }) => {
@@ -607,6 +610,34 @@ export default class extends Controller {
     } else {
       applyHighlight(highlightJoin)
     }
+
+    // ── Queued goal dashed borders ──
+    const queuedBricks = bricks.filter(b => b.isQueued)
+    const queuedJoin = this.brickLayer.selectAll(".brick-queued-border")
+      .data(queuedBricks, d => d.key + "-qb")
+
+    queuedJoin.exit().remove()
+
+    const qbEnter = queuedJoin.enter()
+      .append("rect")
+      .attr("class", "brick-queued-border")
+      .attr("rx", 2)
+      .style("fill", "none")
+      .style("stroke", "rgba(255,255,255,0.4)")
+      .style("stroke-width", 1)
+      .style("stroke-dasharray", "4,3")
+      .style("pointer-events", "none")
+
+    const applyQueued = (sel) => {
+      sel
+        .attr("x", d => this.xScale(d.date) + gap / 2)
+        .attr("y", d => this.yScale(d.yOffset + d.minutes) + gap / 2)
+        .attr("width", d => Math.max(this.xScale(d.nextDate) - this.xScale(d.date) - gap, 1))
+        .attr("height", d => Math.max(this.yScale(d.yOffset) - this.yScale(d.yOffset + d.minutes) - gap, 1))
+    }
+
+    applyQueued(qbEnter)
+    if (t) { applyQueued(queuedJoin.transition(t)) } else { applyQueued(queuedJoin) }
   }
 
   renderLabels(labels, opts = {}) {

@@ -144,15 +144,36 @@
           </dl>
         </div>
       </div>
+    <% elsif @queued_goal %>
+      <div class="rounded-lg bg-white shadow">
+        <div class="px-4 py-5 sm:p-6">
+          <h3 class="text-lg font-medium leading-6 text-gray-900">In Reading List</h3>
+          <p class="mt-2 text-sm text-gray-500">This book is queued in your reading list at position #<%= @queued_goal.position %>.</p>
+          <% if @queued_goal.started_on.present? %>
+            <p class="mt-1 text-sm text-indigo-600">Projected: <%= @queued_goal.started_on.strftime("%b %d") %> - <%= @queued_goal.target_completion_date.strftime("%b %d") %></p>
+          <% end %>
+          <div class="mt-4">
+            <%= link_to "View Reading List", reading_list_path, class: "text-sm text-indigo-600 hover:text-indigo-500" %>
+          </div>
+        </div>
+      </div>
     <% else %>
       <div class="rounded-lg bg-white shadow">
         <div class="px-4 py-5 sm:p-6">
           <h3 class="text-lg font-medium leading-6 text-gray-900">Reading Goal</h3>
           <p class="mt-2 text-sm text-gray-500">Set a goal to track your daily reading progress for this book.</p>
-          <div class="mt-4">
+          <div class="mt-4 flex items-center gap-3">
             <%= link_to new_reading_goal_path(book_id: @book.id), class: "inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500" do %>
               Create Goal
             <% end %>
+            <span class="text-sm text-gray-400">or</span>
+            <button type="button"
+                    data-controller="reading-list-add-single"
+                    data-reading-list-add-single-book-id-value="<%= @book.id %>"
+                    data-action="click->reading-list-add-single#add"
+                    class="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50">
+              Add to Reading List
+            </button>
           </div>
         </div>
       </div>

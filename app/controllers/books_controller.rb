@@ -10,6 +10,7 @@ class BooksController < ApplicationController
   def show
     @reading_sessions = @book.reading_sessions.completed.recent.limit(10)
     @active_goal = @book.reading_goals.active.first
+    @queued_goal = @book.reading_goals.queued.first unless @active_goal
   end
 
   def new
