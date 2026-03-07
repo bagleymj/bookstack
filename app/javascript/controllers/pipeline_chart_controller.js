@@ -398,18 +398,6 @@ export default class extends Controller {
       day = d3.timeDay.offset(day, 1)
     }
 
-    // Alternating day-column shading
-    g.selectAll(".day-shade")
-      .data(days.filter((_, i) => i % 2 === 0))
-      .enter()
-      .append("rect")
-      .attr("class", "day-shade")
-      .attr("x", d => this.xScale(d))
-      .attr("y", 0)
-      .attr("width", d => this.xScale(d3.timeDay.offset(d, 1)) - this.xScale(d))
-      .attr("height", this.chartHeight)
-      .style("fill", "rgba(0,0,0,0.018)")
-
     // Day grid lines
     g.selectAll(".day-line")
       .data(days)
@@ -438,21 +426,18 @@ export default class extends Controller {
       .style("stroke-dasharray", "2,2")
 
     // Weekend shading
-    const hasWeekendExclusion = this.goals.some(g => !g.include_weekends)
-    if (hasWeekendExclusion) {
-      const weekendDays = days.filter(d => d.getDay() === 0 || d.getDay() === 6)
-      g.selectAll(".weekend-shade")
-        .data(weekendDays)
-        .enter()
-        .append("rect")
-        .attr("class", "weekend-shade")
-        .attr("x", d => this.xScale(d))
-        .attr("y", 0)
-        .attr("width", d => this.xScale(d3.timeDay.offset(d, 1)) - this.xScale(d))
-        .attr("height", this.chartHeight)
-        .style("fill", "#f3f4f6")
-        .style("opacity", 0.6)
-    }
+    const weekendDays = days.filter(d => d.getDay() === 0 || d.getDay() === 6)
+    g.selectAll(".weekend-shade")
+      .data(weekendDays)
+      .enter()
+      .append("rect")
+      .attr("class", "weekend-shade")
+      .attr("x", d => this.xScale(d))
+      .attr("y", 0)
+      .attr("width", d => this.xScale(d3.timeDay.offset(d, 1)) - this.xScale(d))
+      .attr("height", this.chartHeight)
+      .style("fill", "#f3f4f6")
+      .style("opacity", 0.6)
 
     // X axis
     g.append("g")
