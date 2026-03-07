@@ -56,12 +56,7 @@ class ReadingListScheduler
   #   Weekend reads (2 days) → Saturday
   #   Weekly reads (7/14 days) → Monday
   #   Monthly+ reads (30/90/180 days) → 1st of the month
-  # If earliest_date is already on the right boundary, use it.
-  # Otherwise advance to the next valid start day.
-  # Exception: if earliest_date is today, start today regardless.
   def snap_start_date(earliest_date, snapped_days)
-    return earliest_date if earliest_date == Date.current
-
     case snapped_days
     when 2
       next_weekday(earliest_date, :saturday)
