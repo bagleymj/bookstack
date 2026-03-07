@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Wrapper that forces a backup before any destructive database command.
+# Usage: bin/safe_db migrate
+#        bin/safe_db schema:load
+#        bin/safe_db reset
+#
+# This script exists because Claude Code has wiped the dev database
+# TWICE by running db commands without backing up first.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
+COMMAND="$1"
+shift || true
+
+if [ -z "$COMMAND" ]; then
+  echo "Usage: bin/safe_db <command> [args...]"
+  echo ""
+  echo "Commands: migrate, rollback, schema:load, reset, drop, seed"
+  echo ""
+  echo "This wrapper automatically backs up the database before running"
+  echo "any destructive database operation."
+  exit 1
+fi
+
+# Always backup first — no exceptions
+echo "==> Auto-backing up database before db:${COMMAND}..."
+"$SCRIPT_DIR/db_backup"
+echo ""
+
+# For the truly destructive ones, require explicit confirmation
+case "$COMMAND" in
+  schema:load|reset|drop)
+    echo "WARNING: db:${COMMAND} is destructive and will wipe data!"
+    read -p "Are you SURE? Type 'yes' to continue: " confirm
+    if [ "$confirm" != "yes" ]; then
+      echo "Aborted. Your backup is safe."
+      exit 1
+    fi
+    ;;
+esac
+
+echo "==> Running: bin/rails db:${COMMAND} $*"
+export BOOKSTACK_DB_BACKUP_DONE=1
+exec "$SCRIPT_DIR/rails" "db:${COMMAND}" "$@"

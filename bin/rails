@@ -1,4 +1,37 @@
-#!/usr/bin/env ruby
-APP_PATH = File.expand_path("../config/application", __dir__)
-require_relative "../config/boot"
-require "rails/commands"
+#!/usr/bin/env bash
+# Rails binstub with database safety guard.
+#
+# Dangerous db commands (migrate, schema:load, reset, drop) are blocked
+# unless routed through bin/safe_db, which auto-backs-up first.
+#
+# This exists because the database has been wiped TWICE by running
+# db commands without a backup.
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# bin/safe_db sets this after taking a backup — allow through
+if [ "$BOOKSTACK_DB_BACKUP_DONE" = "1" ]; then
+  exec ruby -x "$SCRIPT_DIR/rails.rb" "$@"
+fi
+
+# Check if any argument is a dangerous db: command
+DANGEROUS_COMMANDS="db:migrate db:schema:load db:reset db:drop db:rollback db:migrate:down db:migrate:redo"
+
+for arg in "$@"; do
+  for dangerous in $DANGEROUS_COMMANDS; do
+    if [ "$arg" = "$dangerous" ]; then
+      echo ""
+      echo "  BLOCKED: '$arg' must go through bin/safe_db to ensure a backup is taken first."
+      echo ""
+      echo "  Run instead:  bin/safe_db ${arg#db:} ${*/$arg/}"
+      echo ""
+      echo "  This safeguard exists because the database has been wiped by running"
+      echo "  db commands without backing up. bin/safe_db auto-backs-up before running."
+      echo ""
+      exit 1
+    fi
+  done
+done
+
+# Non-dangerous command — run Rails normally
+exec ruby -x "$SCRIPT_DIR/rails.rb" "$@"

@@ -34,10 +34,12 @@ bundle exec rspec spec/models/book_spec.rb
 # Run a specific test by line number
 bundle exec rspec spec/models/book_spec.rb:42
 
-# Database commands
-bin/rails db:migrate
-bin/rails db:migrate:status
-bin/rails db:seed
+# Database commands (MUST use bin/safe_db for destructive operations)
+bin/safe_db migrate           # auto-backs-up, then runs db:migrate
+bin/safe_db rollback          # auto-backs-up, then runs db:rollback
+bin/safe_db schema:load       # auto-backs-up, requires confirmation, then runs db:schema:load
+bin/rails db:migrate:status   # safe — no wrapper needed
+bin/rails db:seed             # safe — no wrapper needed
 
 # Generate resources
 bin/rails generate model ModelName
@@ -87,29 +89,39 @@ bundle exec rspec spec/models/
 
 ## Database Safety
 
-**CRITICAL: Never run destructive database commands without explicit user confirmation AND a backup.**
+**CRITICAL: The dev database has been wiped TWICE by running db commands without backups. Mechanical safeguards are now enforced.**
 
-Destructive commands that require confirmation:
-- `db:reset`, `db:drop`, `db:schema:load`
-- Any raw SQL with `DELETE`, `TRUNCATE`, or `DROP`
-- `destroy_all`, `delete_all` on models
-- Any migration that drops tables or columns
+### Enforced by `bin/rails` guard
 
-Before running ANY of the above:
-1. Run `bin/db_backup` to create a backup
-2. Explicitly ask the user for confirmation
-3. Only proceed after receiving explicit "yes"
+`bin/rails` **blocks** these commands outright: `db:migrate`, `db:schema:load`, `db:reset`, `db:drop`, `db:rollback`, `db:migrate:down`, `db:migrate:redo`. You MUST use `bin/safe_db` instead, which auto-backs-up before running.
 
-Backup and restore commands:
 ```bash
-# Create a backup
-bin/db_backup
+# CORRECT — always use bin/safe_db for destructive db operations
+bin/safe_db migrate
+bin/safe_db rollback
+bin/safe_db schema:load    # also requires interactive confirmation
 
-# List available backups
-bin/db_restore
+# WRONG — these will be blocked with an error
+bin/rails db:migrate       # BLOCKED
+bin/rails db:schema:load   # BLOCKED
+bundle exec rails db:migrate  # bypasses guard — NEVER DO THIS
+```
 
-# Restore from a backup
-bin/db_restore bookstack_20260206_120000.sql
+**NEVER bypass the guard** by calling `bundle exec rails` directly, running raw SQL that drops/truncates, or setting `BOOKSTACK_DB_BACKUP_DONE=1` manually.
+
+### Additional rules
+
+- **NEVER run `RAILS_ENV=test bin/rails db:schema:load`** — it has wiped the dev database before
+- Any raw SQL with `DELETE`, `TRUNCATE`, or `DROP` requires `bin/db_backup` first AND user confirmation
+- `destroy_all`, `delete_all` on models requires user confirmation
+- Any migration that drops tables or columns requires user confirmation
+
+### Backup and restore
+
+```bash
+bin/db_backup                                    # Create a backup
+bin/db_restore                                   # List available backups
+bin/db_restore bookstack_20260206_120000.sql     # Restore from a backup
 ```
 
 Backups are stored in `.postgres/backups/` (last 10 kept automatically).
