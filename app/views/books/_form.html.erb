@@ -1,6 +1,6 @@
 <!-- Book Search -->
 <% if book.new_record? %>
-  <div data-controller="book-search" data-book-search-url-value="<%= api_v1_book_search_index_path %>" class="mb-8">
+  <div data-controller="book-search" data-book-search-url-value="<%= api_v1_book_search_index_path %>" data-book-search-amazon-tag-value="<%= amazon_affiliate_tag %>" class="mb-8">
     <div class="relative">
       <label class="block text-sm font-medium text-gray-700 mb-1">Search for a book</label>
       <div class="relative">

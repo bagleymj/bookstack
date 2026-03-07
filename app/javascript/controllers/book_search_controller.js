@@ -2,7 +2,7 @@ import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
   static targets = ["input", "results", "loading", "form"]
-  static values = { url: String }
+  static values = { url: String, amazonTag: String }
 
   connect() {
     this.debounceTimer = null
@@ -146,6 +146,7 @@ export default class extends Controller {
       return
     }
 
+    const amazonTag = this.amazonTagValue
     const html = results.map((book, index) => `
       <button type="button"
               data-book-result
@@ -155,6 +156,7 @@ export default class extends Controller {
               data-book-pages="${book.pages || ""}"
               data-book-isbn="${this.escapeAttr(book.isbn || "")}"
               data-book-cover="${this.escapeAttr(book.cover_url || "")}"
+              data-book-publisher="${this.escapeAttr(book.publisher || "")}"
               class="w-full flex items-center gap-3 p-3 text-left hover:bg-indigo-50 transition-colors border-b border-gray-100 last:border-0">
         ${book.cover_url_small
           ? `<img src="${this.escapeAttr(book.cover_url_small)}" alt="" class="w-10 h-14 object-cover rounded shadow-sm flex-shrink-0" onerror="this.style.display='none'">`
@@ -172,8 +174,10 @@ export default class extends Controller {
           </p>
           <p class="text-xs text-gray-400">
             ${book.pages ? `${book.pages} pages` : ""}
+            ${book.publisher ? `${book.pages ? " · " : ""}${this.escapeHtml(book.publisher)}` : ""}
             ${book.isbn ? ` · ISBN: ${book.isbn}` : ""}
           </p>
+          ${book.isbn && amazonTag ? `<a href="https://www.amazon.com/s?k=${encodeURIComponent(book.isbn)}&tag=${encodeURIComponent(amazonTag)}" target="_blank" rel="noopener" data-action="click->book-search#stopPropagation" class="inline-flex items-center gap-1 text-xs text-amber-700 hover:text-amber-900 mt-0.5">Buy on Amazon <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg></a>` : ""}
         </div>
         <svg class="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
@@ -251,6 +255,10 @@ export default class extends Controller {
     setTimeout(() => {
       toast.remove()
     }, 2000)
+  }
+
+  stopPropagation(event) {
+    event.stopPropagation()
   }
 
   hideResults() {

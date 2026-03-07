@@ -11,7 +11,7 @@ module Api
           return
         end
 
-        service = OpenLibraryService.new
+        service = GoogleBooksService.new
         results = service.search(query, limit: 8)
 
         render json: { results: results }
