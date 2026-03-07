@@ -1,7 +1,7 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["input", "results", "loading", "form"]
+  static targets = ["input", "results", "loading", "form", "mode"]
   static values = { url: String, amazonTag: String }
 
   connect() {
@@ -70,6 +70,23 @@ export default class extends Controller {
     })
   }
 
+  changeMode() {
+    const placeholders = {
+      all: "Search by title, author, or ISBN...",
+      title: "Search by title...",
+      author: "Search by author name...",
+      isbn: "Search by ISBN..."
+    }
+    const mode = this.hasModeTarget ? this.modeTarget.value : "all"
+    this.inputTarget.placeholder = placeholders[mode] || placeholders.all
+    this.inputTarget.focus()
+
+    // Re-search with new mode if there's a query
+    if (this.inputTarget.value.trim().length >= 2) {
+      this.search()
+    }
+  }
+
   search() {
     const query = this.inputTarget.value.trim()
 
@@ -99,7 +116,8 @@ export default class extends Controller {
     this.showLoading()
 
     try {
-      const response = await fetch(`${this.urlValue}?q=${encodeURIComponent(query)}`, {
+      const mode = this.hasModeTarget ? this.modeTarget.value : "all"
+      const response = await fetch(`${this.urlValue}?q=${encodeURIComponent(query)}&mode=${mode}`, {
         headers: {
           "Accept": "application/json",
           "X-Requested-With": "XMLHttpRequest"

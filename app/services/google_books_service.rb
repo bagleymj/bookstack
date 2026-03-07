@@ -7,17 +7,15 @@ class GoogleBooksService
 
   class ApiError < StandardError; end
 
-  # Search for books by title/author query
-  # Supports "by Author Name" prefix for explicit author search.
-  # Also auto-detects initials (e.g. "C.S. Lewis") as author searches.
-  def search(query, limit: 8)
+  # Search for books.
+  # mode: "all" (default), "title", "author", or "isbn"
+  def search(query, limit: 8, mode: "all")
     return [] if query.blank?
 
-    author_mode, clean_query = detect_author_search(query)
-    search_query = author_mode ? "inauthor:#{clean_query}" : clean_query
+    search_query = build_query(query, mode)
 
     # Request extra results for author searches since we'll post-filter
-    api_limit = author_mode ? [limit * 3, 40].min : limit
+    api_limit = mode == "author" ? [limit * 3, 40].min : limit
 
     params = {
       q: search_query,
@@ -32,8 +30,8 @@ class GoogleBooksService
 
     results = items.map { |item| normalize(item) }.compact
 
-    if author_mode
-      results = filter_by_author(results, clean_query)
+    if mode == "author"
+      results = filter_by_author(results, query)
     end
 
     results.first(limit)
@@ -123,27 +121,13 @@ class GoogleBooksService
     params[:key] = api_key if api_key.present?
   end
 
-  # Detect whether the query is an author search.
-  # Returns [author_mode, cleaned_query].
-  #
-  # Triggers on:
-  #   - Explicit "by " prefix: "by David McCullough" → author search for "David McCullough"
-  #   - Initials pattern: "C.S. Lewis", "J.R.R. Tolkien" → unambiguously author names
-  def detect_author_search(query)
-    stripped = query.strip
-
-    # Explicit "by " prefix
-    if stripped.match?(/\Aby\s+/i)
-      return [true, stripped.sub(/\Aby\s+/i, "")]
+  def build_query(query, mode)
+    case mode
+    when "title"  then "intitle:#{query}"
+    when "author" then "inauthor:#{query}"
+    when "isbn"   then "isbn:#{query.gsub(/[-\s]/, "")}"
+    else query
     end
-
-    # Query contains initials like "C.S." or "J.K." or "J.R.R."
-    words = stripped.split(/\s+/)
-    if words.length >= 2 && words.any? { |w| w.match?(/\A([A-Z]\.){1,3}\z/) }
-      return [true, stripped]
-    end
-
-    [false, stripped]
   end
 
   # Keep only results where the author field matches the query name

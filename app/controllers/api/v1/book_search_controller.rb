@@ -11,8 +11,9 @@ module Api
           return
         end
 
+        mode = %w[all title author isbn].include?(params[:mode]) ? params[:mode] : "all"
         service = GoogleBooksService.new
-        results = service.search(query, limit: 8)
+        results = service.search(query, limit: 8, mode: mode)
 
         render json: { results: results }
       end
