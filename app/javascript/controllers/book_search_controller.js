@@ -1,12 +1,14 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["input", "results", "loading", "form", "mode"]
+  static targets = ["input", "results", "loading", "form"]
   static values = { url: String, amazonTag: String }
 
   connect() {
     this.debounceTimer = null
     this.abortController = null
+    this.searchMode = "all"
+    this.lastResults = []
 
     // Close results on click outside
     this.boundClickOutside = this.handleClickOutside.bind(this)
@@ -70,20 +72,18 @@ export default class extends Controller {
     })
   }
 
-  changeMode() {
-    const placeholders = {
-      all: "Search by title, author, or ISBN...",
-      title: "Search by title...",
-      author: "Search by author name...",
-      isbn: "Search by ISBN..."
-    }
-    const mode = this.hasModeTarget ? this.modeTarget.value : "all"
-    this.inputTarget.placeholder = placeholders[mode] || placeholders.all
-    this.inputTarget.focus()
+  setMode(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    const newMode = event.currentTarget.dataset.mode
+    if (newMode === this.searchMode) return
 
-    // Re-search with new mode if there's a query
-    if (this.inputTarget.value.trim().length >= 2) {
-      this.search()
+    this.searchMode = newMode
+
+    // Re-search with new mode
+    const query = this.inputTarget.value.trim()
+    if (query.length >= 2) {
+      this.performSearch(query)
     }
   }
 
@@ -116,8 +116,7 @@ export default class extends Controller {
     this.showLoading()
 
     try {
-      const mode = this.hasModeTarget ? this.modeTarget.value : "all"
-      const response = await fetch(`${this.urlValue}?q=${encodeURIComponent(query)}&mode=${mode}`, {
+      const response = await fetch(`${this.urlValue}?q=${encodeURIComponent(query)}&mode=${this.searchMode}`, {
         headers: {
           "Accept": "application/json",
           "X-Requested-With": "XMLHttpRequest"
@@ -129,6 +128,7 @@ export default class extends Controller {
       if (!response.ok) throw new Error("Search failed")
 
       const data = await response.json()
+      this.lastResults = data.results
       this.renderResults(data.results)
     } catch (error) {
       if (error.name === "AbortError") return // Ignore aborted requests
@@ -141,6 +141,7 @@ export default class extends Controller {
   showLoading() {
     this.resultsTarget.classList.remove("hidden")
     this.resultsTarget.innerHTML = `
+      ${this.renderFilterChips()}
       <div class="p-4 flex items-center justify-center text-gray-500">
         <svg class="animate-spin h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -149,6 +150,33 @@ export default class extends Controller {
         Searching...
       </div>
     `
+    this.bindFilterChips()
+  }
+
+  renderFilterChips() {
+    const modes = [
+      { value: "all", label: "All" },
+      { value: "title", label: "Title" },
+      { value: "author", label: "Author" },
+      { value: "isbn", label: "ISBN" }
+    ]
+
+    const chips = modes.map(m => {
+      const active = m.value === this.searchMode
+      const baseClasses = "px-3 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer"
+      const colorClasses = active
+        ? "bg-indigo-100 text-indigo-700 border-indigo-300"
+        : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:border-gray-300"
+      return `<button type="button" data-mode="${m.value}" data-filter-chip class="${baseClasses} ${colorClasses}">${m.label}</button>`
+    }).join("")
+
+    return `<div class="sticky top-0 z-10 flex gap-1.5 px-3 py-2 bg-gray-50 border-b border-gray-200 rounded-t-lg">${chips}</div>`
+  }
+
+  bindFilterChips() {
+    this.resultsTarget.querySelectorAll("[data-filter-chip]").forEach(chip => {
+      chip.addEventListener("click", (e) => this.setMode(e))
+    })
   }
 
   renderResults(results) {
@@ -156,16 +184,18 @@ export default class extends Controller {
 
     if (results.length === 0) {
       this.resultsTarget.innerHTML = `
+        ${this.renderFilterChips()}
         <div class="p-4 text-center text-gray-500">
           <p>No books found</p>
-          <p class="text-sm mt-1">Try a different search or enter details manually below</p>
+          <p class="text-sm mt-1">Try a different search or filter above</p>
         </div>
       `
+      this.bindFilterChips()
       return
     }
 
     const amazonTag = this.amazonTagValue
-    const html = results.map((book, index) => `
+    const bookHtml = results.map((book, index) => `
       <button type="button"
               data-book-result
               data-action="click->book-search#selectResult"
@@ -203,16 +233,19 @@ export default class extends Controller {
       </button>
     `).join("")
 
-    this.resultsTarget.innerHTML = html
+    this.resultsTarget.innerHTML = this.renderFilterChips() + bookHtml
     this.resultsTarget.classList.remove("hidden")
+    this.bindFilterChips()
   }
 
   renderError() {
     this.resultsTarget.innerHTML = `
+      ${this.renderFilterChips()}
       <div class="p-4 text-center text-red-500">
         <p>Search failed. Please try again.</p>
       </div>
     `
+    this.bindFilterChips()
   }
 
   selectResult(event) {
@@ -232,6 +265,7 @@ export default class extends Controller {
 
     // Clear search and hide results
     this.inputTarget.value = ""
+    this.searchMode = "all"
     this.hideResults()
 
     // Focus the first empty required field
