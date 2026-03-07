@@ -11,7 +11,7 @@ class User < ApplicationRecord
   has_many :reading_goals, dependent: :destroy
   has_one :user_reading_stats, dependent: :destroy
 
-  READING_GOAL_TYPES = %w[books_per_year books_per_month books_per_week minutes_per_day].freeze
+  READING_PACE_TYPES = %w[books_per_year books_per_month books_per_week minutes_per_day].freeze
 
   # Validations
   validates :default_words_per_page, numericality: { greater_than: 0 }
@@ -19,8 +19,8 @@ class User < ApplicationRecord
   validates :max_concurrent_books, numericality: { greater_than: 0 }
   validates :weekday_reading_minutes, numericality: { greater_than_or_equal_to: 0 }
   validates :weekend_reading_minutes, numericality: { greater_than_or_equal_to: 0 }
-  validates :reading_goal_type, inclusion: { in: READING_GOAL_TYPES }, allow_nil: true
-  validates :reading_goal_value, numericality: { greater_than: 0, only_integer: true }, allow_nil: true
+  validates :reading_pace_type, inclusion: { in: READING_PACE_TYPES }, allow_nil: true
+  validates :reading_pace_value, numericality: { greater_than: 0, only_integer: true }, allow_nil: true
 
   # Callbacks
   after_create :create_reading_stats
@@ -37,34 +37,49 @@ class User < ApplicationRecord
     weekend_reading_minutes > 0
   end
 
-  def reading_goal_progress
-    return nil unless reading_goal_type.present? && reading_goal_value.present?
+  def reading_pace_progress
+    return nil unless reading_pace_type.present? && reading_pace_value.present?
 
-    case reading_goal_type
+    case reading_pace_type
     when "books_per_year"
-      completed = books_completed_in_period(Date.current.beginning_of_year, Date.current.end_of_year)
-      expected = expected_books_by_now(:year)
-      { current: completed, target: reading_goal_value, expected: expected, period: "this year" }
+      pace_start = reading_pace_set_on || Date.current.beginning_of_year
+      days_elapsed = [(Date.current - pace_start).to_i, 1].max
+      completed = books_completed_since(pace_start)
+      actual_rate = completed.to_f / days_elapsed * 365
+      { current: completed, rate: actual_rate.round(1), target_rate: reading_pace_value,
+        unit: "books/year", period_label: "since #{pace_start.strftime('%b %-d')}" }
     when "books_per_month"
-      completed = books_completed_in_period(Date.current.beginning_of_month, Date.current.end_of_month)
-      expected = expected_books_by_now(:month)
-      { current: completed, target: reading_goal_value, expected: expected, period: "this month" }
+      pace_start = reading_pace_set_on || Date.current.beginning_of_month
+      days_elapsed = [(Date.current - pace_start).to_i, 1].max
+      completed = books_completed_since(pace_start)
+      actual_rate = completed.to_f / days_elapsed * 30.44
+      { current: completed, rate: actual_rate.round(1), target_rate: reading_pace_value,
+        unit: "books/month", period_label: "since #{pace_start.strftime('%b %-d')}" }
     when "books_per_week"
-      week_start = Date.current.beginning_of_week(:monday)
-      completed = books_completed_in_period(week_start, week_start + 6.days)
-      expected = expected_books_by_now(:week)
-      { current: completed, target: reading_goal_value, expected: expected, period: "this week" }
+      pace_start = reading_pace_set_on || Date.current.beginning_of_week(:monday)
+      days_elapsed = [(Date.current - pace_start).to_i, 1].max
+      completed = books_completed_since(pace_start)
+      actual_rate = completed.to_f / days_elapsed * 7
+      { current: completed, rate: actual_rate.round(1), target_rate: reading_pace_value,
+        unit: "books/week", period_label: "since #{pace_start.strftime('%b %-d')}" }
     when "minutes_per_day"
+      pace_start = reading_pace_set_on || Date.current
+      days_elapsed = [(Date.current - pace_start).to_i, 1].max
+      total_seconds = reading_sessions.completed
+                        .where("started_at >= ?", pace_start.beginning_of_day)
+                        .sum(&:effective_duration_seconds).to_i
+      avg_minutes_per_day = total_seconds / 60.0 / days_elapsed
       today_seconds = reading_sessions.completed.for_date(Date.current).sum(&:effective_duration_seconds).to_i
       today_minutes = today_seconds / 60
-      { current: today_minutes, target: reading_goal_value, expected: reading_goal_value, period: "today" }
+      { current: today_minutes, rate: avg_minutes_per_day.round, target_rate: reading_pace_value,
+        unit: "min/day", period_label: "avg since #{pace_start.strftime('%b %-d')}" }
     end
   end
 
-  def reading_goal_label
-    return nil unless reading_goal_type.present?
+  def reading_pace_label
+    return nil unless reading_pace_type.present?
 
-    case reading_goal_type
+    case reading_pace_type
     when "books_per_year" then "books/year"
     when "books_per_month" then "books/month"
     when "books_per_week" then "books/week"
@@ -78,25 +93,9 @@ class User < ApplicationRecord
     build_user_reading_stats.save
   end
 
-  def books_completed_in_period(start_date, end_date)
+  def books_completed_since(start_date)
     reading_goals.where(status: :completed)
-                 .where(target_completion_date: start_date..end_date)
+                 .where("target_completion_date >= ?", start_date)
                  .select(:book_id).distinct.count
-  end
-
-  def expected_books_by_now(period)
-    case period
-    when :year
-      day_of_year = Date.current.yday
-      days_in_year = Date.current.end_of_year.yday
-      (reading_goal_value.to_f * day_of_year / days_in_year).round(1)
-    when :month
-      day_of_month = Date.current.day
-      days_in_month = Date.current.end_of_month.day
-      (reading_goal_value.to_f * day_of_month / days_in_month).round(1)
-    when :week
-      day_of_week = (Date.current.cwday) # 1=Monday, 7=Sunday
-      (reading_goal_value.to_f * day_of_week / 7).round(1)
-    end
   end
 end

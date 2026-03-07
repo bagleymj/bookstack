@@ -89,48 +89,56 @@
     </div>
   <% end %>
 
-  <!-- Reading Goal Progress -->
-  <% if @reading_goal_progress %>
-    <% progress = @reading_goal_progress %>
-    <% percentage = progress[:target] > 0 ? [(progress[:current].to_f / progress[:target] * 100).round, 100].min : 0 %>
-    <% diff = progress[:current] - progress[:expected].to_f %>
+  <!-- Reading Pace -->
+  <% if @reading_pace_progress %>
+    <% pace = @reading_pace_progress %>
+    <% rate_ratio = pace[:target_rate] > 0 ? (pace[:rate].to_f / pace[:target_rate]) : 0 %>
+    <% rate_percentage = [(rate_ratio * 100).round, 200].min %>
+    <% diff = pace[:rate] - pace[:target_rate] %>
     <div class="rounded-lg bg-white shadow">
       <div class="px-4 py-5 sm:p-6">
         <div class="flex items-center justify-between mb-4">
-          <h3 class="text-lg font-medium leading-6 text-gray-900">Reading Goal</h3>
+          <h3 class="text-lg font-medium leading-6 text-gray-900">Reading Pace</h3>
           <%= link_to "Edit", profile_path, class: "text-sm text-indigo-600 hover:text-indigo-500" %>
         </div>
         <div class="flex items-center gap-6">
-          <!-- Progress ring -->
+          <!-- Pace gauge -->
           <div class="flex-shrink-0 relative w-24 h-24">
             <svg class="w-24 h-24 transform -rotate-90" viewBox="0 0 100 100">
               <circle cx="50" cy="50" r="42" fill="none" stroke-width="8" class="stroke-gray-200"/>
               <circle cx="50" cy="50" r="42" fill="none" stroke-width="8"
-                      class="<%= percentage >= 100 ? 'stroke-green-500' : 'stroke-indigo-600' %>"
+                      class="<%= rate_ratio >= 0.9 ? 'stroke-green-500' : rate_ratio >= 0.5 ? 'stroke-amber-500' : 'stroke-red-400' %>"
                       stroke-linecap="round"
                       stroke-dasharray="<%= (2 * Math::PI * 42).round(1) %>"
-                      stroke-dashoffset="<%= ((1 - percentage / 100.0) * 2 * Math::PI * 42).round(1) %>"/>
+                      stroke-dashoffset="<%= ((1 - [rate_ratio, 1.0].min) * 2 * Math::PI * 42).round(1) %>"/>
             </svg>
             <div class="absolute inset-0 flex items-center justify-center">
-              <span class="text-xl font-bold text-gray-900"><%= percentage %>%</span>
+              <div class="text-center">
+                <span class="text-lg font-bold text-gray-900"><%= pace[:rate] %></span>
+                <span class="block text-[10px] text-gray-500 -mt-0.5"><%= pace[:unit] %></span>
+              </div>
             </div>
           </div>
           <!-- Details -->
           <div class="flex-1 min-w-0">
             <p class="text-2xl font-bold text-gray-900">
-              <%= progress[:current] %> <span class="text-base font-normal text-gray-500">of <%= progress[:target] %> <%= current_user.reading_goal_label %></span>
+              <%= pace[:current] %> <span class="text-base font-normal text-gray-500"><%= pace[:unit].split("/").first %> read</span>
             </p>
-            <p class="mt-1 text-sm text-gray-600"><%= progress[:period].capitalize %></p>
+            <p class="mt-1 text-sm text-gray-600">
+              Target: <%= pace[:target_rate] %> <%= pace[:unit] %>
+              <span class="text-gray-400">&middot;</span>
+              <%= pace[:period_label] %>
+            </p>
             <% if diff.abs >= 0.5 %>
               <p class="mt-1 text-sm font-medium <%= diff >= 0 ? 'text-green-600' : 'text-amber-600' %>">
                 <% if diff > 0 %>
-                  <%= diff.round(1) %> ahead of pace
-                <% elsif diff < 0 %>
-                  <%= diff.abs.round(1) %> behind pace
+                  Ahead of pace
+                <% else %>
+                  Behind pace
                 <% end %>
               </p>
             <% else %>
-              <p class="mt-1 text-sm font-medium text-green-600">On track</p>
+              <p class="mt-1 text-sm font-medium text-green-600">On pace</p>
             <% end %>
           </div>
         </div>

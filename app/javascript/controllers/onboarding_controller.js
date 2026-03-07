@@ -178,7 +178,7 @@ export default class extends Controller {
     const config = this.constructor.goalConfigs[type]
 
     // Update type hidden field
-    this.element.querySelector('[name="user[reading_goal_type]"]').value = type
+    this.element.querySelector('[name="user[reading_pace_type]"]').value = type
 
     // Highlight selected card
     this.element.querySelectorAll("[data-action='click->onboarding#selectGoalType']").forEach(btn => {
@@ -216,13 +216,13 @@ export default class extends Controller {
     this.goalPresetsTarget.appendChild(customBtn)
 
     // Reset value
-    this.element.querySelector('[name="user[reading_goal_value]"]').value = ""
+    this.element.querySelector('[name="user[reading_pace_value]"]').value = ""
     this.goalCustomTarget.classList.add("hidden")
   }
 
   selectGoalPreset(event) {
     const value = event.currentTarget.dataset.value
-    this.element.querySelector('[name="user[reading_goal_value]"]').value = value
+    this.element.querySelector('[name="user[reading_pace_value]"]').value = value
 
     // Highlight
     this.goalPresetsTarget.querySelectorAll("button").forEach(btn => {
@@ -245,12 +245,12 @@ export default class extends Controller {
   }
 
   syncGoalInput(event) {
-    this.element.querySelector('[name="user[reading_goal_value]"]').value = event.target.value
+    this.element.querySelector('[name="user[reading_pace_value]"]').value = event.target.value
   }
 
   clearGoal() {
-    this.element.querySelector('[name="user[reading_goal_type]"]').value = ""
-    this.element.querySelector('[name="user[reading_goal_value]"]').value = ""
+    this.element.querySelector('[name="user[reading_pace_type]"]').value = ""
+    this.element.querySelector('[name="user[reading_pace_value]"]').value = ""
     this.selectedGoalType = null
 
     // Deselect all cards

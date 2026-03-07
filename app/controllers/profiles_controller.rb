@@ -9,8 +9,12 @@ class ProfilesController < ApplicationController
     old_values = current_user.attributes.slice(*scheduling_fields)
 
     cleaned_params = profile_params
-    if cleaned_params[:reading_goal_type].blank?
-      cleaned_params = cleaned_params.merge(reading_goal_type: nil, reading_goal_value: nil)
+    if cleaned_params[:reading_pace_type].blank?
+      cleaned_params = cleaned_params.merge(reading_pace_type: nil, reading_pace_value: nil, reading_pace_set_on: nil)
+    elsif current_user.reading_pace_type != cleaned_params[:reading_pace_type] ||
+          current_user.reading_pace_value.to_s != cleaned_params[:reading_pace_value]
+      # Reset the pace start date when the pace changes
+      cleaned_params = cleaned_params.merge(reading_pace_set_on: Date.current)
     end
 
     if current_user.update(cleaned_params)
@@ -34,8 +38,8 @@ class ProfilesController < ApplicationController
       :max_concurrent_books,
       :weekday_reading_minutes,
       :weekend_reading_minutes,
-      :reading_goal_type,
-      :reading_goal_value
+      :reading_pace_type,
+      :reading_pace_value
     )
   end
 end

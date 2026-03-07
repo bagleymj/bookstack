@@ -8,8 +8,10 @@ class OnboardingController < ApplicationController
 
   def update
     cleaned_params = onboarding_params
-    if cleaned_params[:reading_goal_type].blank?
-      cleaned_params = cleaned_params.merge(reading_goal_type: nil, reading_goal_value: nil)
+    if cleaned_params[:reading_pace_type].blank?
+      cleaned_params = cleaned_params.merge(reading_pace_type: nil, reading_pace_value: nil, reading_pace_set_on: nil)
+    else
+      cleaned_params = cleaned_params.merge(reading_pace_set_on: Date.current)
     end
 
     if current_user.update(cleaned_params.merge(onboarding_completed_at: Time.current))
@@ -34,8 +36,8 @@ class OnboardingController < ApplicationController
       :weekday_reading_minutes,
       :weekend_reading_minutes,
       :max_concurrent_books,
-      :reading_goal_type,
-      :reading_goal_value
+      :reading_pace_type,
+      :reading_pace_value
     )
   end
 end

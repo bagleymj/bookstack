@@ -176,11 +176,11 @@
       </div>
     </div>
 
-    <!-- Step 4: Reading Goal -->
+    <!-- Step 4: Reading Pace -->
     <div data-onboarding-target="step" class="hidden">
       <div class="text-center mb-8">
-        <h1 class="text-3xl font-bold text-gray-900">Set a Reading Goal</h1>
-        <p class="mt-2 text-gray-600">Optional — set an overarching target to keep yourself on track.</p>
+        <h1 class="text-3xl font-bold text-gray-900">Set Your Reading Pace</h1>
+        <p class="mt-2 text-gray-600">Optional — set the pace you want to maintain. We'll track how you're doing.</p>
       </div>
 
       <div class="space-y-4">
@@ -268,15 +268,15 @@
           </div>
         </div>
 
-        <!-- No goal option -->
+        <!-- No pace option -->
         <button type="button" data-action="click->onboarding#clearGoal"
                 class="w-full text-center py-3 text-sm text-gray-500 hover:text-gray-700 transition-colors">
-          Skip — I don't want to set a goal right now
+          Skip — I don't want to set a pace right now
         </button>
       </div>
 
-      <%= form.hidden_field :reading_goal_type %>
-      <%= form.hidden_field :reading_goal_value %>
+      <%= form.hidden_field :reading_pace_type %>
+      <%= form.hidden_field :reading_pace_value %>
     </div>
 
     <!-- Navigation buttons -->

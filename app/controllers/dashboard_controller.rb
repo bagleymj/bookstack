@@ -50,8 +50,8 @@ class DashboardController < ApplicationController
     # Find goals with unresolved discrepancies from yesterday
     @goals_with_discrepancies = @active_goals.select(&:has_unresolved_discrepancy?)
 
-    # Reading goal progress
-    @reading_goal_progress = current_user.reading_goal_progress
+    # Reading pace progress
+    @reading_pace_progress = current_user.reading_pace_progress
   end
 
   private

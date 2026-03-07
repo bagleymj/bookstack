@@ -41,30 +41,33 @@
       </div>
     </div>
 
-    <!-- Reading Goal -->
+    <!-- Reading Pace -->
     <div class="rounded-lg bg-white shadow">
       <div class="px-4 py-5 sm:p-6">
-        <h3 class="text-lg font-medium text-gray-900">Reading Goal</h3>
-        <p class="mt-1 text-sm text-gray-500">Set an overarching reading target to track on your dashboard.</p>
+        <h3 class="text-lg font-medium text-gray-900">Reading Pace</h3>
+        <p class="mt-1 text-sm text-gray-500">Set the reading pace you want to maintain. Tracked on your dashboard.</p>
         <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 max-w-md">
           <div>
-            <label class="block text-sm font-medium text-gray-700">Goal type</label>
-            <%= form.select :reading_goal_type,
+            <label class="block text-sm font-medium text-gray-700">Pace type</label>
+            <%= form.select :reading_pace_type,
                 options_for_select([
                   ["None", ""],
                   ["Books per year", "books_per_year"],
                   ["Books per month", "books_per_month"],
                   ["Books per week", "books_per_week"],
                   ["Minutes per day", "minutes_per_day"]
-                ], current_user.reading_goal_type),
+                ], current_user.reading_pace_type),
                 {},
                 class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" %>
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700">Target</label>
-            <%= form.number_field :reading_goal_value, min: 1, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm", placeholder: "e.g. 52" %>
+            <%= form.number_field :reading_pace_value, min: 1, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm", placeholder: "e.g. 52" %>
           </div>
         </div>
+        <% if current_user.reading_pace_set_on.present? %>
+          <p class="mt-2 text-xs text-gray-400">Tracking since <%= current_user.reading_pace_set_on.strftime('%b %-d, %Y') %>. Changing the pace resets the start date.</p>
+        <% end %>
       </div>
     </div>
 
