@@ -330,7 +330,7 @@ export default class extends Controller {
       if (this.editModeValue) {
         editToggle.append("div")
           .attr("class", "mt-1 text-xs text-amber-600")
-          .text("Drag to move, resize right edge")
+          .text("Drag to move, resize edges")
       }
     }
 
@@ -831,13 +831,105 @@ export default class extends Controller {
         window.location.href = `/reading_goals/${goal.id}`
       })
 
-      // ── Edit mode: resize handle ──
+      // ── Edit mode: resize handles (left + right edges) ──
       if (this.editModeValue) {
+        const firstBrick = goalBricks[0]
         const lastBrick = goalBricks[goalBricks.length - 1]
         const resizeTooltip = d3.select(this.element)
           .append("div")
           .attr("class", "resize-tooltip absolute hidden bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-xl pointer-events-none z-50 border border-gray-700")
 
+        // Shared resize drag builder
+        const buildResizeDrag = (edge) => d3.drag()
+          .on("start", function(event) {
+            goal._resizeStartX = event.x
+            goal._origStartDate = goal.startDate
+            goal._origEndDate = goal.endDate
+            goal._origMinutesPerDay = goal.minutes_per_day
+            goal._totalPlannedMinutes = goal.duration_days * goal.minutes_per_day
+            goal._resizeEdge = edge
+
+            d3.select(this)
+              .style("fill", "rgba(255,255,255,0.7)")
+              .style("width", "10px")
+
+            const dateToShow = edge === "left" ? goal._origStartDate : goal._origEndDate
+            resizeTooltip
+              .classed("hidden", false)
+              .html(self.formatResizeTooltip(dateToShow, 0, edge))
+          })
+          .on("drag", function(event) {
+            const dx = event.x - goal._resizeStartX
+            const msPerPx = (self.endDate - self.startDate) / self.width
+            const offsetMs = dx * msPerPx
+            const dayMs = 86400000
+            const snappedOffsetMs = Math.round(offsetMs / dayMs) * dayMs
+            const daysChanged = Math.round(snappedOffsetMs / dayMs)
+
+            if (edge === "left") {
+              const newStart = new Date(goal._origStartDate.getTime() + snappedOffsetMs)
+              if (newStart < goal.endDate) {
+                goal.startDate = newStart
+
+                const newActiveDays = self.countActiveDays(goal.startDate, goal.endDate, goal.include_weekends)
+                if (newActiveDays > 0) {
+                  goal.minutes_per_day = goal._totalPlannedMinutes / newActiveDays
+                }
+
+                self.updateBricksForDrag({ rescale: true })
+
+                resizeTooltip
+                  .html(self.formatResizeTooltip(goal.startDate, daysChanged, "left"))
+                  .style("left", `${event.sourceEvent.offsetX + 20}px`)
+                  .style("top", `${event.sourceEvent.offsetY - 40}px`)
+              }
+            } else {
+              const newEnd = new Date(goal._origEndDate.getTime() + snappedOffsetMs)
+              if (newEnd > goal.startDate) {
+                goal.endDate = newEnd
+
+                const newActiveDays = self.countActiveDays(goal.startDate, goal.endDate, goal.include_weekends)
+                if (newActiveDays > 0) {
+                  goal.minutes_per_day = goal._totalPlannedMinutes / newActiveDays
+                }
+
+                self.updateBricksForDrag({ rescale: true })
+
+                resizeTooltip
+                  .html(self.formatResizeTooltip(goal.endDate, daysChanged, "right"))
+                  .style("left", `${event.sourceEvent.offsetX + 20}px`)
+                  .style("top", `${event.sourceEvent.offsetY - 40}px`)
+              }
+            }
+          })
+          .on("end", function() {
+            d3.select(this)
+              .style("fill", "rgba(255,255,255,0.3)")
+              .style("width", "8px")
+
+            resizeTooltip.classed("hidden", true)
+            goal.minutes_per_day = goal._origMinutesPerDay
+
+            const startChanged = goal.startDate.getTime() !== goal._origStartDate.getTime()
+            const endChanged = goal.endDate.getTime() !== goal._origEndDate.getTime()
+            if (startChanged || endChanged) {
+              self.updateGoalDates(goal.id, goal.startDate, goal.endDate)
+            }
+          })
+
+        // Left resize handle
+        this.overlayLayer.append("rect")
+          .attr("class", "resize-handle")
+          .attr("x", this.xScale(firstBrick.date) - 2)
+          .attr("y", minY)
+          .attr("width", 8)
+          .attr("height", Math.max(maxY - minY, 2))
+          .style("fill", "rgba(255,255,255,0.3)")
+          .style("cursor", "ew-resize")
+          .attr("rx", 2)
+          .call(buildResizeDrag("left"))
+
+        // Right resize handle
         this.overlayLayer.append("rect")
           .attr("class", "resize-handle")
           .attr("x", this.xScale(lastBrick.nextDate) - 6)
@@ -847,61 +939,7 @@ export default class extends Controller {
           .style("fill", "rgba(255,255,255,0.3)")
           .style("cursor", "ew-resize")
           .attr("rx", 2)
-          .call(d3.drag()
-            .on("start", function(event) {
-              goal._resizeStartX = event.x
-              goal._origEndDate = goal.endDate
-              goal._origMinutesPerDay = goal.minutes_per_day
-              goal._totalPlannedMinutes = goal.duration_days * goal.minutes_per_day
-
-              d3.select(this)
-                .style("fill", "rgba(255,255,255,0.7)")
-                .style("width", "10px")
-
-              resizeTooltip
-                .classed("hidden", false)
-                .html(self.formatResizeTooltip(goal._origEndDate, 0))
-            })
-            .on("drag", function(event) {
-              const dx = event.x - goal._resizeStartX
-              const msPerPx = (self.endDate - self.startDate) / self.width
-              const offsetMs = dx * msPerPx
-              const dayMs = 86400000
-              const snappedOffsetMs = Math.round(offsetMs / dayMs) * dayMs
-              const newEnd = new Date(goal._origEndDate.getTime() + snappedOffsetMs)
-
-              if (newEnd > goal.startDate) {
-                goal.endDate = newEnd
-                const daysChanged = Math.round(snappedOffsetMs / dayMs)
-
-                // Recalculate minutes_per_day for new duration
-                const newActiveDays = self.countActiveDays(goal.startDate, goal.endDate, goal.include_weekends)
-                if (newActiveDays > 0) {
-                  goal.minutes_per_day = goal._totalPlannedMinutes / newActiveDays
-                }
-
-                // Live reflow with y-axis rescale
-                self.updateBricksForDrag({ rescale: true })
-
-                resizeTooltip
-                  .html(self.formatResizeTooltip(goal.endDate, daysChanged))
-                  .style("left", `${event.sourceEvent.offsetX + 20}px`)
-                  .style("top", `${event.sourceEvent.offsetY - 40}px`)
-              }
-            })
-            .on("end", function() {
-              d3.select(this)
-                .style("fill", "rgba(255,255,255,0.3)")
-                .style("width", "8px")
-
-              resizeTooltip.classed("hidden", true)
-              goal.minutes_per_day = goal._origMinutesPerDay
-
-              if (goal.endDate.getTime() !== goal._origEndDate.getTime()) {
-                self.updateGoalDates(goal.id, goal.startDate, goal.endDate)
-              }
-            })
-          )
+          .call(buildResizeDrag("right"))
       }
 
       // ── Edit mode: drag to move/postpone ──
@@ -1176,9 +1214,10 @@ export default class extends Controller {
     `
   }
 
-  formatResizeTooltip(endDate, daysChanged) {
+  formatResizeTooltip(date, daysChanged, edge = "right") {
     const formatDate = d3.timeFormat("%b %d")
-    const endStr = formatDate(endDate)
+    const dateStr = formatDate(date)
+    const label = edge === "left" ? "New start date:" : "New end date:"
 
     let changeText = ""
     if (daysChanged > 0) {
@@ -1191,8 +1230,8 @@ export default class extends Controller {
 
     return `
       <div class="text-xs space-y-1">
-        <div class="font-semibold text-white">New end date:</div>
-        <div>${endStr}</div>
+        <div class="font-semibold text-white">${label}</div>
+        <div>${dateStr}</div>
         ${changeText}
       </div>
     `
