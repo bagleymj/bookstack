@@ -40,6 +40,7 @@ Rails.application.routes.draw do
 
     resource :pipeline, only: [:show], controller: "pipeline"
     resource :profile, only: [:show, :update]
+    resource :reading_list, only: [:show], controller: "reading_list"
 
     namespace :api do
       namespace :v1 do
@@ -50,6 +51,11 @@ Rails.application.routes.draw do
         end
         resources :active_books, only: [:index]
         resources :book_search, only: [:index]
+        resources :reading_list, only: [:create, :destroy], controller: "reading_list" do
+          collection do
+            post :reorder
+          end
+        end
       end
     end
   end
