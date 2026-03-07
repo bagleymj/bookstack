@@ -311,7 +311,23 @@ class ReadingGoal < ApplicationRecord
   def snap_period_label
     return nil unless started_on && target_completion_date
     calendar_days = (target_completion_date - started_on).to_i + 1
-    SNAP_PERIOD_LABELS[calendar_days]
+
+    # Exact match first (e.g., 7 → "1-week read")
+    return SNAP_PERIOD_LABELS[calendar_days] if SNAP_PERIOD_LABELS.key?(calendar_days)
+
+    # Generate a label for non-standard durations
+    if calendar_days <= 4
+      "#{calendar_days}-day read"
+    elsif calendar_days <= 13
+      weeks = (calendar_days / 7.0).round(1)
+      weeks == weeks.to_i ? "#{weeks.to_i}-week read" : "#{weeks}-week read"
+    elsif calendar_days <= 60
+      weeks = (calendar_days / 7.0).round
+      "#{weeks}-week read"
+    else
+      months = (calendar_days / 30.0).round(1)
+      months == months.to_i ? "#{months.to_i}-month read" : "#{months}-month read"
+    end
   end
 
   # Returns boundaries of all reading sessions for this book up to the goal's end date.

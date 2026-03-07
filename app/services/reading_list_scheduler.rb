@@ -9,26 +9,26 @@ class ReadingListScheduler
     slots = build_slot_timeline
     schedulable_goals = gather_schedulable_goals
     default_duration = pace_book_duration
+    interval = pace_completion_interval
     per_slot_minutes = effective_daily_minutes_per_slot
 
     schedulable_goals.each do |goal|
       earliest_slot = slots.min_by { |s| s[:free_date] }
       earliest_date = [earliest_slot[:free_date], Date.current].max
 
-      # Start with pace-derived duration. Every book gets the same window
-      # so the plan projects to the target pace.
-      snapped_days = default_duration
+      # Start with pace-derived duration so the plan projects to the target.
+      duration = default_duration
 
-      # Extend for books that physically can't fit — if the reading time
-      # exceeds the slot's daily budget × duration, bump to the next period.
+      # Extend for books too long to fit — add intervals to maintain rhythm.
       total_minutes = estimate_total_minutes(goal.book)
-      min_days = per_slot_minutes > 0 ? (total_minutes.to_f / per_slot_minutes).ceil : snapped_days
-      while snapped_days < min_days && snapped_days < SNAP_PERIODS.last
-        snapped_days = next_snap_period(snapped_days)
+      min_days = per_slot_minutes > 0 ? (total_minutes.to_f / per_slot_minutes).ceil : duration
+      step = [interval, 7].max
+      while duration < min_days
+        duration += step
       end
 
-      start_date = snap_start_date(earliest_date, snapped_days)
-      end_date = start_date + snapped_days - 1
+      start_date = snap_start_date(earliest_date, duration)
+      end_date = start_date + duration - 1
 
       goal.update!(
         started_on: start_date,
@@ -47,53 +47,23 @@ class ReadingListScheduler
 
   private
 
-  # The standard duration each book gets, derived from the pace target.
-  # With 50 books/year and 3 concurrent: interval=7, duration=7*3=21 → snap to 14.
-  # This ensures the plan projects to ~50 completions/year.
+  # The duration each book gets, derived directly from the pace target.
+  # NOT snapped — the pace determines the exact duration.
+  # With 50 books/year and 3 concurrent: 7 × 3 = 21 days per book.
   def pace_book_duration
     interval = pace_completion_interval
-    if interval > 0
-      snap_to_period(interval * @user.max_concurrent_books)
-    else
-      # minutes_per_day pace: fall back to reading-speed estimate
-      7
-    end
+    return 7 if interval <= 0
+    interval * @user.max_concurrent_books
   end
 
-  def next_snap_period(current)
-    idx = SNAP_PERIODS.index(current)
-    return SNAP_PERIODS.last if idx.nil? || idx >= SNAP_PERIODS.length - 1
-    SNAP_PERIODS[idx + 1]
-  end
-
-  # Snap raw_days to the nearest period, biased toward gentler (longer).
-  # Uses a 40% threshold: snap down only if raw_days falls in the bottom 40%
-  # of the gap between two snap points. Otherwise snap up.
-  def snap_to_period(raw_days)
-    return SNAP_PERIODS.first if raw_days <= SNAP_PERIODS.first
-
-    SNAP_PERIODS.each_cons(2) do |lower, upper|
-      next if raw_days > upper
-      midpoint = lower + (upper - lower) * 0.4
-      return raw_days > midpoint ? upper : lower
-    end
-
-    SNAP_PERIODS.last
-  end
-
-  # Snap a start date to a clean boundary based on the pace rhythm:
-  #   ≤2-day interval → Saturday (weekend pace)
-  #   ≤14-day interval → Monday (weekly/biweekly pace)
-  #   >14-day interval → 1st of the month (monthly pace)
-  # The pace rhythm — not individual book duration — determines when
-  # books start so that staggered slots land on consistent boundaries.
-  def snap_start_date(earliest_date, _snapped_days)
-    interval = pace_completion_interval
-
-    case interval
-    when 0..2
+  # Snap a start date to a clean boundary based on the book's duration:
+  #   Weekend reads (≤4 days) → Saturday
+  #   Weekly reads (5–21 days) → Monday
+  #   Monthly+ reads (22+ days) → 1st of the month
+  def snap_start_date(earliest_date, duration_days)
+    if duration_days <= 4
       next_weekday(earliest_date, :saturday)
-    when 3..14
+    elsif duration_days <= 21
       next_weekday(earliest_date, :monday)
     else
       next_first_of_month(earliest_date)
@@ -145,9 +115,6 @@ class ReadingListScheduler
     slots
   end
 
-  # How many days to stagger between slots, derived from the user's pace.
-  # With 50 books/year → 7 days between each slot opening.
-  # With 1 concurrent book → no stagger needed.
   def pace_stagger_days
     return 0 if @user.max_concurrent_books <= 1
 
