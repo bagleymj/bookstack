@@ -1,15 +1,12 @@
 Rails.application.routes.draw do
   devise_for :users
 
-  # JWT API authentication (outside authenticate block)
-  devise_for :users, path: "api/v1/auth", path_names: {
-    sign_in: "sign_in",
-    sign_out: "sign_out",
-    registration: "sign_up"
-  }, controllers: {
-    sessions: "api/v1/auth/sessions",
-    registrations: "api/v1/auth/registrations"
-  }, as: :api_user
+  # JWT API authentication
+  scope "api/v1/auth", defaults: { format: :json } do
+    post "sign_in", to: "api/v1/auth/sessions#create", as: :api_sign_in
+    delete "sign_out", to: "api/v1/auth/sessions#destroy", as: :api_sign_out
+    post "sign_up", to: "api/v1/auth/registrations#create", as: :api_sign_up
+  end
 
   # Authenticated routes
   authenticate :user do

@@ -1,10 +1,10 @@
 FactoryBot.define do
   factory :reading_goal do
-    user { nil }
-    book { nil }
-    target_completion_date { "2026-01-26" }
-    started_on { "2026-01-26" }
-    include_weekends { false }
-    status { 1 }
+    user
+    book
+    started_on { Date.current }
+    target_completion_date { 30.days.from_now.to_date }
+    include_weekends { true }
+    status { :active }
   end
 end

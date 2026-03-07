@@ -1,27 +1,29 @@
 module Api
   module V1
     module Auth
-      class RegistrationsController < Devise::RegistrationsController
-        respond_to :json
+      class RegistrationsController < ActionController::API
+        def create
+          user = User.new(sign_up_params)
 
-        private
+          if user.save
+            token = Warden::JWTAuth::UserEncoder.new.call(user, :user, nil).first
+            response.set_header("Authorization", "Bearer #{token}")
 
-        def respond_with(resource, _opts = {})
-          if resource.persisted?
             render json: {
               user: {
-                id: resource.id,
-                email: resource.email,
-                name: resource.name
+                id: user.id,
+                email: user.email,
+                name: user.name
               },
+              token: token,
               message: "Signed up successfully."
             }, status: :created
           else
-            render json: {
-              errors: resource.errors.full_messages
-            }, status: :unprocessable_entity
+            render json: { errors: user.errors.full_messages }, status: :unprocessable_entity
           end
         end
+
+        private
 
         def sign_up_params
           params.require(:user).permit(:email, :password, :password_confirmation, :name)

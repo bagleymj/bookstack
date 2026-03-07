@@ -1,9 +1,9 @@
 FactoryBot.define do
-  factory :daily_quotum do
-    reading_goal { nil }
-    date { "2026-01-26" }
-    target_pages { 1 }
-    actual_pages { 1 }
-    status { 1 }
+  factory :daily_quota do
+    reading_goal
+    date { Date.current }
+    target_pages { 10 }
+    actual_pages { 0 }
+    status { :pending }
   end
 end
