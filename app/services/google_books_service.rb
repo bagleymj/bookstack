@@ -4,6 +4,11 @@ require "json"
 class GoogleBooksService
   BASE_URL = "https://www.googleapis.com"
   TIMEOUT = 5 # seconds
+  OVERFETCH_LIMIT = 24 # fetch more than needed so we can rank and filter
+
+  JUNK_TITLE_PATTERNS = /\b(study guide|workbook|companion|cliff.?s?\s*notes|spark\s*notes|
+    summary\s*(and|&)\s*analysis|book\s*summary|reader.?s?\s*guide|teacher.?s?\s*guide|
+    lesson\s*plans?|test\s*prep|exam\s*review|quiz|for\s*dummies)\b/ix
 
   class ApiError < StandardError; end
 
@@ -13,14 +18,13 @@ class GoogleBooksService
     return [] if query.blank?
 
     search_query = build_query(query, mode)
-
-    # Request extra results for author searches since we'll post-filter
-    api_limit = mode == "author" ? [limit * 3, 40].min : limit
+    api_limit = [OVERFETCH_LIMIT, limit * 3].max
 
     params = {
       q: search_query,
       maxResults: api_limit,
-      printType: "books"
+      printType: "books",
+      langRestrict: "en"
     }
 
     add_api_key(params)
@@ -28,7 +32,11 @@ class GoogleBooksService
     response = get("/books/v1/volumes", params)
     items = response["items"] || []
 
-    results = items.map { |item| normalize(item) }.compact
+    # Score and sort raw items before normalizing
+    scored = items.map { |item| [item, quality_score(item)] }
+                  .sort_by { |_item, score| -score }
+
+    results = scored.map { |item, _score| normalize(item) }.compact
 
     if mode == "author"
       results = filter_by_author(results, query)
@@ -85,6 +93,44 @@ class GoogleBooksService
     end
 
     JSON.parse(response.body)
+  end
+
+  # Score a raw Google Books API item by quality signals.
+  # Higher score = more likely to be a real, popular, purchasable book.
+  def quality_score(item)
+    info = item["volumeInfo"] || {}
+    sale = item["saleInfo"] || {}
+    score = 0.0
+
+    # Metadata completeness
+    score += 10 if info["pageCount"].to_i > 0
+    score += 10 if info["industryIdentifiers"].present?
+    score += 5  if info["imageLinks"].present?
+    score += 5  if info["publisher"].present?
+    score += 3  if info["authors"].present?
+    score += 3  if info["description"].present?
+
+    # Community signals — ratings are strong evidence of a real popular book
+    ratings_count = info["ratingsCount"].to_i
+    if ratings_count > 0
+      score += 15
+      score += [ratings_count, 50].min * 0.3 # up to +15 more for heavily rated
+      score += (info["averageRating"].to_f - 3.0) * 3 # boost well-rated books
+    end
+
+    # Commercial availability — for-sale books are real published editions
+    score += 10 if sale["saleability"] == "FOR_SALE"
+    score += 3  if sale["saleability"] == "FREE"
+
+    # Penalize junk
+    title = info["title"].to_s
+    score -= 40 if title.match?(JUNK_TITLE_PATTERNS)
+
+    # Penalize very short works (pamphlets, excerpts)
+    page_count = info["pageCount"].to_i
+    score -= 10 if page_count > 0 && page_count < 50
+
+    score
   end
 
   def normalize(item)
