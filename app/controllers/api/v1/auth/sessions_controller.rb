@@ -6,7 +6,7 @@ module Api
           user = User.find_by(email: sign_in_params[:email])
 
           if user&.valid_password?(sign_in_params[:password])
-            token = Warden::JWTAuth::UserEncoder.new.call(user, :user, nil).first
+            token = JwtToken.encode(user)
             response.set_header("Authorization", "Bearer #{token}")
 
             render json: {
@@ -27,11 +27,11 @@ module Api
           token = request.headers["Authorization"]&.split(" ")&.last
 
           if token
-            begin
-              payload = Warden::JWTAuth::TokenDecoder.new.call(token)
+            payload = JwtToken.decode(token)
+            if payload
               JwtDenylist.create!(jti: payload["jti"], exp: Time.at(payload["exp"]))
               render json: { message: "Logged out successfully." }, status: :ok
-            rescue JWT::DecodeError
+            else
               render json: { error: "Invalid token." }, status: :unauthorized
             end
           else

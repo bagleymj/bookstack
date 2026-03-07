@@ -6,7 +6,7 @@ module Api
           user = User.new(sign_up_params)
 
           if user.save
-            token = Warden::JWTAuth::UserEncoder.new.call(user, :user, nil).first
+            token = JwtToken.encode(user)
             response.set_header("Authorization", "Bearer #{token}")
 
             render json: {

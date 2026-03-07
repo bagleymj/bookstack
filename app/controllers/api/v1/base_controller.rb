@@ -24,11 +24,20 @@ module Api
       end
 
       def current_user
-        @current_user ||= warden&.authenticate(scope: :user)
+        return @current_user if defined?(@current_user)
+
+        @current_user = authenticate_from_jwt
       end
 
-      def warden
-        request.env["warden"]
+      def authenticate_from_jwt
+        token = request.headers["Authorization"]&.split(" ")&.last
+        return nil unless token
+
+        payload = JwtToken.decode(token)
+        return nil unless payload
+        return nil if JwtDenylist.revoked?(payload["jti"])
+
+        User.find_by(id: payload["sub"])
       end
     end
   end
