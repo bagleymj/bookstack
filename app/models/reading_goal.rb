@@ -4,8 +4,7 @@ class ReadingGoal < ApplicationRecord
   has_many :daily_quotas, dependent: :destroy
 
   SNAP_PERIOD_LABELS = {
-    2 => "Weekend read", 7 => "1-week read", 14 => "2-week read",
-    30 => "1-month read", 90 => "3-month read", 180 => "6-month read"
+    2 => "Weekend read", 7 => "1-week read", 14 => "2-week read"
   }.freeze
 
   # Enums
@@ -315,6 +314,10 @@ class ReadingGoal < ApplicationRecord
     # Exact match first (e.g., 7 → "1-week read")
     return SNAP_PERIOD_LABELS[calendar_days] if SNAP_PERIOD_LABELS.key?(calendar_days)
 
+    # Calendar-month-aware labels: check if duration aligns with whole months
+    month_label = calendar_month_label(calendar_days)
+    return month_label if month_label
+
     # Generate a label for non-standard durations
     if calendar_days <= 4
       "#{calendar_days}-day read"
@@ -328,6 +331,22 @@ class ReadingGoal < ApplicationRecord
       months = (calendar_days / 30.0).round(1)
       months == months.to_i ? "#{months.to_i}-month read" : "#{months}-month read"
     end
+  end
+
+  # Detect if a duration corresponds to a whole number of calendar months.
+  # Calendar months vary (28-31 days), so we check if started_on + N months
+  # lands on the day after target_completion_date.
+  def calendar_month_label(calendar_days)
+    return nil if calendar_days < 28
+
+    [1, 2, 3, 6].each do |n|
+      expected_end = (started_on + n.months) - 1
+      if expected_end == target_completion_date
+        return "#{n}-month read"
+      end
+    end
+
+    nil
   end
 
   # Returns boundaries of all reading sessions for this book up to the goal's end date.

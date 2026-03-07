@@ -1,34 +1,32 @@
 class ReadingListScheduler
-  SNAP_PERIODS = [2, 7, 14, 30, 90, 180].freeze
+  DURATION_TIERS = {
+    week:      { max_minutes: 150,  snap: :monday,         label: "1-week read" },
+    two_weeks: { max_minutes: 400,  snap: :monday,         label: "2-week read" },
+    month:     { max_minutes: 800,  snap: :first_of_month, label: "1-month read" },
+    quarter:   { max_minutes: 1600, snap: :first_of_month, label: "3-month read" },
+    half_year: { max_minutes: Float::INFINITY, snap: :first_of_month, label: "6-month read" }
+  }.freeze
 
   def initialize(user)
     @user = user
+    @max_concurrent = user.max_concurrent_books
   end
 
   def schedule!
-    slots = build_slot_timeline
-    schedulable_goals = gather_schedulable_goals
-    default_duration = pace_book_duration
-    interval = pace_completion_interval
-    per_slot_minutes = effective_daily_minutes_per_slot
+    all_goals = locked_goals + gather_schedulable_goals
+    @daily_budget = compute_daily_budget(all_goals)
 
-    schedulable_goals.each do |goal|
-      earliest_slot = slots.min_by { |s| s[:free_date] }
-      earliest_date = [earliest_slot[:free_date], Date.current].max
+    timeline = build_locked_timeline
+    schedulable = gather_schedulable_goals
 
-      # Start with pace-derived duration so the plan projects to the target.
-      duration = default_duration
+    schedulable.each do |goal|
+      book_minutes = estimate_total_minutes(goal.book)
+      tier = duration_tier(book_minutes)
 
-      # Extend for books too long to fit — add intervals to maintain rhythm.
-      total_minutes = estimate_total_minutes(goal.book)
-      min_days = per_slot_minutes > 0 ? (total_minutes.to_f / per_slot_minutes).ceil : duration
-      step = [interval, 7].max
-      while duration < min_days
-        duration += step
-      end
-
-      start_date = snap_start_date(earliest_date, duration)
-      end_date = start_date + duration - 1
+      start_date = find_start_date(timeline, tier, book_minutes)
+      end_date = calendar_end(start_date, tier)
+      duration_days = count_reading_days(start_date, end_date)
+      daily_share = duration_days > 0 ? book_minutes.to_f / duration_days : book_minutes.to_f
 
       goal.update!(
         started_on: start_date,
@@ -41,34 +39,136 @@ class ReadingListScheduler
       goal.daily_quotas.reload
       ProfileAwareQuotaCalculator.new(goal, @user).generate_quotas!
 
-      earliest_slot[:free_date] = end_date + 1.day
+      timeline << { start: start_date, end: end_date, share: daily_share }
     end
   end
 
   private
 
-  # The duration each book gets, derived directly from the pace target.
-  # NOT snapped — the pace determines the exact duration.
-  # With 50 books/year and 3 concurrent: 7 × 3 = 21 days per book.
-  def pace_book_duration
+  # --- Budget ---
+
+  def compute_daily_budget(all_goals)
+    return fallback_daily_budget if all_goals.empty?
+
+    total_minutes = all_goals.sum { |g| estimate_total_minutes(g.book) }
+    return fallback_daily_budget if total_minutes <= 0
+
     interval = pace_completion_interval
-    return 7 if interval <= 0
-    interval * @user.max_concurrent_books
+    return fallback_daily_budget if interval <= 0
+
+    total_days = all_goals.size * interval
+    total_minutes.to_f / total_days
   end
 
-  # Snap a start date to a clean boundary based on the book's duration:
-  #   Weekend reads (≤4 days) → Saturday
-  #   Weekly reads (5–21 days) → Monday
-  #   Monthly+ reads (22+ days) → 1st of the month
-  def snap_start_date(earliest_date, duration_days)
-    if duration_days <= 4
-      next_weekday(earliest_date, :saturday)
-    elsif duration_days <= 21
-      next_weekday(earliest_date, :monday)
-    else
-      next_first_of_month(earliest_date)
+  def fallback_daily_budget
+    @user.derive_daily_minutes_from_pace || default_daily_minutes
+  end
+
+  def default_daily_minutes
+    (@user.weekday_reading_minutes * 5 + @user.weekend_reading_minutes * 2) / 7.0
+  end
+
+  # --- Tier & calendar logic ---
+
+  def duration_tier(book_minutes)
+    case book_minutes
+    when 0..150    then :week
+    when 151..400  then :two_weeks
+    when 401..800  then :month
+    when 801..1600 then :quarter
+    else :half_year
     end
   end
+
+  def snap_to_boundary(date, tier)
+    case DURATION_TIERS[tier][:snap]
+    when :monday
+      next_weekday(date, :monday)
+    when :first_of_month
+      next_first_of_month(date)
+    end
+  end
+
+  def calendar_end(start_date, tier)
+    case tier
+    when :week      then start_date + 6
+    when :two_weeks then start_date + 13
+    when :month     then start_date.end_of_month
+    when :quarter   then (start_date + 2.months).end_of_month
+    when :half_year then (start_date + 5.months).end_of_month
+    end
+  end
+
+  # --- Placement ---
+
+  def find_start_date(timeline, tier, book_minutes)
+    date = Date.current
+    budget_cap = @daily_budget * 1.1
+
+    100.times do
+      snapped = snap_to_boundary(date, tier)
+      end_date = calendar_end(snapped, tier)
+      days = count_reading_days(snapped, end_date)
+      daily_share = days > 0 ? book_minutes.to_f / days : book_minutes.to_f
+
+      active = timeline.select { |e| e[:start] <= snapped && e[:end] >= snapped }
+
+      if active.size < @max_concurrent && (active.sum { |e| e[:share] } + daily_share) <= budget_cap
+        return snapped
+      end
+
+      next_end = active.map { |e| e[:end] }.min
+      date = next_end ? next_end + 1 : date + 1
+    end
+
+    snap_to_boundary(Date.current, tier)
+  end
+
+  # --- Timeline ---
+
+  def build_locked_timeline
+    locked_goals.map do |goal|
+      book_minutes = estimate_total_minutes(goal.book)
+      days = count_reading_days(goal.started_on, goal.target_completion_date)
+      daily_share = days > 0 ? book_minutes.to_f / days : 0
+
+      { start: goal.started_on, end: goal.target_completion_date, share: daily_share }
+    end
+  end
+
+  def locked_goals
+    @locked_goals ||= @user.reading_goals
+                            .active
+                            .where.not(target_completion_date: nil)
+                            .includes(:book)
+                            .select(&:has_reading_sessions?)
+  end
+
+  # --- Schedulable goals ---
+
+  def gather_schedulable_goals
+    @user.reading_goals
+         .where(status: [:queued, :active])
+         .where(auto_scheduled: true)
+         .where.not(position: nil)
+         .includes(:book)
+         .order(:position)
+         .reject { |g| g.active? && g.has_reading_sessions? }
+  end
+
+  # --- Day counting ---
+
+  def count_reading_days(start_date, end_date)
+    return 0 if start_date.nil? || end_date.nil?
+
+    if @user.includes_weekends?
+      (end_date - start_date).to_i + 1
+    else
+      (start_date..end_date).count { |d| !d.on_weekend? }
+    end
+  end
+
+  # --- Date helpers ---
 
   def next_weekday(date, day)
     target_wday = day == :monday ? 1 : 6
@@ -82,49 +182,15 @@ class ReadingListScheduler
     date.next_month.beginning_of_month
   end
 
-  def effective_daily_minutes_per_slot
-    total = @user.derive_daily_minutes_from_pace
-    total ||= (@user.weekday_reading_minutes * 5 + @user.weekend_reading_minutes * 2) / 7.0
-    total.to_f / @user.max_concurrent_books
+  # --- Estimates ---
+
+  def estimate_total_minutes(book)
+    wpm = book.actual_wpm || (@user.effective_reading_speed * book.difficulty_modifier)
+    return 60 if wpm.zero?
+
+    (book.remaining_words.to_f / wpm).ceil
   end
 
-  # Build initial slot availability from locked goals (goals with sessions).
-  # Empty slots are staggered by the pace interval so books spread out
-  # over time instead of all starting on the same day.
-  def build_slot_timeline
-    max_slots = @user.max_concurrent_books
-    stagger = pace_stagger_days
-    slots = Array.new(max_slots) { |i| { free_date: Date.current + (i * stagger) } }
-
-    locked_goals = @user.reading_goals
-                        .active
-                        .where.not(target_completion_date: nil)
-                        .includes(:book)
-
-    locked_goals.each do |goal|
-      next unless goal.has_reading_sessions?
-
-      # This goal occupies a slot until its end date
-      earliest_slot = slots.min_by { |s| s[:free_date] }
-      end_after = goal.target_completion_date + 1.day
-      if end_after > earliest_slot[:free_date]
-        earliest_slot[:free_date] = end_after
-      end
-    end
-
-    slots
-  end
-
-  def pace_stagger_days
-    return 0 if @user.max_concurrent_books <= 1
-
-    interval = pace_completion_interval
-    return 0 if interval <= 0
-
-    interval
-  end
-
-  # Days between finishing one book and the next, based on pace setting.
   def pace_completion_interval
     return 0 unless @user.reading_pace_value&.positive?
 
@@ -138,23 +204,5 @@ class ReadingListScheduler
     else
       0
     end
-  end
-
-  # Schedulable = queued + active auto_scheduled without sessions, ordered by position
-  def gather_schedulable_goals
-    @user.reading_goals
-         .where(status: [:queued, :active])
-         .where(auto_scheduled: true)
-         .where.not(position: nil)
-         .includes(:book)
-         .order(:position)
-         .reject { |g| g.active? && g.has_reading_sessions? }
-  end
-
-  def estimate_total_minutes(book)
-    wpm = book.actual_wpm || (@user.effective_reading_speed * book.difficulty_modifier)
-    return 60 if wpm.zero? # fallback: 1 hour
-
-    (book.remaining_words.to_f / wpm).ceil
   end
 end
