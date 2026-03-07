@@ -18,7 +18,8 @@ class ProfilesController < ApplicationController
     end
 
     if current_user.update(cleaned_params)
-      new_values = current_user.attributes.slice(*scheduling_fields)
+      current_user.apply_pace_to_schedule! if current_user.reading_pace_type.present?
+      new_values = current_user.reload.attributes.slice(*scheduling_fields)
       if old_values != new_values && current_user.reading_goals.where(auto_scheduled: true).exists?
         ReadingListScheduler.new(current_user).schedule!
       end

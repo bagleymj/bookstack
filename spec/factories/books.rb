@@ -15,6 +15,7 @@ FactoryBot.define do
     trait :completed do
       status { :completed }
       current_page { 300 }
+      completed_at { Time.current }
     end
 
     trait :unread do

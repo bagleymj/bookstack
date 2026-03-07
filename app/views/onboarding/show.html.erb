@@ -9,7 +9,6 @@
     <div data-onboarding-target="indicator" class="w-8 h-1 rounded-full bg-indigo-600"></div>
     <div data-onboarding-target="indicator" class="w-8 h-1 rounded-full bg-gray-200"></div>
     <div data-onboarding-target="indicator" class="w-8 h-1 rounded-full bg-gray-200"></div>
-    <div data-onboarding-target="indicator" class="w-8 h-1 rounded-full bg-gray-200"></div>
   </div>
 
   <%= form_with model: current_user, url: onboarding_path, method: :patch, data: { onboarding_target: "form" } do |form| %>
@@ -79,108 +78,11 @@
       </div>
     </div>
 
-    <!-- Step 3: Daily Schedule -->
-    <div data-onboarding-target="step" class="hidden">
-      <div class="text-center mb-8">
-        <h1 class="text-3xl font-bold text-gray-900">Daily Schedule</h1>
-        <p class="mt-2 text-gray-600">How much time do you want to spend reading each day?</p>
-      </div>
-
-      <div class="space-y-6">
-        <!-- Weekday minutes -->
-        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <label class="block text-sm font-medium text-gray-700 mb-3">Weekday reading time</label>
-          <div class="flex flex-wrap gap-3">
-            <button type="button" data-action="click->onboarding#selectWeekday" data-value="15"
-                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
-              15 min
-            </button>
-            <button type="button" data-action="click->onboarding#selectWeekday" data-value="30"
-                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
-              30 min
-            </button>
-            <button type="button" data-action="click->onboarding#selectWeekday" data-value="60"
-                    class="px-4 py-2.5 rounded-lg border border-gray-200 ring-2 ring-indigo-600 bg-indigo-50 text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
-              1 hour
-            </button>
-            <button type="button" data-action="click->onboarding#selectWeekday" data-value="90"
-                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
-              1.5 hours
-            </button>
-            <button type="button" data-action="click->onboarding#selectWeekdayCustom"
-                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
-              Custom
-            </button>
-          </div>
-          <div data-onboarding-target="weekdayCustom" class="hidden mt-3">
-            <div class="flex items-center gap-2">
-              <input type="number" min="0" max="480" placeholder="minutes"
-                     data-action="input->onboarding#syncWeekdayInput"
-                     class="block w-24 rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
-              <span class="text-sm text-gray-500">minutes per day</span>
-            </div>
-          </div>
-          <%= form.hidden_field :weekday_reading_minutes %>
-        </div>
-
-        <!-- Weekend minutes -->
-        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <label class="block text-sm font-medium text-gray-700 mb-3">Weekend reading time</label>
-          <div class="flex flex-wrap gap-3">
-            <button type="button" data-action="click->onboarding#selectWeekend" data-value="15"
-                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
-              15 min
-            </button>
-            <button type="button" data-action="click->onboarding#selectWeekend" data-value="30"
-                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
-              30 min
-            </button>
-            <button type="button" data-action="click->onboarding#selectWeekend" data-value="60"
-                    class="px-4 py-2.5 rounded-lg border border-gray-200 ring-2 ring-indigo-600 bg-indigo-50 text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
-              1 hour
-            </button>
-            <button type="button" data-action="click->onboarding#selectWeekend" data-value="90"
-                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
-              1.5 hours
-            </button>
-            <button type="button" data-action="click->onboarding#selectWeekendCustom"
-                    class="px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-indigo-300 transition-colors">
-              Custom
-            </button>
-          </div>
-          <div data-onboarding-target="weekendCustom" class="hidden mt-3">
-            <div class="flex items-center gap-2">
-              <input type="number" min="0" max="480" placeholder="minutes"
-                     data-action="input->onboarding#syncWeekendInput"
-                     class="block w-24 rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
-              <span class="text-sm text-gray-500">minutes per day</span>
-            </div>
-          </div>
-          <%= form.hidden_field :weekend_reading_minutes %>
-        </div>
-
-        <!-- Max concurrent books -->
-        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <label class="block text-sm font-medium text-gray-700 mb-1">Max concurrent books</label>
-          <p class="text-xs text-gray-500 mb-3">How many books do you want to read at the same time?</p>
-          <div class="flex gap-3">
-            <% [1, 2, 3].each do |n| %>
-              <button type="button" data-action="click->onboarding#selectConcurrent" data-value="<%= n %>"
-                      class="w-12 h-12 rounded-lg border border-gray-200 <%= n == 1 ? 'ring-2 ring-indigo-600 bg-indigo-50' : 'bg-white' %> text-lg font-medium text-gray-700 hover:border-indigo-300 transition-colors">
-                <%= n %>
-              </button>
-            <% end %>
-          </div>
-          <%= form.hidden_field :max_concurrent_books %>
-        </div>
-      </div>
-    </div>
-
-    <!-- Step 4: Reading Pace -->
+    <!-- Step 3: Set Your Pace -->
     <div data-onboarding-target="step" class="hidden">
       <div class="text-center mb-8">
         <h1 class="text-3xl font-bold text-gray-900">Set Your Reading Pace</h1>
-        <p class="mt-2 text-gray-600">Optional — set the pace you want to maintain. We'll track how you're doing.</p>
+        <p class="mt-2 text-gray-600">This drives your daily reading schedule and pipeline.</p>
       </div>
 
       <div class="space-y-4">
@@ -266,17 +168,43 @@
               </div>
             </div>
           </div>
+
+          <!-- Derived info panel -->
+          <div data-onboarding-target="derivedInfo" class="hidden mt-3">
+            <div class="rounded-md bg-indigo-50 p-3">
+              <p class="text-sm text-indigo-800">
+                At your reading speed, this means approximately <strong data-onboarding-target="derivedMinutes">0</strong> min/day of reading.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Max concurrent books -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Max concurrent books</label>
+          <p class="text-xs text-gray-500 mb-3">How many books do you want to read at the same time?</p>
+          <div class="flex gap-3">
+            <% [1, 2, 3].each do |n| %>
+              <button type="button" data-action="click->onboarding#selectConcurrent" data-value="<%= n %>"
+                      class="w-12 h-12 rounded-lg border border-gray-200 <%= n == 1 ? 'ring-2 ring-indigo-600 bg-indigo-50' : 'bg-white' %> text-lg font-medium text-gray-700 hover:border-indigo-300 transition-colors">
+                <%= n %>
+              </button>
+            <% end %>
+          </div>
+          <%= form.hidden_field :max_concurrent_books %>
         </div>
 
         <!-- No pace option -->
         <button type="button" data-action="click->onboarding#clearGoal"
                 class="w-full text-center py-3 text-sm text-gray-500 hover:text-gray-700 transition-colors">
-          Skip — I don't want to set a pace right now
+          Skip — I'll set a pace later
         </button>
       </div>
 
       <%= form.hidden_field :reading_pace_type %>
       <%= form.hidden_field :reading_pace_value %>
+      <%= form.hidden_field :weekday_reading_minutes %>
+      <%= form.hidden_field :weekend_reading_minutes %>
     </div>
 
     <!-- Navigation buttons -->

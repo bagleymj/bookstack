@@ -3,14 +3,16 @@ import { Controller } from "@hotwired/stimulus"
 export default class extends Controller {
   static targets = [
     "step", "indicator", "backButton", "nextButton", "submitButton",
-    "speedCustom", "weekdayCustom", "weekendCustom",
-    "goalValuePanel", "goalValueLabel", "goalPresets", "goalCustom", "goalCustomInput", "goalUnit"
+    "speedCustom",
+    "goalValuePanel", "goalValueLabel", "goalPresets", "goalCustom", "goalCustomInput", "goalUnit",
+    "derivedInfo", "derivedMinutes"
   ]
 
   static goalConfigs = {
     books_per_year: {
       label: "How many books per year?",
       unit: "books per year",
+      daysInPeriod: 365,
       presets: [
         { value: 12, label: "12", sub: "1/month" },
         { value: 24, label: "24", sub: "2/month" },
@@ -20,6 +22,7 @@ export default class extends Controller {
     books_per_month: {
       label: "How many books per month?",
       unit: "books per month",
+      daysInPeriod: 30.44,
       presets: [
         { value: 1, label: "1", sub: "" },
         { value: 2, label: "2", sub: "" },
@@ -29,6 +32,7 @@ export default class extends Controller {
     books_per_week: {
       label: "How many books per week?",
       unit: "books per week",
+      daysInPeriod: 7,
       presets: [
         { value: 1, label: "1", sub: "" },
         { value: 2, label: "2", sub: "" },
@@ -38,6 +42,7 @@ export default class extends Controller {
     minutes_per_day: {
       label: "How many minutes per day?",
       unit: "minutes per day",
+      daysInPeriod: null,
       presets: [
         { value: 15, label: "15 min", sub: "" },
         { value: 30, label: "30 min", sub: "" },
@@ -89,6 +94,7 @@ export default class extends Controller {
     this.element.querySelector('[name="user[default_reading_speed_wpm]"]').value = value
     this._updatePresetButtons(event.currentTarget, "click->onboarding#selectSpeed")
     if (this.hasSpeedCustomTarget) this.speedCustomTarget.classList.add("hidden")
+    this._calculateDerivedMinutes()
   }
 
   selectSpeedCustom() {
@@ -102,66 +108,7 @@ export default class extends Controller {
 
   syncSpeedInput(event) {
     this.element.querySelector('[name="user[default_reading_speed_wpm]"]').value = event.target.value
-  }
-
-  // -- Weekday presets --
-  selectWeekday(event) {
-    const value = event.currentTarget.dataset.value
-    this.element.querySelector('[name="user[weekday_reading_minutes]"]').value = value
-    this._updatePresetButtons(event.currentTarget, "click->onboarding#selectWeekday")
-    if (this.hasWeekdayCustomTarget) this.weekdayCustomTarget.classList.add("hidden")
-
-    // Auto-set weekend to match if not yet customized
-    const weekendInput = this.element.querySelector('[name="user[weekend_reading_minutes]"]')
-    if (!weekendInput._customized) {
-      weekendInput.value = value
-      this.element.querySelectorAll("[data-action='click->onboarding#selectWeekend']").forEach(btn => {
-        btn.classList.remove("ring-2", "ring-indigo-600", "bg-indigo-50")
-        btn.classList.add("bg-white")
-        if (btn.dataset.value === value) {
-          btn.classList.add("ring-2", "ring-indigo-600", "bg-indigo-50")
-          btn.classList.remove("bg-white")
-        }
-      })
-    }
-  }
-
-  selectWeekdayCustom() {
-    this._deselectPresets("click->onboarding#selectWeekday")
-    if (this.hasWeekdayCustomTarget) {
-      this.weekdayCustomTarget.classList.remove("hidden")
-      this.weekdayCustomTarget.querySelector("input")?.focus()
-    }
-  }
-
-  syncWeekdayInput(event) {
-    this.element.querySelector('[name="user[weekday_reading_minutes]"]').value = event.target.value
-  }
-
-  // -- Weekend presets --
-  selectWeekend(event) {
-    const value = event.currentTarget.dataset.value
-    const input = this.element.querySelector('[name="user[weekend_reading_minutes]"]')
-    input.value = value
-    input._customized = true
-    this._updatePresetButtons(event.currentTarget, "click->onboarding#selectWeekend")
-    if (this.hasWeekendCustomTarget) this.weekendCustomTarget.classList.add("hidden")
-  }
-
-  selectWeekendCustom() {
-    this._deselectPresets("click->onboarding#selectWeekend")
-    const input = this.element.querySelector('[name="user[weekend_reading_minutes]"]')
-    input._customized = true
-    if (this.hasWeekendCustomTarget) {
-      this.weekendCustomTarget.classList.remove("hidden")
-      this.weekendCustomTarget.querySelector("input")?.focus()
-    }
-  }
-
-  syncWeekendInput(event) {
-    const input = this.element.querySelector('[name="user[weekend_reading_minutes]"]')
-    input.value = event.target.value
-    input._customized = true
+    this._calculateDerivedMinutes()
   }
 
   // -- Concurrent books --
@@ -215,9 +162,10 @@ export default class extends Controller {
     customBtn.textContent = "Custom"
     this.goalPresetsTarget.appendChild(customBtn)
 
-    // Reset value
+    // Reset value and hide derived info
     this.element.querySelector('[name="user[reading_pace_value]"]').value = ""
     this.goalCustomTarget.classList.add("hidden")
+    if (this.hasDerivedInfoTarget) this.derivedInfoTarget.classList.add("hidden")
   }
 
   selectGoalPreset(event) {
@@ -233,6 +181,7 @@ export default class extends Controller {
     event.currentTarget.classList.remove("bg-white")
 
     this.goalCustomTarget.classList.add("hidden")
+    this._calculateDerivedMinutes()
   }
 
   selectGoalCustom() {
@@ -246,6 +195,7 @@ export default class extends Controller {
 
   syncGoalInput(event) {
     this.element.querySelector('[name="user[reading_pace_value]"]').value = event.target.value
+    this._calculateDerivedMinutes()
   }
 
   clearGoal() {
@@ -260,6 +210,36 @@ export default class extends Controller {
     })
 
     this.goalValuePanelTarget.classList.add("hidden")
+    if (this.hasDerivedInfoTarget) this.derivedInfoTarget.classList.add("hidden")
+  }
+
+  // -- Derived minutes calculation --
+  _calculateDerivedMinutes() {
+    if (!this.selectedGoalType || !this.hasDerivedInfoTarget) return
+
+    const paceValue = parseFloat(this.element.querySelector('[name="user[reading_pace_value]"]').value)
+    if (!paceValue || paceValue <= 0) {
+      this.derivedInfoTarget.classList.add("hidden")
+      return
+    }
+
+    const config = this.constructor.goalConfigs[this.selectedGoalType]
+    let dailyMinutes
+
+    if (this.selectedGoalType === "minutes_per_day") {
+      dailyMinutes = paceValue
+    } else {
+      const wpp = parseFloat(this.element.querySelector('[name="user[default_words_per_page]"]').value) || 250
+      const wpm = parseFloat(this.element.querySelector('[name="user[default_reading_speed_wpm]"]').value) || 200
+      const avgPages = 300
+      const wordsPerBook = avgPages * wpp
+      const minutesPerBook = wordsPerBook / wpm
+      const booksPerDay = paceValue / config.daysInPeriod
+      dailyMinutes = Math.ceil(minutesPerBook * booksPerDay)
+    }
+
+    this.derivedMinutesTarget.textContent = dailyMinutes
+    this.derivedInfoTarget.classList.remove("hidden")
   }
 
   // -- Helpers --

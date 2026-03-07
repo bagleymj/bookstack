@@ -12,6 +12,7 @@ class User < ApplicationRecord
   has_one :user_reading_stats, dependent: :destroy
 
   READING_PACE_TYPES = %w[books_per_year books_per_month books_per_week minutes_per_day].freeze
+  DEFAULT_AVG_BOOK_PAGES = 300
 
   # Validations
   validates :default_words_per_page, numericality: { greater_than: 0 }
@@ -76,6 +77,27 @@ class User < ApplicationRecord
     end
   end
 
+  def derive_daily_minutes_from_pace
+    return nil unless reading_pace_type.present? && reading_pace_value.present?
+
+    case reading_pace_type
+    when "minutes_per_day"
+      reading_pace_value
+    when "books_per_year"
+      calculate_daily_minutes_for_book_pace(365.0)
+    when "books_per_month"
+      calculate_daily_minutes_for_book_pace(30.44)
+    when "books_per_week"
+      calculate_daily_minutes_for_book_pace(7.0)
+    end
+  end
+
+  def apply_pace_to_schedule!
+    daily_minutes = derive_daily_minutes_from_pace
+    return unless daily_minutes
+    update!(weekday_reading_minutes: daily_minutes, weekend_reading_minutes: daily_minutes)
+  end
+
   def reading_pace_label
     return nil unless reading_pace_type.present?
 
@@ -94,8 +116,17 @@ class User < ApplicationRecord
   end
 
   def books_completed_since(start_date)
-    reading_goals.where(status: :completed)
-                 .where("target_completion_date >= ?", start_date)
-                 .select(:book_id).distinct.count
+    books.where(status: :completed)
+         .where("completed_at >= ?", start_date.beginning_of_day)
+         .count
+  end
+
+  def calculate_daily_minutes_for_book_pace(days_in_period)
+    avg_pages = books.average(:total_pages)&.to_f || DEFAULT_AVG_BOOK_PAGES
+    avg_pages = DEFAULT_AVG_BOOK_PAGES if avg_pages <= 0
+    words_per_book = avg_pages * (default_words_per_page || 250)
+    minutes_per_book = words_per_book.to_f / effective_reading_speed
+    books_per_day = reading_pace_value.to_f / days_in_period
+    (minutes_per_book * books_per_day).ceil
   end
 end

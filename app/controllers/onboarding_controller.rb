@@ -15,6 +15,7 @@ class OnboardingController < ApplicationController
     end
 
     if current_user.update(cleaned_params.merge(onboarding_completed_at: Time.current))
+      current_user.apply_pace_to_schedule! if current_user.reading_pace_type.present?
       redirect_to root_path, notice: "Welcome to BookStack! You're all set."
     else
       render :show, status: :unprocessable_entity

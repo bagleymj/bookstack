@@ -46,6 +46,7 @@ class Book < ApplicationRecord
   # Callbacks
   before_validation :set_defaults
   before_save :calculate_total_pages
+  before_save :set_completed_at_on_completion
 
   def total_pages
     return super if super.present?
@@ -125,7 +126,7 @@ class Book < ApplicationRecord
   end
 
   def mark_completed!
-    update!(status: :completed, current_page: last_page)
+    update!(status: :completed, current_page: last_page, completed_at: Time.current)
     reading_goals.active.find_each(&:mark_completed!)
   end
 
@@ -135,6 +136,12 @@ class Book < ApplicationRecord
   end
 
   private
+
+  def set_completed_at_on_completion
+    if status_changed? && completed? && completed_at.nil?
+      self.completed_at = Time.current
+    end
+  end
 
   def set_defaults
     self.current_page = first_page || 1 if current_page.nil? || current_page.zero?
