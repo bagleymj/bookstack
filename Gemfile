@@ -31,6 +31,11 @@ gem "jbuilder"
 
 # Authentication [https://github.com/heartcombo/devise]
 gem "devise", "~> 4.9"
+gem "devise-jwt", "~> 0.12"
+
+# API support
+gem "rack-cors"
+gem "rack-attack"
 
 # Use Redis adapter to run Action Cable in production
 # gem "redis", ">= 4.0.1"

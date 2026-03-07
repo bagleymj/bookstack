@@ -1,15 +1,24 @@
 FactoryBot.define do
   factory :book do
-    user { nil }
-    title { "MyString" }
-    author { "MyString" }
-    total_pages { 1 }
-    words_per_page { 1 }
-    current_page { 1 }
-    status { 1 }
-    difficulty { 1 }
-    actual_difficulty_modifier { 1.5 }
-    cover_image_url { "MyString" }
-    isbn { "MyString" }
+    user
+    title { "Test Book" }
+    author { "Test Author" }
+    first_page { 1 }
+    last_page { 300 }
+    difficulty { :average }
+
+    trait :reading do
+      status { :reading }
+      current_page { 50 }
+    end
+
+    trait :completed do
+      status { :completed }
+      current_page { 300 }
+    end
+
+    trait :unread do
+      status { :unread }
+    end
   end
 end

@@ -1,6 +1,13 @@
 Rails.application.routes.draw do
   devise_for :users
 
+  # JWT API authentication
+  scope "api/v1/auth", defaults: { format: :json } do
+    post "sign_in", to: "api/v1/auth/sessions#create", as: :api_sign_in
+    delete "sign_out", to: "api/v1/auth/sessions#destroy", as: :api_sign_out
+    post "sign_up", to: "api/v1/auth/registrations#create", as: :api_sign_up
+  end
+
   # Authenticated routes
   authenticate :user do
     root "dashboard#index", as: :authenticated_root
@@ -42,6 +49,7 @@ Rails.application.routes.draw do
     resource :profile, only: [:show, :update]
     resource :reading_list, only: [:show], controller: "reading_list"
 
+    # Existing web API endpoints (session auth)
     namespace :api do
       namespace :v1 do
         resources :pipeline, only: [:index], controller: "pipeline" do
@@ -57,6 +65,47 @@ Rails.application.routes.draw do
           end
         end
       end
+    end
+  end
+
+  # Mobile API endpoints (JWT auth)
+  namespace :api do
+    namespace :v1 do
+      resource :dashboard, only: [:show], controller: "dashboard"
+
+      resources :books, controller: "books" do
+        member do
+          post :start_reading
+          post :mark_completed
+          post :update_progress
+        end
+      end
+
+      resources :reading_sessions, controller: "reading_sessions" do
+        collection do
+          post :start
+          get :active
+        end
+        member do
+          post :stop
+          post :complete
+        end
+      end
+
+      resources :reading_goals, controller: "reading_goals" do
+        member do
+          post :mark_completed
+          post :mark_abandoned
+          post :redistribute
+          post :catch_up
+          post :resolve_discrepancy
+        end
+      end
+
+      resources :daily_quotas, only: [:update], controller: "daily_quotas"
+
+      resource :profile, only: [:show, :update], controller: "profiles"
+      resource :stats, only: [:show], controller: "stats"
     end
   end
 

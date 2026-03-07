@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_03_07_162749) do
+ActiveRecord::Schema[7.1].define(version: 2026_03_07_163937) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -46,6 +46,12 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_07_162749) do
     t.index ["date"], name: "index_daily_quotas_on_date"
     t.index ["reading_goal_id", "date"], name: "index_daily_quotas_on_reading_goal_id_and_date", unique: true
     t.index ["reading_goal_id"], name: "index_daily_quotas_on_reading_goal_id"
+  end
+
+  create_table "jwt_denylist", force: :cascade do |t|
+    t.string "jti", null: false
+    t.datetime "exp", null: false
+    t.index ["jti"], name: "index_jwt_denylist_on_jti"
   end
 
   create_table "reading_goals", force: :cascade do |t|
