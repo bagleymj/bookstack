@@ -851,6 +851,8 @@ export default class extends Controller {
             .on("start", function(event) {
               goal._resizeStartX = event.x
               goal._origEndDate = goal.endDate
+              goal._origMinutesPerDay = goal.minutes_per_day
+              goal._totalPlannedMinutes = goal.duration_days * goal.minutes_per_day
 
               d3.select(this)
                 .style("fill", "rgba(255,255,255,0.7)")
@@ -872,8 +874,14 @@ export default class extends Controller {
                 goal.endDate = newEnd
                 const daysChanged = Math.round(snappedOffsetMs / dayMs)
 
-                // Live reflow
-                self.updateBricksForDrag()
+                // Recalculate minutes_per_day for new duration
+                const newActiveDays = self.countActiveDays(goal.startDate, goal.endDate, goal.include_weekends)
+                if (newActiveDays > 0) {
+                  goal.minutes_per_day = goal._totalPlannedMinutes / newActiveDays
+                }
+
+                // Live reflow with y-axis rescale
+                self.updateBricksForDrag({ rescale: true })
 
                 resizeTooltip
                   .html(self.formatResizeTooltip(goal.endDate, daysChanged))
@@ -887,6 +895,7 @@ export default class extends Controller {
                 .style("width", "8px")
 
               resizeTooltip.classed("hidden", true)
+              goal.minutes_per_day = goal._origMinutesPerDay
 
               if (goal.endDate.getTime() !== goal._origEndDate.getTime()) {
                 self.updateGoalDates(goal.id, goal.startDate, goal.endDate)
@@ -1051,9 +1060,16 @@ export default class extends Controller {
 
   // ── Live reflow during drag ───────────────────────────────────────
 
-  updateBricksForDrag() {
-    const { bricks } = this.computeBricks(this.goals)
+  updateBricksForDrag(opts = {}) {
+    const { bricks, maxY } = this.computeBricks(this.goals)
     this.currentBricks = bricks
+
+    if (opts.rescale) {
+      this.totalMinutes = maxY || 1
+      this.yScale.domain([0, this.totalMinutes])
+      this.updateYGrid()
+    }
+
     const labels = this.computeLabels(bricks, this.goals)
     this.renderBricks(bricks, { transition: true, duration: 80 })
     this.renderLabels(labels, { transition: true, duration: 80 })
@@ -1182,7 +1198,60 @@ export default class extends Controller {
     `
   }
 
+  // ── Y-axis live update during drag ──────────────────────────────
+
+  updateYGrid() {
+    const minuteTicks = this.niceMinuteTicks(this.totalMinutes)
+
+    // Update y-axis
+    this.gridLayer.select(".y-axis")
+      .transition().duration(80).ease(d3.easeCubicOut)
+      .call(
+        d3.axisLeft(this.yScale)
+          .tickValues(minuteTicks)
+          .tickFormat(d => `${d}m`)
+      )
+      .selectAll("text")
+      .style("font-size", "11px")
+      .style("fill", "#6b7280")
+
+    // Update horizontal grid lines
+    const gridLines = this.gridLayer.selectAll(".minute-line")
+      .data(minuteTicks)
+
+    gridLines.exit().remove()
+
+    const enter = gridLines.enter()
+      .append("line")
+      .attr("class", "minute-line")
+      .attr("x1", 0)
+      .attr("x2", this.width)
+      .style("stroke", "#e5e7eb")
+      .style("stroke-dasharray", "2,2")
+
+    enter
+      .attr("y1", d => this.yScale(d))
+      .attr("y2", d => this.yScale(d))
+
+    gridLines.transition().duration(80).ease(d3.easeCubicOut)
+      .attr("y1", d => this.yScale(d))
+      .attr("y2", d => this.yScale(d))
+  }
+
   // ── Utilities ─────────────────────────────────────────────────────
+
+  countActiveDays(startDate, endDate, includeWeekends) {
+    const dayMs = 86400000
+    let count = 0
+    let d = new Date(startDate)
+    while (d < endDate) {
+      if (includeWeekends || (d.getDay() !== 0 && d.getDay() !== 6)) {
+        count++
+      }
+      d = new Date(d.getTime() + dayMs)
+    }
+    return count
+  }
 
   niceMinuteTicks(totalMinutes) {
     if (totalMinutes <= 30) return d3.range(0, totalMinutes + 1, 5)
