@@ -1,5 +1,9 @@
 class ReadingListScheduler
-  TIERS = [:week, :two_weeks, :month, :quarter, :half_year, :year].freeze
+  TIERS = [:week, :two_weeks, :four_weeks, :twelve_weeks, :twenty_six_weeks, :fifty_two_weeks].freeze
+  TIER_WEEKS = {
+    week: 1, two_weeks: 2, four_weeks: 4,
+    twelve_weeks: 12, twenty_six_weeks: 26, fifty_two_weeks: 52
+  }.freeze
   BUDGET_TOLERANCE = 10 # ±10 minutes from target share
 
   def initialize(user)
@@ -120,27 +124,16 @@ class ReadingListScheduler
 
   # --- Placement ---
 
-  # Pick the tier whose daily share is closest to the target clip
-  # (budget / max_concurrent). This spreads long books over long tiers
-  # at a low daily clip, letting shorter books layer on top.
-  # Tiers are tried shortest-first; once share drops below target,
-  # no longer tier can be closer, so we stop.
+  # Try tiers shortest-first; return the first one that fits under
+  # the ceiling. Short books land in week tiers; long books escalate
+  # to longer tiers at a lower daily clip, padding the schedule.
   def find_best_placement(timeline, book_minutes)
-    target = @weekday_budget / [@max_concurrent, 1].max.to_f
-    best = nil
-
     TIERS.each do |tier|
       placement = find_opening_for_tier(timeline, tier, book_minutes)
-      next unless placement
-
-      if best.nil? || (placement[:share] - target).abs < (best[:share] - target).abs
-        best = placement
-      end
-
-      break if placement[:share] <= target
+      return placement if placement
     end
 
-    best || default_placement(book_minutes)
+    default_placement(book_minutes)
   end
 
   # Walk snap boundaries for a given tier, looking for the first date
@@ -206,14 +199,9 @@ class ReadingListScheduler
     end
   end
 
-  # Advance past the current snap boundary to the next one for this tier.
-  def next_boundary(current_snap, tier)
-    case tier
-    when :week, :two_weeks
-      current_snap + 7 # next Monday
-    when :month, :quarter, :half_year, :year
-      next_first_of_month(current_snap + 1)
-    end
+  # Advance to the next Monday boundary.
+  def next_boundary(current_snap, _tier)
+    current_snap + 7
   end
 
   # Fallback when no tier fits after exhausting openings.
@@ -228,24 +216,12 @@ class ReadingListScheduler
 
   # --- Snap & calendar ---
 
-  def snap_to_boundary(date, tier)
-    case tier
-    when :week, :two_weeks
-      next_weekday(date, :monday)
-    when :month, :quarter, :half_year, :year
-      next_first_of_month(date)
-    end
+  def snap_to_boundary(date, _tier)
+    next_weekday(date, :monday)
   end
 
   def calendar_end(start_date, tier)
-    case tier
-    when :week       then start_date + 6
-    when :two_weeks  then start_date + 13
-    when :month      then start_date.end_of_month
-    when :quarter    then (start_date + 2.months).end_of_month
-    when :half_year  then (start_date + 5.months).end_of_month
-    when :year       then (start_date + 11.months).end_of_month
-    end
+    start_date + (TIER_WEEKS[tier] * 7) - 1
   end
 
   # --- Timeline ---
@@ -314,11 +290,6 @@ class ReadingListScheduler
     return date if date.wday == target_wday
     days_ahead = (target_wday - date.wday) % 7
     date + days_ahead
-  end
-
-  def next_first_of_month(date)
-    return date if date.day == 1
-    date.next_month.beginning_of_month
   end
 
   def next_reading_day(date)

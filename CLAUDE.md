@@ -73,11 +73,11 @@ bin/rails console
 
 ### Scheduler Design (ReadingListScheduler)
 
-The scheduler uses a **fixed logical tier system** to place books into calendar-aligned buckets. **Do NOT replace this with computed durations, target-share-based end dates, or any approach that removes the tier concept.** The tiers are:
+The scheduler uses a **fixed logical tier system** to place books into week-count buckets. **Do NOT replace this with computed durations, target-share-based end dates, or any approach that removes the tier concept.** The tiers are:
 
-`[:week, :two_weeks, :month, :quarter, :half_year, :year]`
+`[:week, :two_weeks, :four_weeks, :twelve_weeks, :twenty_six_weeks, :fifty_two_weeks]`
 
-Each tier snaps to a natural calendar boundary (Mondays for week/two_weeks, 1st of month for longer tiers). For each book, the scheduler picks the tier whose daily share is closest to `budget / max_concurrent` — this naturally places short books in weeks and stretches long books over months/quarters as low-clip background reading. Stacking is a natural outcome of the ceiling math, not a goal in itself.
+All tiers snap to Monday boundaries. Tiers are tried shortest-first: a book goes into the shortest tier where it fits under the daily budget ceiling (+ 10 min tolerance). Short books land in week tiers; long books escalate to longer tiers at a lower daily clip, padding the schedule. Stacking is a natural outcome of the ceiling math, not a goal in itself.
 
 ### Key Patterns
 
