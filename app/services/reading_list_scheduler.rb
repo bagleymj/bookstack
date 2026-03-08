@@ -1,7 +1,8 @@
 class ReadingListScheduler
-  TIERS = [:week, :two_weeks, :four_weeks, :twelve_weeks, :twenty_six_weeks, :fifty_two_weeks].freeze
+  TIERS = [:week, :two_weeks, :three_weeks, :four_weeks, :six_weeks,
+           :twelve_weeks, :twenty_six_weeks, :fifty_two_weeks].freeze
   TIER_WEEKS = {
-    week: 1, two_weeks: 2, four_weeks: 4,
+    week: 1, two_weeks: 2, three_weeks: 3, four_weeks: 4, six_weeks: 6,
     twelve_weeks: 12, twenty_six_weeks: 26, fifty_two_weeks: 52
   }.freeze
   BUDGET_TOLERANCE = 10 # ±10 minutes from target share
