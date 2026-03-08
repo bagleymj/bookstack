@@ -1,4 +1,7 @@
 class ReadingListScheduler
+  TIERS = [:week, :two_weeks, :month, :quarter, :half_year].freeze
+  BUDGET_TOLERANCE = 10 # ±10 minutes from target share
+
   def initialize(user)
     @user = user
     @max_concurrent = user.max_concurrent_books
@@ -14,14 +17,11 @@ class ReadingListScheduler
 
     schedulable.each do |goal|
       book_minutes = estimate_total_minutes(goal.book)
-
-      start_date, daily_share = find_placement(timeline, book_minutes, remaining_in_queue)
-      reading_days = [(book_minutes.to_f / daily_share).ceil, 1].max
-      end_date = advance_by_reading_days(start_date, reading_days)
+      placement = find_best_placement(timeline, book_minutes, remaining_in_queue)
 
       goal.update!(
-        started_on: start_date,
-        target_completion_date: end_date,
+        started_on: placement[:start],
+        target_completion_date: placement[:end],
         include_weekends: @user.includes_weekends?,
         status: :active
       )
@@ -30,7 +30,7 @@ class ReadingListScheduler
       goal.daily_quotas.reload
       ProfileAwareQuotaCalculator.new(goal, @user).generate_quotas!
 
-      timeline << { start: start_date, end: end_date, share: daily_share }
+      timeline << { start: placement[:start], end: placement[:end], share: placement[:share] }
       remaining_in_queue -= 1
     end
   end
@@ -66,34 +66,106 @@ class ReadingListScheduler
 
   # --- Placement ---
 
-  # Find the earliest date with slot capacity and assign a daily share.
-  # The share = available gap / empty slots to fill, so concurrent books
-  # each get an equal slice of the budget. Books that start when fewer
-  # slots are occupied get a larger share (and thus shorter duration).
-  def find_placement(timeline, book_minutes, remaining_in_queue)
+  # Walk slot openings on the timeline. At each opening, try every tier
+  # and pick the one whose daily share is closest to the target (budget
+  # gap / slots to fill). Prefer tiers within ±10 min tolerance that
+  # start earliest. If nothing is within tolerance, take the closest.
+  def find_best_placement(timeline, book_minutes, remaining_in_queue)
     date = next_reading_day(Date.current)
+    best = nil
 
     200.times do
       active = timeline.select { |e| e[:start] <= date && e[:end] >= date }
-      active_count = active.size
 
-      if active_count < @max_concurrent
-        active_total = active.sum { |e| e[:share] }
-        gap = @daily_budget - active_total
-        empty_slots = @max_concurrent - active_count
-        slots_to_fill = [empty_slots, remaining_in_queue].min
-        daily_share = slots_to_fill > 0 ? gap / slots_to_fill.to_f : gap
+      if active.size < @max_concurrent
+        candidate = best_tier_at(date, timeline, book_minutes, remaining_in_queue)
 
-        return [date, daily_share] if daily_share >= 1
+        if candidate
+          # Within tolerance at earliest opening — use it
+          return candidate if candidate[:within_tolerance]
+
+          # Track best outside-tolerance option as fallback
+          if best.nil? || candidate[:deviation] < best[:deviation]
+            best = candidate
+          end
+        end
       end
 
       next_end = active.map { |e| e[:end] }.min
       date = next_end ? next_reading_day(next_end + 1) : next_reading_day(date + 1)
     end
 
-    # Fallback: equal share from today
+    best || default_placement(book_minutes)
+  end
+
+  # Try all tiers at a given slot opening. Each tier snaps to its own
+  # boundary (Monday or 1st) so the actual start date varies. Prefer
+  # within-tolerance tiers with the earliest start date.
+  def best_tier_at(open_date, timeline, book_minutes, remaining_in_queue)
+    best = nil
+
+    TIERS.each do |tier|
+      snapped = snap_to_boundary(open_date, tier)
+      end_date = calendar_end(snapped, tier)
+      reading_days = count_reading_days(snapped, end_date)
+      next if reading_days <= 0
+
+      daily_share = book_minutes.to_f / reading_days
+
+      # Check capacity at the snapped date (may differ from open_date)
+      active = timeline.select { |e| e[:start] <= snapped && e[:end] >= snapped }
+      next if active.size >= @max_concurrent
+
+      active_total = active.sum { |e| e[:share] }
+      gap = @daily_budget - active_total
+      empty_slots = @max_concurrent - active.size
+      slots_to_fill = [empty_slots, remaining_in_queue].min
+      target_share = slots_to_fill > 0 ? gap / slots_to_fill.to_f : gap
+
+      deviation = (daily_share - target_share).abs
+      within = deviation <= BUDGET_TOLERANCE
+
+      if best.nil? ||
+         (within && !best[:within_tolerance]) ||
+         (within == best[:within_tolerance] && snapped < best[:start]) ||
+         (within == best[:within_tolerance] && snapped == best[:start] && deviation < best[:deviation])
+        best = { start: snapped, end: end_date, share: daily_share,
+                 deviation: deviation, within_tolerance: within }
+      end
+    end
+
+    best
+  end
+
+  # Fallback when no tier fits after exhausting openings.
+  def default_placement(book_minutes)
+    start = next_reading_day(Date.current)
     share = @daily_budget / [@max_concurrent, 1].max.to_f
-    [next_reading_day(Date.current), [share, 1].max]
+    share = [share, 1].max
+    reading_days = [(book_minutes.to_f / share).ceil, 1].max
+    end_date = advance_by_reading_days(start, reading_days)
+    { start: start, end: end_date, share: share, deviation: 0, within_tolerance: true }
+  end
+
+  # --- Snap & calendar ---
+
+  def snap_to_boundary(date, tier)
+    case tier
+    when :week, :two_weeks
+      next_weekday(date, :monday)
+    when :month, :quarter, :half_year
+      next_first_of_month(date)
+    end
+  end
+
+  def calendar_end(start_date, tier)
+    case tier
+    when :week      then start_date + 6
+    when :two_weeks then start_date + 13
+    when :month     then start_date.end_of_month
+    when :quarter   then (start_date + 2.months).end_of_month
+    when :half_year then (start_date + 5.months).end_of_month
+    end
   end
 
   # --- Timeline ---
@@ -140,7 +212,6 @@ class ReadingListScheduler
     end
   end
 
-  # Advance from start_date by N reading days, returning the end date.
   def advance_by_reading_days(start_date, reading_days)
     return start_date if reading_days <= 1
 
@@ -155,6 +226,20 @@ class ReadingListScheduler
         date += 1
       end
     end
+  end
+
+  # --- Date helpers ---
+
+  def next_weekday(date, day)
+    target_wday = day == :monday ? 1 : 6
+    return date if date.wday == target_wday
+    days_ahead = (target_wday - date.wday) % 7
+    date + days_ahead
+  end
+
+  def next_first_of_month(date)
+    return date if date.day == 1
+    date.next_month.beginning_of_month
   end
 
   def next_reading_day(date)
