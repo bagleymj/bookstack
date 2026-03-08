@@ -124,39 +124,31 @@ class ReadingListScheduler
 
   # --- Placement ---
 
-  # Try tiers shortest-first; return the first one that fits under
-  # the ceiling. Short books land in week tiers; long books escalate
-  # to longer tiers at a lower daily clip, padding the schedule.
+  # For each Monday boundary, try tiers shortest-first. The first
+  # tier that fits under the ceiling wins. This ensures books stretch
+  # to fill headroom rather than skipping to a later week.
   def find_best_placement(timeline, book_minutes)
-    TIERS.each do |tier|
-      placement = find_opening_for_tier(timeline, tier, book_minutes)
-      return placement if placement
-    end
-
-    default_placement(book_minutes)
-  end
-
-  # Walk snap boundaries for a given tier, looking for the first date
-  # where the book fits under the ceiling across its entire span.
-  def find_opening_for_tier(timeline, tier, book_minutes)
     date = next_reading_day(Date.current)
 
     50.times do
-      snapped = next_reading_day(snap_to_boundary(date, tier))
-      end_date = calendar_end(snapped, tier)
-      reading_days = count_reading_days(snapped, end_date)
-      break if reading_days <= 0
+      snapped = next_reading_day(snap_to_boundary(date, nil))
 
-      daily_share = compute_weekday_share(book_minutes, snapped, end_date)
+      TIERS.each do |tier|
+        end_date = calendar_end(snapped, tier)
+        reading_days = count_reading_days(snapped, end_date)
+        next if reading_days <= 0
 
-      if fits_across_span?(timeline, snapped, end_date, daily_share)
-        return { start: snapped, end: end_date, share: daily_share }
+        daily_share = compute_weekday_share(book_minutes, snapped, end_date)
+
+        if fits_across_span?(timeline, snapped, end_date, daily_share)
+          return { start: snapped, end: end_date, share: daily_share }
+        end
       end
 
-      date = next_boundary(snapped, tier)
+      date = snapped + 7
     end
 
-    nil
+    default_placement(book_minutes)
   end
 
   # Compute the weekday share for a book across a date span.
