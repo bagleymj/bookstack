@@ -26,7 +26,7 @@ module Api
         end
 
         service = OpenLibraryService.new
-        editions = service.fetch_editions(work_key, limit: 25)
+        editions = service.fetch_editions(work_key)
 
         # Mark editions already in the user's collection
         user_isbns = current_user.books.where.not(isbn: [nil, ""]).pluck(:isbn).map(&:strip).to_set

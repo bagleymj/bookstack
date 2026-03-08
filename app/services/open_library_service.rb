@@ -35,7 +35,7 @@ class OpenLibraryService
 
   # Fetch editions for a work (step 2).
   # work_key: e.g. "/works/OL55847W" or just "OL55847W"
-  def fetch_editions(work_key, limit: 25)
+  def fetch_editions(work_key, limit: 100)
     return [] if work_key.blank?
 
     work_id = work_key.split("/").last # handle both "/works/OL55847W" and "OL55847W"
