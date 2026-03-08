@@ -2,14 +2,15 @@ import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
   static targets = ["input", "results", "loading", "form"]
-  static values = { url: String, amazonTag: String }
+  static values = { url: String, editionsUrl: String, amazonTag: String }
 
   connect() {
     this.debounceTimer = null
     this.abortController = null
-    this.searchMode = "all"
-    this.hideOwned = false
     this.lastResults = []
+    this.viewMode = "works"       // "works" or "editions"
+    this.selectedWork = null       // the work object when viewing editions
+    this.editionsCache = new Map() // work_key -> editions array
 
     // Close results on click outside
     this.boundClickOutside = this.handleClickOutside.bind(this)
@@ -52,12 +53,16 @@ export default class extends Controller {
       case "Enter":
         event.preventDefault()
         if (this.selectedIndex >= 0 && results[this.selectedIndex]) {
-          this.selectResult({ currentTarget: results[this.selectedIndex] })
+          results[this.selectedIndex].click()
         }
         break
       case "Escape":
-        this.hideResults()
-        this.inputTarget.blur()
+        if (this.viewMode === "editions") {
+          this.showWorksView()
+        } else {
+          this.hideResults()
+          this.inputTarget.blur()
+        }
         break
     }
   }
@@ -73,65 +78,34 @@ export default class extends Controller {
     })
   }
 
-  setMode(event) {
-    event.preventDefault()
-    event.stopPropagation()
-    const newMode = event.currentTarget.dataset.mode
-    if (newMode === this.searchMode) return
-
-    this.searchMode = newMode
-
-    // Re-search with new mode
-    const query = this.inputTarget.value.trim()
-    if (query.length >= 2) {
-      this.performSearch(query)
-    }
-  }
-
-  toggleHideOwned(event) {
-    event.preventDefault()
-    event.stopPropagation()
-    this.hideOwned = !this.hideOwned
-    // Re-render from cached results (no new API call needed)
-    if (this.lastResults.length > 0) {
-      this.renderResults(this.lastResults)
-    }
-  }
+  // --- Step 1: Search works ---
 
   search() {
     const query = this.inputTarget.value.trim()
 
-    // Clear previous timer
     if (this.debounceTimer) clearTimeout(this.debounceTimer)
 
-    // Hide results if query is too short
     if (query.length < 2) {
       this.hideResults()
       return
     }
 
-    // Debounce the search (300ms)
     this.debounceTimer = setTimeout(() => {
+      this.viewMode = "works"
+      this.selectedWork = null
       this.performSearch(query)
     }, 300)
   }
 
   async performSearch(query) {
-    // Abort previous request
-    if (this.abortController) {
-      this.abortController.abort()
-    }
+    if (this.abortController) this.abortController.abort()
     this.abortController = new AbortController()
 
-    // Show loading state
-    this.showLoading()
+    this.showLoading("Searching...")
 
     try {
-      const response = await fetch(`${this.urlValue}?q=${encodeURIComponent(query)}&mode=${this.searchMode}`, {
-        headers: {
-          "Accept": "application/json",
-          "X-Requested-With": "XMLHttpRequest"
-        },
+      const response = await fetch(`${this.urlValue}?q=${encodeURIComponent(query)}`, {
+        headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" },
         credentials: "same-origin",
         signal: this.abortController.signal
       })
@@ -140,190 +114,314 @@ export default class extends Controller {
 
       const data = await response.json()
       this.lastResults = data.results
-      this.renderResults(data.results)
+      this.renderWorksResults(data.results)
     } catch (error) {
-      if (error.name === "AbortError") return // Ignore aborted requests
-
+      if (error.name === "AbortError") return
       console.error("Book search error:", error)
-      this.renderError()
+      this.renderError("Search failed. Please try again.")
     }
   }
 
-  showLoading() {
+  renderWorksResults(works) {
+    this.selectedIndex = -1
+    this.viewMode = "works"
+
+    if (works.length === 0) {
+      this.resultsTarget.innerHTML = `
+        <div class="p-4 text-center text-gray-500">
+          <p>No books found</p>
+          <p class="text-sm mt-1">Try a different search term</p>
+        </div>
+      `
+      this.resultsTarget.classList.remove("hidden")
+      return
+    }
+
+    const worksHtml = works.map(work => `
+      <button type="button"
+              data-book-result
+              data-work-key="${this.escapeAttr(work.key || "")}"
+              class="w-full flex items-center gap-3 p-3 text-left hover:bg-indigo-50 transition-colors border-b border-gray-100 last:border-0">
+        ${work.cover_url
+          ? `<img src="${this.escapeAttr(work.cover_url)}" alt="" class="w-10 h-14 object-cover rounded shadow-sm flex-shrink-0" onerror="this.parentElement.replaceChild(this.parentElement.querySelector('.fallback-icon') || this, this)">`
+          : ""
+        }
+        ${!work.cover_url ? `<div class="w-10 h-14 bg-gray-100 rounded flex items-center justify-center flex-shrink-0">
+               <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+               </svg>
+             </div>` : ""}
+        <div class="flex-1 min-w-0">
+          <p class="font-medium text-gray-900 truncate">${this.escapeHtml(work.title)}</p>
+          <p class="text-sm text-gray-500 truncate">
+            ${work.author ? this.escapeHtml(work.author) : "Unknown author"}
+            ${work.first_publish_year ? `<span class="text-gray-400">(${work.first_publish_year})</span>` : ""}
+          </p>
+          <p class="text-xs text-gray-400">
+            ${work.edition_count} edition${work.edition_count === 1 ? "" : "s"}
+          </p>
+        </div>
+        <svg class="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        </svg>
+      </button>
+    `).join("")
+
+    this.resultsTarget.innerHTML = worksHtml
     this.resultsTarget.classList.remove("hidden")
+
+    // Bind click handlers for works
+    this.resultsTarget.querySelectorAll("[data-book-result]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const workKey = btn.dataset.workKey
+        const work = works.find(w => w.key === workKey)
+        if (work) this.showEditionsForWork(work)
+      })
+    })
+  }
+
+  // --- Step 2: Fetch and show editions ---
+
+  async showEditionsForWork(work) {
+    this.selectedWork = work
+    this.viewMode = "editions"
+
+    // Check cache first
+    if (this.editionsCache.has(work.key)) {
+      this.renderEditionsResults(this.editionsCache.get(work.key))
+      return
+    }
+
+    if (this.abortController) this.abortController.abort()
+    this.abortController = new AbortController()
+
+    this.showEditionsLoading(work)
+
+    try {
+      const response = await fetch(`${this.editionsUrlValue}?work_key=${encodeURIComponent(work.key)}`, {
+        headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" },
+        credentials: "same-origin",
+        signal: this.abortController.signal
+      })
+
+      if (!response.ok) throw new Error("Failed to load editions")
+
+      const data = await response.json()
+      this.editionsCache.set(work.key, data.editions)
+      this.renderEditionsResults(data.editions)
+    } catch (error) {
+      if (error.name === "AbortError") return
+      console.error("Editions fetch error:", error)
+      this.renderEditionsError()
+    }
+  }
+
+  showEditionsLoading(work) {
     this.resultsTarget.innerHTML = `
-      ${this.renderFilterChips()}
+      ${this.renderEditionsHeader(work)}
       <div class="p-4 flex items-center justify-center text-gray-500">
         <svg class="animate-spin h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
-        Searching...
+        Loading editions...
       </div>
     `
-    this.bindFilterChips()
+    this.resultsTarget.classList.remove("hidden")
+    this.bindBackButton()
   }
 
-  renderFilterChips(hasOwned = false) {
-    const modes = [
-      { value: "all", label: "All" },
-      { value: "title", label: "Title" },
-      { value: "author", label: "Author" },
-      { value: "isbn", label: "ISBN" }
-    ]
-
-    const chips = modes.map(m => {
-      const active = m.value === this.searchMode
-      const baseClasses = "px-3 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer"
-      const colorClasses = active
-        ? "bg-indigo-100 text-indigo-700 border-indigo-300"
-        : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:border-gray-300"
-      return `<button type="button" data-mode="${m.value}" data-filter-chip class="${baseClasses} ${colorClasses}">${m.label}</button>`
-    }).join("")
-
-    // Only show "Hide owned" toggle when there are owned books in results
-    let ownedToggle = ""
-    if (hasOwned) {
-      const baseClasses = "px-3 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer ml-auto"
-      const colorClasses = this.hideOwned
-        ? "bg-amber-100 text-amber-700 border-amber-300"
-        : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:border-gray-300"
-      ownedToggle = `<button type="button" data-hide-owned-chip class="${baseClasses} ${colorClasses}">Hide owned</button>`
-    }
-
-    return `<div class="sticky top-0 z-10 flex gap-1.5 px-3 py-2 bg-gray-50 border-b border-gray-200 rounded-t-lg">${chips}${ownedToggle}</div>`
+  renderEditionsHeader(work) {
+    return `
+      <div class="sticky top-0 z-10 flex items-center gap-2 px-3 py-2 bg-gray-50 border-b border-gray-200 rounded-t-lg">
+        <button type="button" data-back-btn class="p-1 rounded hover:bg-gray-200 transition-colors">
+          <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+        </button>
+        <div class="min-w-0">
+          <p class="text-sm font-medium text-gray-900 truncate">${this.escapeHtml(work.title)}</p>
+          <p class="text-xs text-gray-500 truncate">${work.author ? this.escapeHtml(work.author) : "Unknown author"}</p>
+        </div>
+      </div>
+    `
   }
 
-  bindFilterChips() {
-    this.resultsTarget.querySelectorAll("[data-filter-chip]").forEach(chip => {
-      chip.addEventListener("click", (e) => this.setMode(e))
-    })
-    const ownedChip = this.resultsTarget.querySelector("[data-hide-owned-chip]")
-    if (ownedChip) {
-      ownedChip.addEventListener("click", (e) => this.toggleHideOwned(e))
-    }
-  }
-
-  renderResults(results) {
+  renderEditionsResults(editions) {
     this.selectedIndex = -1
+    const work = this.selectedWork
 
-    const hasOwned = results.some(b => b.in_collection)
-    const displayResults = this.hideOwned ? results.filter(b => !b.in_collection) : results
-
-    if (displayResults.length === 0) {
+    if (editions.length === 0) {
       this.resultsTarget.innerHTML = `
-        ${this.renderFilterChips(hasOwned)}
+        ${this.renderEditionsHeader(work)}
         <div class="p-4 text-center text-gray-500">
-          <p>${this.hideOwned && results.length > 0 ? "All results are in your collection" : "No books found"}</p>
-          <p class="text-sm mt-1">${this.hideOwned && results.length > 0 ? "Toggle \"Hide owned\" to see them" : "Try a different search or filter above"}</p>
+          <p>No editions found with sufficient data</p>
         </div>
       `
-      this.bindFilterChips()
+      this.resultsTarget.classList.remove("hidden")
+      this.bindBackButton()
       return
     }
 
     const amazonTag = this.amazonTagValue
-    const bookHtml = displayResults.map((book, index) => `
-      <button type="button"
-              data-book-result
-              data-action="click->book-search#selectResult"
-              data-book-title="${this.escapeAttr(book.title || "")}"
-              data-book-author="${this.escapeAttr(book.author || "")}"
-              data-book-pages="${book.pages || ""}"
-              data-book-isbn="${this.escapeAttr(book.isbn || "")}"
-              data-book-cover="${this.escapeAttr(book.cover_url || "")}"
-              data-book-publisher="${this.escapeAttr(book.publisher || "")}"
-              class="w-full flex items-center gap-3 p-3 text-left hover:bg-indigo-50 transition-colors border-b border-gray-100 last:border-0${book.in_collection ? " opacity-60" : ""}">
-        ${book.cover_url_small
-          ? `<img src="${this.escapeAttr(book.cover_url_small)}" alt="" class="w-10 h-14 object-cover rounded shadow-sm flex-shrink-0" onerror="this.style.display='none'">`
-          : `<div class="w-10 h-14 bg-gray-100 rounded flex items-center justify-center flex-shrink-0">
-               <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
-               </svg>
-             </div>`
-        }
-        <div class="flex-1 min-w-0">
-          <p class="font-medium text-gray-900 truncate">
-            ${this.escapeHtml(book.title)}
-            ${book.in_collection ? `<span class="inline-flex items-center ml-1.5 px-1.5 py-0.5 text-xs font-medium rounded bg-green-100 text-green-700">In collection</span>` : ""}
-          </p>
-          <p class="text-sm text-gray-500 truncate">
-            ${book.author ? this.escapeHtml(book.author) : "Unknown author"}
-            ${book.year ? `<span class="text-gray-400">(${book.year})</span>` : ""}
-          </p>
-          <p class="text-xs text-gray-400">
-            ${book.pages ? `${book.pages} pages` : ""}
-            ${book.publisher ? `${book.pages ? " · " : ""}${this.escapeHtml(book.publisher)}` : ""}
-            ${book.isbn ? ` · ISBN: ${book.isbn}` : ""}
-          </p>
-          ${book.isbn && amazonTag ? `<a href="https://www.amazon.com/s?k=${encodeURIComponent(book.isbn)}&tag=${encodeURIComponent(amazonTag)}" target="_blank" rel="noopener" data-action="click->book-search#stopPropagation" class="inline-flex items-center gap-1 text-xs text-amber-700 hover:text-amber-900 mt-0.5">Buy on Amazon <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg></a>` : ""}
-        </div>
-        <svg class="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-        </svg>
-      </button>
-    `).join("")
+    const editionsHtml = editions.map(edition => {
+      const dimmed = !edition.pages
+      return `
+        <button type="button"
+                data-book-result
+                data-edition-key="${this.escapeAttr(edition.key || "")}"
+                class="w-full flex items-center gap-3 p-3 text-left hover:bg-indigo-50 transition-colors border-b border-gray-100 last:border-0${dimmed ? " opacity-50" : ""}${edition.in_collection ? " opacity-60" : ""}">
+          ${edition.cover_url
+            ? `<img src="${this.escapeAttr(edition.cover_url)}" alt="" class="w-10 h-14 object-cover rounded shadow-sm flex-shrink-0" onerror="this.style.display='none'">`
+            : `<div class="w-10 h-14 bg-gray-100 rounded flex items-center justify-center flex-shrink-0">
+                 <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                 </svg>
+               </div>`
+          }
+          <div class="flex-1 min-w-0">
+            <p class="font-medium text-gray-900 truncate">
+              ${edition.publisher ? this.escapeHtml(edition.publisher) : this.escapeHtml(edition.title || work.title)}
+              ${edition.in_collection ? `<span class="inline-flex items-center ml-1.5 px-1.5 py-0.5 text-xs font-medium rounded bg-green-100 text-green-700">In collection</span>` : ""}
+            </p>
+            <p class="text-sm text-gray-500 truncate">
+              ${edition.year ? edition.year : ""}
+              ${edition.format ? `${edition.year ? " · " : ""}${this.escapeHtml(edition.format)}` : ""}
+            </p>
+            <p class="text-xs text-gray-400">
+              ${edition.pages ? `${edition.pages} pages` : `<span class="text-amber-500">pages unknown</span>`}
+              ${edition.isbn ? ` · ISBN: ${edition.isbn}` : ""}
+            </p>
+            ${edition.isbn && amazonTag ? `<a href="https://www.amazon.com/s?k=${encodeURIComponent(edition.isbn)}&tag=${encodeURIComponent(amazonTag)}" target="_blank" rel="noopener" data-amazon-link class="inline-flex items-center gap-1 text-xs text-amber-700 hover:text-amber-900 mt-0.5">Buy on Amazon <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg></a>` : ""}
+          </div>
+          <svg class="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+          </svg>
+        </button>
+      `
+    }).join("")
 
-    this.resultsTarget.innerHTML = this.renderFilterChips(hasOwned) + bookHtml
+    this.resultsTarget.innerHTML = this.renderEditionsHeader(work) + editionsHtml
     this.resultsTarget.classList.remove("hidden")
-    this.bindFilterChips()
+    this.bindBackButton()
+
+    // Bind click handlers for editions
+    this.resultsTarget.querySelectorAll("[data-book-result]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const editionKey = btn.dataset.editionKey
+        const edition = editions.find(ed => ed.key === editionKey)
+        if (edition) this.selectEdition(edition)
+      })
+    })
+
+    // Prevent Amazon links from triggering edition selection
+    this.resultsTarget.querySelectorAll("[data-amazon-link]").forEach(link => {
+      link.addEventListener("click", (e) => e.stopPropagation())
+    })
   }
 
-  renderError() {
+  renderEditionsError() {
+    const work = this.selectedWork
     this.resultsTarget.innerHTML = `
-      ${this.renderFilterChips()}
+      ${this.renderEditionsHeader(work)}
       <div class="p-4 text-center text-red-500">
-        <p>Search failed. Please try again.</p>
+        <p>Failed to load editions. Please try again.</p>
       </div>
     `
-    this.bindFilterChips()
+    this.bindBackButton()
   }
 
-  selectResult(event) {
-    const button = event.currentTarget
-    const data = button.dataset
+  bindBackButton() {
+    const backBtn = this.resultsTarget.querySelector("[data-back-btn]")
+    if (backBtn) {
+      backBtn.addEventListener("click", (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        this.showWorksView()
+      })
+    }
+  }
 
-    // Populate form fields
-    this.setFormField("book_title", data.bookTitle)
-    this.setFormField("book_author", data.bookAuthor)
-    this.setFormField("book_isbn", data.bookIsbn)
-    this.setFormField("book_cover_image_url", data.bookCover)
+  showWorksView() {
+    this.viewMode = "works"
+    this.selectedWork = null
+    if (this.lastResults.length > 0) {
+      this.renderWorksResults(this.lastResults)
+    } else {
+      this.hideResults()
+    }
+  }
 
-    // Set last_page if pages available (first_page stays at 1)
-    if (data.bookPages) {
-      this.setFormField("book_last_page", data.bookPages)
+  // --- Step 3: Select edition and populate form ---
+
+  selectEdition(edition) {
+    const work = this.selectedWork
+
+    // Use work-level author, edition-level title (or fall back to work title)
+    this.setFormField("book_title", edition.title || work?.title)
+    this.setFormField("book_author", work?.author)
+    this.setFormField("book_isbn", edition.isbn)
+    this.setFormField("book_cover_image_url", edition.cover_url || work?.cover_url)
+
+    if (edition.pages) {
+      this.setFormField("book_last_page", String(edition.pages))
     }
 
     // Clear search and hide results
     this.inputTarget.value = ""
-    this.searchMode = "all"
-    this.hideOwned = false
+    this.viewMode = "works"
+    this.selectedWork = null
     this.hideResults()
 
     // Focus the first empty required field
-    const titleField = document.getElementById("book_title")
     const lastPageField = document.getElementById("book_last_page")
+    const titleField = document.getElementById("book_title")
     if (!lastPageField?.value) {
       lastPageField?.focus()
     } else {
       titleField?.focus()
     }
 
-    // Show a brief confirmation
-    this.showConfirmation(data.bookTitle)
+    this.showConfirmation(edition.title || work?.title)
+  }
+
+  // --- Shared helpers ---
+
+  showLoading(message) {
+    this.resultsTarget.classList.remove("hidden")
+    this.resultsTarget.innerHTML = `
+      <div class="p-4 flex items-center justify-center text-gray-500">
+        <svg class="animate-spin h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        ${message}
+      </div>
+    `
+  }
+
+  renderError(message) {
+    this.resultsTarget.innerHTML = `
+      <div class="p-4 text-center text-red-500">
+        <p>${message}</p>
+      </div>
+    `
+    this.resultsTarget.classList.remove("hidden")
   }
 
   setFormField(id, value) {
     const field = document.getElementById(id)
     if (field && value) {
       field.value = value
-      // Trigger change event for any listeners
       field.dispatchEvent(new Event("change", { bubbles: true }))
     }
   }
 
   showConfirmation(title) {
-    // Create a brief toast notification
     const toast = document.createElement("div")
     toast.className = "fixed bottom-4 right-4 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-fade-in"
     toast.innerHTML = `
@@ -335,14 +433,7 @@ export default class extends Controller {
       </div>
     `
     document.body.appendChild(toast)
-
-    setTimeout(() => {
-      toast.remove()
-    }, 2000)
-  }
-
-  stopPropagation(event) {
-    event.stopPropagation()
+    setTimeout(() => toast.remove(), 2000)
   }
 
   hideResults() {

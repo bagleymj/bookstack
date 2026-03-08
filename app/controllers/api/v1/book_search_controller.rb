@@ -11,20 +11,31 @@ module Api
           return
         end
 
-        mode = %w[all title author isbn].include?(params[:mode]) ? params[:mode] : "all"
-        service = GoogleBooksService.new
-        results = service.search(query, limit: 8, mode: mode)
-
-        # Mark books already in the user's collection
-        user_isbns = current_user.books.where.not(isbn: [nil, ""]).pluck(:isbn).map(&:strip).to_set
-        user_titles = current_user.books.pluck(:title).map { |t| t.strip.downcase }.to_set
-
-        results.each do |book|
-          book[:in_collection] = (book[:isbn].present? && user_isbns.include?(book[:isbn])) ||
-                                 (book[:title].present? && user_titles.include?(book[:title].strip.downcase))
-        end
+        service = OpenLibraryService.new
+        results = service.search_works(query, limit: 8)
 
         render json: { results: results }
+      end
+
+      def editions
+        work_key = params[:work_key].to_s.strip
+
+        if work_key.blank?
+          render json: { editions: [] }
+          return
+        end
+
+        service = OpenLibraryService.new
+        editions = service.fetch_editions(work_key, limit: 25)
+
+        # Mark editions already in the user's collection
+        user_isbns = current_user.books.where.not(isbn: [nil, ""]).pluck(:isbn).map(&:strip).to_set
+
+        editions.each do |edition|
+          edition[:in_collection] = edition[:isbn].present? && user_isbns.include?(edition[:isbn])
+        end
+
+        render json: { editions: editions }
       end
     end
   end

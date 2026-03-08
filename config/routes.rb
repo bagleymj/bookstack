@@ -65,7 +65,11 @@ Rails.application.routes.draw do
           end
         end
         resources :active_books, only: [:index]
-        resources :book_search, only: [:index]
+        resources :book_search, only: [:index] do
+          collection do
+            get :editions
+          end
+        end
         resources :reading_list, only: [:create, :destroy], controller: "reading_list" do
           collection do
             post :reorder
