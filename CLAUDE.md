@@ -71,6 +71,14 @@ bin/rails console
 - **ReadingStatsCalculator** - Updates user reading statistics
 - **DifficultyAnalyzer** - Analyzes actual vs. expected reading speed
 
+### Scheduler Design (ReadingListScheduler)
+
+The scheduler uses a **fixed logical tier system** to place books into calendar-aligned buckets. **Do NOT replace this with computed durations, target-share-based end dates, or any approach that removes the tier concept.** The tiers are:
+
+`[:week, :two_weeks, :month, :two_months, :quarter, :half_year, :year]`
+
+Each tier snaps to a natural calendar boundary (Mondays for week/two_weeks, 1st of month for longer tiers). Books are tried shortest-tier-first and placed in the first tier where they fit under the daily budget ceiling. Stacking (multiple concurrent books) is a natural outcome of the ceiling math, not a goal in itself.
+
 ### Key Patterns
 
 - Books use `first_page` and `last_page` instead of raw page count (accommodates different editions)
