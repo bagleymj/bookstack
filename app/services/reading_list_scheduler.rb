@@ -1,5 +1,5 @@
 class ReadingListScheduler
-  TIERS = [:week, :two_weeks, :month, :quarter, :half_year].freeze
+  TIERS = [:week, :month, :quarter, :half_year].freeze
   BUDGET_TOLERANCE = 10 # ±10 minutes from target share
 
   def initialize(user)
@@ -199,7 +199,7 @@ class ReadingListScheduler
   # Advance past the current snap boundary to the next one for this tier.
   def next_boundary(current_snap, tier)
     case tier
-    when :week, :two_weeks
+    when :week
       current_snap + 7 # next Monday
     when :month, :quarter, :half_year
       next_first_of_month(current_snap + 1)
@@ -220,7 +220,7 @@ class ReadingListScheduler
 
   def snap_to_boundary(date, tier)
     case tier
-    when :week, :two_weeks
+    when :week
       next_weekday(date, :monday)
     when :month, :quarter, :half_year
       next_first_of_month(date)
@@ -230,7 +230,6 @@ class ReadingListScheduler
   def calendar_end(start_date, tier)
     case tier
     when :week      then start_date + 6
-    when :two_weeks then start_date + 13
     when :month     then start_date.end_of_month
     when :quarter   then (start_date + 2.months).end_of_month
     when :half_year then (start_date + 5.months).end_of_month
