@@ -99,64 +99,58 @@ class ReadingListScheduler
 
   # --- Placement ---
 
-  # Walk slot openings. At each opening, try tiers shortest-first and
-  # take the first one whose daily share fits within the per-slot budget.
-  # This prefers quick reads — a book is read in 1 week unless it's too
-  # intense, then 2 weeks, then a month, etc.
+  # For each tier (shortest first), walk snap boundaries looking for the
+  # first opening where the book fits. This ensures a week read at a later
+  # opening always beats a month read at an earlier one — short tiers get
+  # every chance before the scheduler stretches to a longer one.
   def find_best_placement(timeline, book_minutes, remaining_in_queue)
-    date = next_reading_day(Date.current)
-    longest_fallback = nil
-
-    200.times do
-      active = timeline.select { |e| e[:start] <= date && e[:end] >= date }
-
-      if active.size < @max_concurrent
-        placement = try_tiers_shortest_first(date, timeline, book_minutes, remaining_in_queue)
-        return placement if placement
-
-        # Track longest-tier fallback for books that don't fit any budget
-        longest_fallback ||= try_single_tier(date, timeline, TIERS.last, book_minutes)
-      end
-
-      next_end = active.map { |e| e[:end] }.min
-      date = next_end ? next_reading_day(next_end + 1) : next_reading_day(date + 1)
+    TIERS.each do |tier|
+      placement = find_opening_for_tier(timeline, tier, book_minutes, remaining_in_queue)
+      return placement if placement
     end
 
-    longest_fallback || default_placement(book_minutes)
+    default_placement(book_minutes)
   end
 
-  # Try tiers from shortest to longest. Return the first one where the
-  # book's daily share fits: share ≤ (gap / slots_to_fill) + tolerance.
-  def try_tiers_shortest_first(open_date, timeline, book_minutes, remaining_in_queue)
-    TIERS.each do |tier|
-      result = try_single_tier(open_date, timeline, tier, book_minutes)
-      next unless result
+  # Walk snap boundaries for a given tier, looking for the first date
+  # where the book's daily share fits within the per-slot budget.
+  def find_opening_for_tier(timeline, tier, book_minutes, remaining_in_queue)
+    date = next_reading_day(Date.current)
 
-      active = timeline.select { |e| e[:start] <= result[:start] && e[:end] >= result[:start] }
-      active_total = active.sum { |e| e[:share] }
-      gap = @daily_budget - active_total
-      empty_slots = @max_concurrent - active.size
-      slots_to_fill = [empty_slots, remaining_in_queue].min
-      max_share = (slots_to_fill > 0 ? gap / slots_to_fill.to_f : gap) + BUDGET_TOLERANCE
+    50.times do
+      snapped = snap_to_boundary(date, tier)
+      end_date = calendar_end(snapped, tier)
+      reading_days = count_reading_days(snapped, end_date)
+      break if reading_days <= 0
 
-      return result if result[:share] <= max_share
+      daily_share = book_minutes.to_f / reading_days
+
+      active = timeline.select { |e| e[:start] <= snapped && e[:end] >= snapped }
+      if active.size < @max_concurrent
+        active_total = active.sum { |e| e[:share] }
+        gap = @daily_budget - active_total
+        empty_slots = @max_concurrent - active.size
+        slots_to_fill = [empty_slots, remaining_in_queue].min
+        max_share = (slots_to_fill > 0 ? gap / slots_to_fill.to_f : gap) + BUDGET_TOLERANCE
+
+        return { start: snapped, end: end_date, share: daily_share } if daily_share <= max_share
+      end
+
+      # Advance to next snap boundary for this tier
+      date = next_boundary(snapped, tier)
     end
 
     nil
   end
 
-  # Snap a single tier at the given date and return placement if valid.
-  def try_single_tier(open_date, timeline, tier, book_minutes)
-    snapped = snap_to_boundary(open_date, tier)
-    end_date = calendar_end(snapped, tier)
-    reading_days = count_reading_days(snapped, end_date)
-    return nil if reading_days <= 0
-
-    active = timeline.select { |e| e[:start] <= snapped && e[:end] >= snapped }
-    return nil if active.size >= @max_concurrent
-
-    daily_share = book_minutes.to_f / reading_days
-    { start: snapped, end: end_date, share: daily_share }
+  # Advance past the current snap boundary to the next one for this tier.
+  def next_boundary(current_snap, tier)
+    case tier
+    when :week, :two_weeks
+      current_snap + 7 # next Monday
+    when :month, :quarter, :half_year
+      next_first_of_month(current_snap + 1)
+    end
   end
 
   # Fallback when no tier fits after exhausting openings.
