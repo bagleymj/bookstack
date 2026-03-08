@@ -1,5 +1,5 @@
 class ReadingListScheduler
-  TIERS = [:week, :two_weeks, :month, :quarter, :half_year].freeze
+  TIERS = [:week, :two_weeks, :month, :two_months, :quarter, :half_year, :year].freeze
   BUDGET_TOLERANCE = 10 # ±10 minutes from target share
 
   def initialize(user)
@@ -201,7 +201,7 @@ class ReadingListScheduler
     case tier
     when :week, :two_weeks
       current_snap + 7 # next Monday
-    when :month, :quarter, :half_year
+    when :month, :two_months, :quarter, :half_year, :year
       next_first_of_month(current_snap + 1)
     end
   end
@@ -222,18 +222,20 @@ class ReadingListScheduler
     case tier
     when :week, :two_weeks
       next_weekday(date, :monday)
-    when :month, :quarter, :half_year
+    when :month, :two_months, :quarter, :half_year, :year
       next_first_of_month(date)
     end
   end
 
   def calendar_end(start_date, tier)
     case tier
-    when :week      then start_date + 6
-    when :two_weeks then start_date + 13
-    when :month     then start_date.end_of_month
-    when :quarter   then (start_date + 2.months).end_of_month
-    when :half_year then (start_date + 5.months).end_of_month
+    when :week       then start_date + 6
+    when :two_weeks  then start_date + 13
+    when :month      then start_date.end_of_month
+    when :two_months then (start_date + 1.month).end_of_month
+    when :quarter    then (start_date + 2.months).end_of_month
+    when :half_year  then (start_date + 5.months).end_of_month
+    when :year       then (start_date + 11.months).end_of_month
     end
   end
 
