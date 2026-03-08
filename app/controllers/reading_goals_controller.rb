@@ -60,7 +60,9 @@ class ReadingGoalsController < ApplicationController
   end
 
   def destroy
+    was_auto_scheduled = @reading_goal.auto_scheduled?
     @reading_goal.destroy
+    ReadingListScheduler.new(current_user).schedule! if was_auto_scheduled
     respond_to do |format|
       format.html { redirect_to pipeline_path, notice: "Reading goal deleted." }
       format.json { head :no_content }
