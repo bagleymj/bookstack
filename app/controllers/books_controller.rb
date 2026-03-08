@@ -37,6 +37,7 @@ class BooksController < ApplicationController
 
   def update
     if @book.update(book_params)
+      reschedule_if_on_pipeline!
       redirect_to @book, notice: "Book was successfully updated."
     else
       render :edit, status: :unprocessable_entity
@@ -72,6 +73,12 @@ class BooksController < ApplicationController
 
   def book_params
     params.require(:book).permit(:title, :author, :first_page, :last_page, :words_per_page, :difficulty, :cover_image_url, :isbn)
+  end
+
+  def reschedule_if_on_pipeline!
+    return unless @book.reading_goals.where(auto_scheduled: true).where.not(position: nil).exists?
+
+    ReadingListScheduler.new(current_user).schedule!
   end
 
   def add_to_reading_list!(book)
