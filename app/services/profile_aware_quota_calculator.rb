@@ -7,11 +7,11 @@ class ProfileAwareQuotaCalculator
 
   # Distributes pages proportionally to available minutes per day.
   # Days with more reading time get more pages.
-  def generate_quotas!
-    return if @goal.daily_quotas.any?
+  def generate_quotas!(from_date: nil)
+    return if from_date.nil? && @goal.daily_quotas.any?
 
     pages_remaining = @book.remaining_pages
-    reading_dates = calculate_reading_dates
+    reading_dates = calculate_reading_dates(from_date: from_date)
     return if reading_dates.empty? || pages_remaining <= 0
 
     # Calculate minutes for each day
@@ -44,10 +44,11 @@ class ProfileAwareQuotaCalculator
 
   private
 
-  def calculate_reading_dates
+  def calculate_reading_dates(from_date: nil)
     return [] if @goal.started_on.nil? || @goal.target_completion_date.nil?
 
-    (@goal.started_on..@goal.target_completion_date).select do |date|
+    start_date = from_date || @goal.started_on
+    (start_date..@goal.target_completion_date).select do |date|
       minutes = daily_minutes(date)
       minutes > 0
     end
@@ -55,7 +56,7 @@ class ProfileAwareQuotaCalculator
 
   def daily_minutes(date)
     if date.on_weekend?
-      @user.weekend_reading_minutes
+      @user.weekend_budget
     else
       @user.weekday_reading_minutes
     end

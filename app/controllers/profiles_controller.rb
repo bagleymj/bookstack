@@ -20,8 +20,9 @@ class ProfilesController < ApplicationController
     if current_user.update(cleaned_params)
       current_user.apply_pace_to_schedule! if current_user.reading_pace_type.present?
       new_values = current_user.reload.attributes.slice(*scheduling_fields)
-      if old_values != new_values && current_user.reading_goals.where(auto_scheduled: true).exists?
-        ReadingListScheduler.new(current_user).schedule!
+      if old_values != new_values
+        ReadingListScheduler.new(current_user).schedule! if current_user.reading_goals.where(auto_scheduled: true).exists?
+        regenerate_future_quotas!
       end
       redirect_to profile_path, notice: "Profile updated."
     else
@@ -30,6 +31,14 @@ class ProfilesController < ApplicationController
   end
 
   private
+
+  def regenerate_future_quotas!
+    current_user.reading_goals.active.includes(:book, :daily_quotas).find_each do |goal|
+      goal.daily_quotas.where("date >= ?", Date.current).destroy_all
+      goal.daily_quotas.reload
+      ProfileAwareQuotaCalculator.new(goal, current_user).generate_quotas!(from_date: Date.current)
+    end
+  end
 
   def profile_params
     params.require(:user).permit(
