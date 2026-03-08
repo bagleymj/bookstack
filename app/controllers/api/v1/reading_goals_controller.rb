@@ -47,7 +47,9 @@ module Api
       end
 
       def destroy
+        was_auto_scheduled = @goal.auto_scheduled?
         @goal.destroy
+        ReadingListScheduler.new(current_user).schedule! if was_auto_scheduled
         head :no_content
       end
 

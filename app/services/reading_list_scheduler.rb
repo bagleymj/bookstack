@@ -132,7 +132,7 @@ class ReadingListScheduler
     date = next_reading_day(Date.current)
 
     50.times do
-      snapped = next_reading_day(snap_to_boundary(date, nil))
+      snapped = next_reading_day(snap_to_monday(date))
 
       TIERS.each do |tier|
         end_date = calendar_end(snapped, tier)
@@ -192,11 +192,6 @@ class ReadingListScheduler
     end
   end
 
-  # Advance to the next Monday boundary.
-  def next_boundary(current_snap, _tier)
-    current_snap + 7
-  end
-
   # Fallback when no tier fits after exhausting openings.
   def default_placement(book_minutes)
     start = next_reading_day(Date.current)
@@ -209,7 +204,7 @@ class ReadingListScheduler
 
   # --- Snap & calendar ---
 
-  def snap_to_boundary(date, _tier)
+  def snap_to_monday(date)
     next_weekday(date, :monday)
   end
 
