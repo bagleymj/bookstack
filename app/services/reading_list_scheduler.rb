@@ -47,17 +47,21 @@ class ReadingListScheduler
 
   # --- Budget ---
 
+  # Project the list's average book across the full year pace.
+  # "If my typical book looks like the average of my list, how much
+  # daily reading does 50 books/year require?"
   def compute_daily_budget(all_goals)
     return fallback_daily_budget if all_goals.empty?
 
     total_minutes = all_goals.sum { |g| estimate_total_minutes(g.book) }
     return fallback_daily_budget if total_minutes <= 0
 
-    interval = pace_completion_interval
-    return fallback_daily_budget if interval <= 0
+    pace = annual_pace
+    return fallback_daily_budget if pace <= 0
 
-    total_days = all_goals.size * interval
-    total_minutes.to_f / total_days
+    avg_book_minutes = total_minutes.to_f / all_goals.size
+    books_per_day = pace / 365.0
+    avg_book_minutes * books_per_day
   end
 
   def fallback_daily_budget
@@ -191,18 +195,22 @@ class ReadingListScheduler
     (book.remaining_words.to_f / wpm).ceil
   end
 
-  def pace_completion_interval
+  # Normalize pace to books/year for budget projection.
+  def annual_pace
     return 0 unless @user.reading_pace_value&.positive?
 
     case @user.reading_pace_type
-    when "books_per_year"
-      (365.0 / @user.reading_pace_value).round
-    when "books_per_month"
-      (30.0 / @user.reading_pace_value).round
-    when "books_per_week"
-      (7.0 / @user.reading_pace_value).round
-    else
-      0
+    when "books_per_year"  then @user.reading_pace_value.to_f
+    when "books_per_month" then @user.reading_pace_value * 12.0
+    when "books_per_week"  then @user.reading_pace_value * 52.0
+    else 0
     end
+  end
+
+  # Days between completing one book and the next.
+  def pace_completion_interval
+    pace = annual_pace
+    return 0 if pace <= 0
+    (365.0 / pace).round
   end
 end
