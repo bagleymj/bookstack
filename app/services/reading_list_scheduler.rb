@@ -139,7 +139,7 @@ class ReadingListScheduler
     date = next_reading_day(Date.current)
 
     50.times do
-      snapped = snap_to_boundary(date, tier)
+      snapped = next_reading_day(snap_to_boundary(date, tier))
       end_date = calendar_end(snapped, tier)
       reading_days = count_reading_days(snapped, end_date)
       break if reading_days <= 0
