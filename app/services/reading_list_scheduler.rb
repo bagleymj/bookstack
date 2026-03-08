@@ -1,5 +1,5 @@
 class ReadingListScheduler
-  TIERS = [:week, :two_weeks, :month, :two_months, :quarter, :half_year, :year].freeze
+  TIERS = [:week, :two_weeks, :month, :quarter, :half_year, :year].freeze
   BUDGET_TOLERANCE = 10 # ±10 minutes from target share
 
   def initialize(user)
@@ -120,17 +120,27 @@ class ReadingListScheduler
 
   # --- Placement ---
 
-  # For each tier (shortest first), walk snap boundaries looking for the
-  # first opening where the book fits. This ensures a week read at a later
-  # opening always beats a month read at an earlier one — short tiers get
-  # every chance before the scheduler stretches to a longer one.
+  # Pick the tier whose daily share is closest to the target clip
+  # (budget / max_concurrent). This spreads long books over long tiers
+  # at a low daily clip, letting shorter books layer on top.
+  # Tiers are tried shortest-first; once share drops below target,
+  # no longer tier can be closer, so we stop.
   def find_best_placement(timeline, book_minutes)
+    target = @weekday_budget / [@max_concurrent, 1].max.to_f
+    best = nil
+
     TIERS.each do |tier|
       placement = find_opening_for_tier(timeline, tier, book_minutes)
-      return placement if placement
+      next unless placement
+
+      if best.nil? || (placement[:share] - target).abs < (best[:share] - target).abs
+        best = placement
+      end
+
+      break if placement[:share] <= target
     end
 
-    default_placement(book_minutes)
+    best || default_placement(book_minutes)
   end
 
   # Walk snap boundaries for a given tier, looking for the first date
@@ -201,7 +211,7 @@ class ReadingListScheduler
     case tier
     when :week, :two_weeks
       current_snap + 7 # next Monday
-    when :month, :two_months, :quarter, :half_year, :year
+    when :month, :quarter, :half_year, :year
       next_first_of_month(current_snap + 1)
     end
   end
@@ -222,7 +232,7 @@ class ReadingListScheduler
     case tier
     when :week, :two_weeks
       next_weekday(date, :monday)
-    when :month, :two_months, :quarter, :half_year, :year
+    when :month, :quarter, :half_year, :year
       next_first_of_month(date)
     end
   end
@@ -232,7 +242,6 @@ class ReadingListScheduler
     when :week       then start_date + 6
     when :two_weeks  then start_date + 13
     when :month      then start_date.end_of_month
-    when :two_months then (start_date + 1.month).end_of_month
     when :quarter    then (start_date + 2.months).end_of_month
     when :half_year  then (start_date + 5.months).end_of_month
     when :year       then (start_date + 11.months).end_of_month

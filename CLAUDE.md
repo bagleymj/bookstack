@@ -75,9 +75,9 @@ bin/rails console
 
 The scheduler uses a **fixed logical tier system** to place books into calendar-aligned buckets. **Do NOT replace this with computed durations, target-share-based end dates, or any approach that removes the tier concept.** The tiers are:
 
-`[:week, :two_weeks, :month, :two_months, :quarter, :half_year, :year]`
+`[:week, :two_weeks, :month, :quarter, :half_year, :year]`
 
-Each tier snaps to a natural calendar boundary (Mondays for week/two_weeks, 1st of month for longer tiers). Books are tried shortest-tier-first and placed in the first tier where they fit under the daily budget ceiling. Stacking (multiple concurrent books) is a natural outcome of the ceiling math, not a goal in itself.
+Each tier snaps to a natural calendar boundary (Mondays for week/two_weeks, 1st of month for longer tiers). For each book, the scheduler picks the tier whose daily share is closest to `budget / max_concurrent` — this naturally places short books in weeks and stretches long books over months/quarters as low-clip background reading. Stacking is a natural outcome of the ceiling math, not a goal in itself.
 
 ### Key Patterns
 
