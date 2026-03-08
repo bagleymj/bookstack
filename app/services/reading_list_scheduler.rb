@@ -1,12 +1,4 @@
 class ReadingListScheduler
-  DURATION_TIERS = {
-    week:      { max_minutes: 150,  snap: :monday,         label: "1-week read" },
-    two_weeks: { max_minutes: 400,  snap: :monday,         label: "2-week read" },
-    month:     { max_minutes: 800,  snap: :first_of_month, label: "1-month read" },
-    quarter:   { max_minutes: 1600, snap: :first_of_month, label: "3-month read" },
-    half_year: { max_minutes: Float::INFINITY, snap: :first_of_month, label: "6-month read" }
-  }.freeze
-
   def initialize(user)
     @user = user
     @max_concurrent = user.max_concurrent_books
@@ -18,15 +10,14 @@ class ReadingListScheduler
 
     timeline = build_locked_timeline
     schedulable = gather_schedulable_goals
+    remaining_in_queue = schedulable.size
 
     schedulable.each do |goal|
       book_minutes = estimate_total_minutes(goal.book)
-      tier = duration_tier(book_minutes)
 
-      start_date = find_start_date(timeline, tier, book_minutes)
-      end_date = calendar_end(start_date, tier)
-      duration_days = count_reading_days(start_date, end_date)
-      daily_share = duration_days > 0 ? book_minutes.to_f / duration_days : book_minutes.to_f
+      start_date, daily_share = find_placement(timeline, book_minutes, remaining_in_queue)
+      reading_days = [(book_minutes.to_f / daily_share).ceil, 1].max
+      end_date = advance_by_reading_days(start_date, reading_days)
 
       goal.update!(
         started_on: start_date,
@@ -40,6 +31,7 @@ class ReadingListScheduler
       ProfileAwareQuotaCalculator.new(goal, @user).generate_quotas!
 
       timeline << { start: start_date, end: end_date, share: daily_share }
+      remaining_in_queue -= 1
     end
   end
 
@@ -72,60 +64,36 @@ class ReadingListScheduler
     (@user.weekday_reading_minutes * 5 + @user.weekend_reading_minutes * 2) / 7.0
   end
 
-  # --- Tier & calendar logic ---
-
-  def duration_tier(book_minutes)
-    case book_minutes
-    when 0..150    then :week
-    when 151..400  then :two_weeks
-    when 401..800  then :month
-    when 801..1600 then :quarter
-    else :half_year
-    end
-  end
-
-  def snap_to_boundary(date, tier)
-    case DURATION_TIERS[tier][:snap]
-    when :monday
-      next_weekday(date, :monday)
-    when :first_of_month
-      next_first_of_month(date)
-    end
-  end
-
-  def calendar_end(start_date, tier)
-    case tier
-    when :week      then start_date + 6
-    when :two_weeks then start_date + 13
-    when :month     then start_date.end_of_month
-    when :quarter   then (start_date + 2.months).end_of_month
-    when :half_year then (start_date + 5.months).end_of_month
-    end
-  end
-
   # --- Placement ---
 
-  def find_start_date(timeline, tier, book_minutes)
-    date = Date.current
-    budget_cap = @daily_budget * 1.1
+  # Find the earliest date with slot capacity and assign a daily share.
+  # The share = available gap / empty slots to fill, so concurrent books
+  # each get an equal slice of the budget. Books that start when fewer
+  # slots are occupied get a larger share (and thus shorter duration).
+  def find_placement(timeline, book_minutes, remaining_in_queue)
+    date = next_reading_day(Date.current)
 
-    100.times do
-      snapped = snap_to_boundary(date, tier)
-      end_date = calendar_end(snapped, tier)
-      days = count_reading_days(snapped, end_date)
-      daily_share = days > 0 ? book_minutes.to_f / days : book_minutes.to_f
+    200.times do
+      active = timeline.select { |e| e[:start] <= date && e[:end] >= date }
+      active_count = active.size
 
-      active = timeline.select { |e| e[:start] <= snapped && e[:end] >= snapped }
+      if active_count < @max_concurrent
+        active_total = active.sum { |e| e[:share] }
+        gap = @daily_budget - active_total
+        empty_slots = @max_concurrent - active_count
+        slots_to_fill = [empty_slots, remaining_in_queue].min
+        daily_share = slots_to_fill > 0 ? gap / slots_to_fill.to_f : gap
 
-      if active.size < @max_concurrent && (active.sum { |e| e[:share] } + daily_share) <= budget_cap
-        return snapped
+        return [date, daily_share] if daily_share >= 1
       end
 
       next_end = active.map { |e| e[:end] }.min
-      date = next_end ? next_end + 1 : date + 1
+      date = next_end ? next_reading_day(next_end + 1) : next_reading_day(date + 1)
     end
 
-    snap_to_boundary(Date.current, tier)
+    # Fallback: equal share from today
+    share = @daily_budget / [@max_concurrent, 1].max.to_f
+    [next_reading_day(Date.current), [share, 1].max]
   end
 
   # --- Timeline ---
@@ -172,18 +140,27 @@ class ReadingListScheduler
     end
   end
 
-  # --- Date helpers ---
+  # Advance from start_date by N reading days, returning the end date.
+  def advance_by_reading_days(start_date, reading_days)
+    return start_date if reading_days <= 1
 
-  def next_weekday(date, day)
-    target_wday = day == :monday ? 1 : 6
-    return date if date.wday == target_wday
-    days_ahead = (target_wday - date.wday) % 7
-    date + days_ahead
+    if @user.includes_weekends?
+      start_date + reading_days - 1
+    else
+      date = start_date
+      counted = 0
+      loop do
+        counted += 1 unless date.on_weekend?
+        return date if counted >= reading_days
+        date += 1
+      end
+    end
   end
 
-  def next_first_of_month(date)
-    return date if date.day == 1
-    date.next_month.beginning_of_month
+  def next_reading_day(date)
+    return date if @user.includes_weekends?
+    date += 1 while date.on_weekend?
+    date
   end
 
   # --- Estimates ---
@@ -195,7 +172,6 @@ class ReadingListScheduler
     (book.remaining_words.to_f / wpm).ceil
   end
 
-  # Normalize pace to books/year for budget projection.
   def annual_pace
     return 0 unless @user.reading_pace_value&.positive?
 
@@ -205,12 +181,5 @@ class ReadingListScheduler
     when "books_per_week"  then @user.reading_pace_value * 52.0
     else 0
     end
-  end
-
-  # Days between completing one book and the next.
-  def pace_completion_interval
-    pace = annual_pace
-    return 0 if pace <= 0
-    (365.0 / pace).round
   end
 end
