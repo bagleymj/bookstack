@@ -3,7 +3,7 @@ import { Controller } from "@hotwired/stimulus"
 // Handles drag-and-drop of book cards onto the pipeline to create reading goals
 export default class extends Controller {
   static targets = ["bookCard", "dropZone", "modal", "modalTitle", "bookIdField",
-                     "startedOn", "targetDate", "includeWeekends", "modalErrors"]
+                     "startedOn", "targetDate", "modalErrors"]
   static values = {
     createUrl: String
   }
@@ -84,7 +84,6 @@ export default class extends Controller {
     this.startedOnTarget.value = this.todayString()
     this.targetDateTarget.value = ""
     this.targetDateTarget.min = this.tomorrowString()
-    this.includeWeekendsTarget.checked = false
     this.clearErrors()
 
     this.modalTarget.classList.remove("hidden")
@@ -117,7 +116,6 @@ export default class extends Controller {
     const bookId = this.bookIdFieldTarget.value
     const startedOn = this.startedOnTarget.value
     const targetDate = this.targetDateTarget.value
-    const includeWeekends = this.includeWeekendsTarget.checked
 
     if (!targetDate) {
       this.showErrors(["Target completion date is required"])
@@ -137,8 +135,7 @@ export default class extends Controller {
           reading_goal: {
             book_id: bookId,
             started_on: startedOn,
-            target_completion_date: targetDate,
-            include_weekends: includeWeekends
+            target_completion_date: targetDate
           }
         })
       })

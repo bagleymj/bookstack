@@ -5,7 +5,7 @@ class ProfilesController < ApplicationController
   end
 
   def update
-    scheduling_fields = %w[max_concurrent_books weekday_reading_minutes weekend_reading_minutes]
+    scheduling_fields = %w[max_concurrent_books weekday_reading_minutes weekend_reading_minutes weekend_mode]
     old_values = current_user.attributes.slice(*scheduling_fields)
 
     cleaned_params = profile_params
@@ -39,6 +39,7 @@ class ProfilesController < ApplicationController
       :max_concurrent_books,
       :weekday_reading_minutes,
       :weekend_reading_minutes,
+      :weekend_mode,
       :reading_pace_type,
       :reading_pace_value
     )

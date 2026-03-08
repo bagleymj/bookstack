@@ -16,6 +16,7 @@ module Api
           max_concurrent_books: @user.max_concurrent_books,
           weekday_reading_minutes: @user.weekday_reading_minutes,
           weekend_reading_minutes: @user.weekend_reading_minutes,
+          weekend_mode: @user.weekend_mode,
           includes_weekends: @user.includes_weekends?,
           stats: stats_json
         }

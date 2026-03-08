@@ -39,7 +39,7 @@ class QuotaCalculator
   def calculate_reading_dates(from_date: nil)
     start_date = from_date || @goal.started_on
     (start_date..@goal.target_completion_date).select do |date|
-      @goal.include_weekends? || !date.on_weekend?
+      @goal.user.includes_weekends? || !date.on_weekend?
     end
   end
 end

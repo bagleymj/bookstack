@@ -58,6 +58,7 @@ export default class extends Controller {
 
       const text = await response.text()
       this.chartData = JSON.parse(text)
+      this.includesWeekends = this.chartData.includes_weekends !== false
     } catch (error) {
       console.error("Pipeline chart fetch error:", error)
       this.element.innerHTML = `
@@ -117,7 +118,7 @@ export default class extends Controller {
       // Which goals are active on this day?
       const active = goals.filter(g => {
         if (g.startDate.getTime() > dayTime || g.endDate.getTime() <= dayTime) return false
-        if (isWeekend && !g.include_weekends) return false
+        if (isWeekend && !this.includesWeekends) return false
         return true
       })
 
@@ -766,10 +767,10 @@ export default class extends Controller {
       } else if (goal.goal_status === "abandoned") {
         daysLine = '<span class="text-red-400">Abandoned</span>'
       } else if (goal.days_remaining > 0 && goal.startDate <= new Date()) {
-        const suffix = !goal.include_weekends ? ` <span class="text-gray-500">(${goal.calendar_days} calendar)</span>` : ""
+        const suffix = !this.includesWeekends ? ` <span class="text-gray-500">(${goal.calendar_days} calendar)</span>` : ""
         daysLine = `${goal.days_remaining} days remaining${suffix}`
       } else {
-        const suffix = !goal.include_weekends ? ` <span class="text-gray-500">(${goal.calendar_days} calendar)</span>` : ""
+        const suffix = !this.includesWeekends ? ` <span class="text-gray-500">(${goal.calendar_days} calendar)</span>` : ""
         daysLine = `${goal.duration_days} day duration${suffix}`
       }
 
@@ -961,7 +962,7 @@ export default class extends Controller {
               if (newStart < goal.endDate) {
                 goal.startDate = newStart
 
-                const newActiveDays = self.countActiveDays(goal.startDate, goal.endDate, goal.include_weekends)
+                const newActiveDays = self.countActiveDays(goal.startDate, goal.endDate, self.includesWeekends)
                 if (newActiveDays > 0) {
                   goal.minutes_per_day = goal._totalPlannedMinutes / newActiveDays
                 }
@@ -978,7 +979,7 @@ export default class extends Controller {
               if (newEnd > goal.startDate) {
                 goal.endDate = newEnd
 
-                const newActiveDays = self.countActiveDays(goal.startDate, goal.endDate, goal.include_weekends)
+                const newActiveDays = self.countActiveDays(goal.startDate, goal.endDate, self.includesWeekends)
                 if (newActiveDays > 0) {
                   goal.minutes_per_day = goal._totalPlannedMinutes / newActiveDays
                 }

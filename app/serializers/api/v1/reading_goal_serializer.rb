@@ -12,7 +12,6 @@ module Api
           book_title: @goal.book.title,
           started_on: @goal.started_on,
           target_completion_date: @goal.target_completion_date,
-          include_weekends: @goal.include_weekends?,
           status: @goal.status,
           progress_percentage: @goal.progress_percentage,
           pages_per_day: @goal.pages_per_day,

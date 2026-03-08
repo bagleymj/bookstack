@@ -152,6 +152,6 @@ class ReadingGoalsController < ApplicationController
   end
 
   def reading_goal_params
-    params.require(:reading_goal).permit(:book_id, :target_completion_date, :started_on, :include_weekends)
+    params.require(:reading_goal).permit(:book_id, :target_completion_date, :started_on)
   end
 end

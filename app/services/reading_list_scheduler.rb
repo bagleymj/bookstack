@@ -9,6 +9,7 @@ class ReadingListScheduler
 
   def schedule!
     @daily_budget = compute_daily_budget
+    compute_weekend_budgets
 
     timeline = build_locked_timeline
     schedulable = gather_schedulable_goals
@@ -20,7 +21,6 @@ class ReadingListScheduler
       goal.update!(
         started_on: placement[:start],
         target_completion_date: placement[:end],
-        include_weekends: @user.includes_weekends?,
         status: :active
       )
 
@@ -92,7 +92,30 @@ class ReadingListScheduler
   end
 
   def default_daily_minutes
-    (@user.weekday_reading_minutes * 5 + @user.weekend_reading_minutes * 2) / 7.0
+    (@user.weekday_reading_minutes * 5 + @user.weekend_budget * 2) / 7.0
+  end
+
+  def compute_weekend_budgets
+    weekly_total = @daily_budget * 7
+    case @user.weekend_mode
+    when "skip"
+      @weekday_budget = weekly_total / 5.0
+      @weekend_budget = 0
+    when "same"
+      @weekday_budget = @weekend_budget = weekly_total / 7.0
+    when "capped"
+      @weekend_budget = @user.weekend_reading_minutes.to_f
+      @weekday_budget = (weekly_total - @weekend_budget * 2) / 5.0
+    end
+  end
+
+  def budget_for_date(date)
+    date.on_weekend? ? @weekend_budget : @weekday_budget
+  end
+
+  def share_for_date(share, date)
+    return share unless @user.capped? && date.on_weekend? && @weekday_budget > 0
+    share * (@weekend_budget / @weekday_budget)
   end
 
   # --- Placement ---
@@ -121,7 +144,7 @@ class ReadingListScheduler
       reading_days = count_reading_days(snapped, end_date)
       break if reading_days <= 0
 
-      daily_share = book_minutes.to_f / reading_days
+      daily_share = compute_weekday_share(book_minutes, snapped, end_date)
 
       if fits_across_span?(timeline, snapped, end_date, daily_share)
         return { start: snapped, end: end_date, share: daily_share }
@@ -131,6 +154,23 @@ class ReadingListScheduler
     end
 
     nil
+  end
+
+  # Compute the weekday share for a book across a date span.
+  # For skip/same modes, this is simply book_minutes / reading_days.
+  # For capped mode, weekend days count as fractional days based on the
+  # ratio of weekend_budget to weekday_budget.
+  def compute_weekday_share(book_minutes, start_date, end_date)
+    if @user.capped? && @weekday_budget > 0
+      ratio = @weekend_budget / @weekday_budget
+      weekday_count = (start_date..end_date).count { |d| !d.on_weekend? }
+      weekend_count = (start_date..end_date).count { |d| d.on_weekend? }
+      effective_days = weekday_count + weekend_count * ratio
+      effective_days > 0 ? book_minutes.to_f / effective_days : 0
+    else
+      reading_days = count_reading_days(start_date, end_date)
+      reading_days > 0 ? book_minutes.to_f / reading_days : 0
+    end
   end
 
   # Check viability (concurrent cap + budget not met) and fit (ceiling)
@@ -143,11 +183,16 @@ class ReadingListScheduler
     end
 
     check_dates.uniq.all? do |date|
+      next true if !@user.includes_weekends? && date.on_weekend?
+
+      date_budget = budget_for_date(date)
+      date_share = share_for_date(daily_share, date)
+
       active = timeline.select { |e| e[:start] <= date && e[:end] >= date }
-      active_total = active.sum { |e| e[:share] }
+      active_total = active.sum { |e| share_for_date(e[:share], date) }
       active.size < @max_concurrent &&
-        active_total < @daily_budget &&
-        active_total + daily_share <= @daily_budget + BUDGET_TOLERANCE
+        active_total < date_budget &&
+        active_total + date_share <= date_budget + BUDGET_TOLERANCE
     end
   end
 
@@ -164,7 +209,7 @@ class ReadingListScheduler
   # Fallback when no tier fits after exhausting openings.
   def default_placement(book_minutes)
     start = next_reading_day(Date.current)
-    share = @daily_budget / [@max_concurrent, 1].max.to_f
+    share = @weekday_budget / [@max_concurrent, 1].max.to_f
     share = [share, 1].max
     reading_days = [(book_minutes.to_f / share).ceil, 1].max
     end_date = advance_by_reading_days(start, reading_days)
@@ -197,8 +242,7 @@ class ReadingListScheduler
   def build_locked_timeline
     locked_goals.map do |goal|
       book_minutes = estimate_total_minutes(goal.book)
-      days = count_reading_days(goal.started_on, goal.target_completion_date)
-      daily_share = days > 0 ? book_minutes.to_f / days : 0
+      daily_share = compute_weekday_share(book_minutes, goal.started_on, goal.target_completion_date)
 
       { start: goal.started_on, end: goal.target_completion_date, share: daily_share }
     end

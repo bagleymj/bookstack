@@ -65,7 +65,7 @@
              data-redistribute-preview-first-page-value="<%= @reading_goal.book.first_page %>"
              data-redistribute-preview-last-page-value="<%= @reading_goal.book.last_page %>"
              data-redistribute-preview-target-date-value="<%= @reading_goal.target_completion_date %>"
-             data-redistribute-preview-include-weekends-value="<%= @reading_goal.include_weekends? %>">
+             data-redistribute-preview-include-weekends-value="<%= @reading_goal.user.includes_weekends? %>">
           <h4 class="text-sm font-medium text-gray-900 mb-2">Preview</h4>
           <dl class="grid grid-cols-2 gap-4 text-sm">
             <div>

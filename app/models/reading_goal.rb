@@ -43,7 +43,7 @@ class ReadingGoal < ApplicationRecord
     return 0 if target_completion_date < Date.current
 
     (Date.current..target_completion_date).count do |date|
-      include_weekends? || !date.on_weekend?
+      user.includes_weekends? || !date.on_weekend?
     end
   end
 
@@ -51,7 +51,7 @@ class ReadingGoal < ApplicationRecord
   def goal_reading_days
     return 0 if queued? || started_on.nil? || target_completion_date.nil?
     days = (started_on..target_completion_date).count do |date|
-      include_weekends? || !date.on_weekend?
+      user.includes_weekends? || !date.on_weekend?
     end
     [days, 1].max
   end
@@ -285,7 +285,6 @@ class ReadingGoal < ApplicationRecord
       duration_days: goal_reading_days,
       days_remaining: reading_days_remaining,
       calendar_days: (started_on..target_completion_date).count,
-      include_weekends: include_weekends?,
       goal_status: status,
       on_track: on_track?,
       pages_per_day: pages_per_day,
@@ -426,7 +425,6 @@ class ReadingGoal < ApplicationRecord
       duration_days: 0,
       days_remaining: 0,
       calendar_days: 0,
-      include_weekends: true,
       goal_status: status,
       on_track: false,
       pages_per_day: 0,

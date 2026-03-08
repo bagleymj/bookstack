@@ -47,8 +47,7 @@ RSpec.describe "API V1 Reading Goals", type: :request do
         reading_goal: {
           book_id: new_book.id,
           started_on: Date.current.to_s,
-          target_completion_date: 30.days.from_now.to_date.to_s,
-          include_weekends: true
+          target_completion_date: 30.days.from_now.to_date.to_s
         }
       }, headers: headers, as: :json
 

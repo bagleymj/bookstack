@@ -13,11 +13,15 @@ class User < ApplicationRecord
   READING_PACE_TYPES = %w[books_per_year books_per_month books_per_week minutes_per_day].freeze
   DEFAULT_AVG_BOOK_PAGES = 300
 
+  # Enums
+  enum :weekend_mode, { skip: 0, same: 1, capped: 2 }
+
   # Validations
   validates :default_words_per_page, numericality: { greater_than: 0 }
   validates :default_reading_speed_wpm, numericality: { greater_than: 0 }
   validates :max_concurrent_books, numericality: { greater_than: 0 }
   validates :weekday_reading_minutes, numericality: { greater_than_or_equal_to: 0 }
+  validates :weekend_reading_minutes, numericality: { greater_than: 0 }, if: :capped?
   validates :weekend_reading_minutes, numericality: { greater_than_or_equal_to: 0 }
   validates :reading_pace_type, inclusion: { in: READING_PACE_TYPES }, allow_nil: true
   validates :reading_pace_value, numericality: { greater_than: 0, only_integer: true }, allow_nil: true
@@ -34,7 +38,15 @@ class User < ApplicationRecord
   end
 
   def includes_weekends?
-    weekend_reading_minutes > 0
+    !skip?
+  end
+
+  def weekend_budget
+    case weekend_mode
+    when "skip"   then 0
+    when "same"   then weekday_reading_minutes
+    when "capped" then weekend_reading_minutes
+    end
   end
 
   def reading_pace_progress
@@ -94,7 +106,9 @@ class User < ApplicationRecord
   def apply_pace_to_schedule!
     daily_minutes = derive_daily_minutes_from_pace
     return unless daily_minutes
-    update!(weekday_reading_minutes: daily_minutes, weekend_reading_minutes: daily_minutes)
+    attrs = { weekday_reading_minutes: daily_minutes }
+    attrs[:weekend_reading_minutes] = daily_minutes if same?
+    update!(attrs)
   end
 
   def reading_pace_label

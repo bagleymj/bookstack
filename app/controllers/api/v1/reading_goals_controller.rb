@@ -91,7 +91,7 @@ module Api
 
       def goal_params
         params.require(:reading_goal).permit(
-          :book_id, :started_on, :target_completion_date, :include_weekends
+          :book_id, :started_on, :target_completion_date
         )
       end
     end

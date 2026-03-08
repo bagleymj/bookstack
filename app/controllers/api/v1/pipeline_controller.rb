@@ -14,7 +14,8 @@ module Api
             start_date: goals.minimum(:started_on) || Date.current,
             end_date: goals.maximum(:target_completion_date) || 3.months.from_now.to_date
           },
-          goals: goals.map(&:as_pipeline_data)
+          goals: goals.map(&:as_pipeline_data),
+          includes_weekends: current_user.includes_weekends?
         }
       end
 

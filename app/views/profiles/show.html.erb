@@ -80,7 +80,7 @@
     </div>
 
     <!-- Scheduling -->
-    <div class="rounded-lg bg-white shadow">
+    <div class="rounded-lg bg-white shadow" data-controller="profile">
       <div class="px-4 py-5 sm:p-6">
         <h3 class="text-lg font-medium text-gray-900">Scheduling</h3>
         <p class="mt-1 text-sm text-gray-500">Controls how the reading list auto-schedules your books.</p>
@@ -90,15 +90,25 @@
             <p class="text-xs text-gray-500">How many books you want to read at the same time.</p>
             <%= form.number_field :max_concurrent_books, min: 1, max: 10, class: "mt-1 block w-24 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" %>
           </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-medium text-gray-700">Weekday reading (min)</label>
-              <%= form.number_field :weekday_reading_minutes, min: 0, max: 480, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" %>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700">Weekend reading (min)</label>
-              <%= form.number_field :weekend_reading_minutes, min: 0, max: 480, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" %>
-            </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Daily reading (min)</label>
+            <%= form.number_field :weekday_reading_minutes, min: 0, max: 480, class: "mt-1 block w-24 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" %>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Weekend mode</label>
+            <%= form.select :weekend_mode,
+                options_for_select([
+                  ["Same as weekdays", "same"],
+                  ["Skip weekends", "skip"],
+                  ["Capped weekend time", "capped"]
+                ], current_user.weekend_mode),
+                {},
+                class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm",
+                data: { action: "change->profile#toggleWeekendCap" } %>
+          </div>
+          <div id="weekend-cap-field" class="<%= 'hidden' unless current_user.capped? %>">
+            <label class="block text-sm font-medium text-gray-700">Weekend cap (min/day)</label>
+            <%= form.number_field :weekend_reading_minutes, min: 1, max: 480, class: "mt-1 block w-24 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" %>
           </div>
           <% if current_user.reading_pace_type.present? %>
             <p class="mt-2 text-xs text-gray-500">

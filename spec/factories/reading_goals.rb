@@ -4,7 +4,6 @@ FactoryBot.define do
     book
     started_on { Date.current }
     target_completion_date { 30.days.from_now.to_date }
-    include_weekends { true }
     status { :active }
   end
 end
