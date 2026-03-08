@@ -104,11 +104,19 @@ class User < ApplicationRecord
   end
 
   def apply_pace_to_schedule!
-    daily_minutes = derive_daily_minutes_from_pace
-    return unless daily_minutes
-    attrs = { weekday_reading_minutes: daily_minutes }
-    attrs[:weekend_reading_minutes] = daily_minutes if same?
-    update!(attrs)
+    calendar_daily = derive_daily_minutes_from_pace
+    return unless calendar_daily
+
+    weekly_total = calendar_daily * 7.0
+    case weekend_mode
+    when "skip"
+      update!(weekday_reading_minutes: (weekly_total / 5).ceil)
+    when "same"
+      update!(weekday_reading_minutes: calendar_daily, weekend_reading_minutes: calendar_daily)
+    when "capped"
+      weekday_mins = [(weekly_total - weekend_reading_minutes * 2) / 5.0, 1].max.ceil
+      update!(weekday_reading_minutes: weekday_mins)
+    end
   end
 
   def reading_pace_label

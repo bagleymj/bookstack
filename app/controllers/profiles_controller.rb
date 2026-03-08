@@ -34,9 +34,10 @@ class ProfilesController < ApplicationController
 
   def regenerate_future_quotas!
     current_user.reading_goals.active.includes(:book, :daily_quotas).find_each do |goal|
-      goal.daily_quotas.where("date >= ?", Date.current).destroy_all
+      from = [Date.current, goal.started_on].compact.max
+      goal.daily_quotas.where("date >= ?", from).destroy_all
       goal.daily_quotas.reload
-      ProfileAwareQuotaCalculator.new(goal, current_user).generate_quotas!(from_date: Date.current)
+      ProfileAwareQuotaCalculator.new(goal, current_user).generate_quotas!(from_date: from)
     end
   end
 
