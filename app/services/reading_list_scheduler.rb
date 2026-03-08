@@ -8,8 +8,7 @@ class ReadingListScheduler
   end
 
   def schedule!
-    all_goals = locked_goals + gather_schedulable_goals
-    @daily_budget = compute_daily_budget(all_goals)
+    @daily_budget = compute_daily_budget
 
     timeline = build_locked_timeline
     schedulable = gather_schedulable_goals
@@ -39,21 +38,55 @@ class ReadingListScheduler
 
   # --- Budget ---
 
-  # Project the list's average book across the full year pace.
-  # "If my typical book looks like the average of my list, how much
-  # daily reading does 50 books/year require?"
-  def compute_daily_budget(all_goals)
-    return fallback_daily_budget if all_goals.empty?
+  # Build a rolling window of exactly `annual_pace` books (e.g. 50 for
+  # 50 books/year). Fill reading-list-first (by queue position), then
+  # backfill with most recently completed books. This keeps the budget
+  # predictive — it always represents one full pace cycle — without
+  # being dragged down by distant history or spiked by outliers.
+  def compute_daily_budget
+    window_size = annual_pace.round
+    return fallback_daily_budget if window_size <= 0
 
-    total_minutes = all_goals.sum { |g| estimate_total_minutes(g.book) }
-    return fallback_daily_budget if total_minutes <= 0
+    window = build_budget_window(window_size)
+    return fallback_daily_budget if window.empty?
 
-    pace = annual_pace
-    return fallback_daily_budget if pace <= 0
+    avg_minutes = window.sum { |book| full_book_minutes(book) }.to_f / window.size
+    books_per_day = annual_pace / 365.0
+    avg_minutes * books_per_day
+  end
 
-    avg_book_minutes = total_minutes.to_f / all_goals.size
-    books_per_day = pace / 365.0
-    avg_book_minutes * books_per_day
+  # Reading list books first (up to window_size), then recent completions.
+  def build_budget_window(window_size)
+    # Reading list books in queue order (limited to window)
+    list_books = @user.reading_goals
+                      .where(auto_scheduled: true)
+                      .where.not(position: nil)
+                      .where(status: [:queued, :active])
+                      .includes(:book)
+                      .order(:position)
+                      .limit(window_size)
+                      .map(&:book)
+
+    return list_books if list_books.size >= window_size
+
+    # Backfill with most recently completed books
+    remaining = window_size - list_books.size
+    exclude_ids = list_books.map(&:id)
+    completed = @user.books
+                     .finished
+                     .where.not(id: exclude_ids)
+                     .order(completed_at: :desc)
+                     .limit(remaining)
+
+    list_books + completed.to_a
+  end
+
+  # Full reading time for a book (total words, not remaining).
+  # Used for budget calculation so completed books aren't counted as 0.
+  def full_book_minutes(book)
+    wpm = book.actual_wpm || (@user.effective_reading_speed * book.difficulty_modifier)
+    return 60 if wpm.zero?
+    (book.total_words.to_f / wpm).ceil
   end
 
   def fallback_daily_budget
