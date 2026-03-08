@@ -12,11 +12,10 @@ class ReadingListScheduler
 
     timeline = build_locked_timeline
     schedulable = gather_schedulable_goals
-    remaining_in_queue = schedulable.size
 
     schedulable.each do |goal|
       book_minutes = estimate_total_minutes(goal.book)
-      placement = find_best_placement(timeline, book_minutes, remaining_in_queue)
+      placement = find_best_placement(timeline, book_minutes)
 
       goal.update!(
         started_on: placement[:start],
@@ -30,7 +29,6 @@ class ReadingListScheduler
       ProfileAwareQuotaCalculator.new(goal, @user).generate_quotas!
 
       timeline << { start: placement[:start], end: placement[:end], share: placement[:share] }
-      remaining_in_queue -= 1
     end
   end
 
@@ -103,9 +101,9 @@ class ReadingListScheduler
   # first opening where the book fits. This ensures a week read at a later
   # opening always beats a month read at an earlier one — short tiers get
   # every chance before the scheduler stretches to a longer one.
-  def find_best_placement(timeline, book_minutes, remaining_in_queue)
+  def find_best_placement(timeline, book_minutes)
     TIERS.each do |tier|
-      placement = find_opening_for_tier(timeline, tier, book_minutes, remaining_in_queue)
+      placement = find_opening_for_tier(timeline, tier, book_minutes)
       return placement if placement
     end
 
@@ -113,8 +111,8 @@ class ReadingListScheduler
   end
 
   # Walk snap boundaries for a given tier, looking for the first date
-  # where the book's daily share fits within the per-slot budget.
-  def find_opening_for_tier(timeline, tier, book_minutes, remaining_in_queue)
+  # where the book fits under the ceiling across its entire span.
+  def find_opening_for_tier(timeline, tier, book_minutes)
     date = next_reading_day(Date.current)
 
     50.times do
@@ -125,22 +123,32 @@ class ReadingListScheduler
 
       daily_share = book_minutes.to_f / reading_days
 
-      active = timeline.select { |e| e[:start] <= snapped && e[:end] >= snapped }
-      if active.size < @max_concurrent
-        active_total = active.sum { |e| e[:share] }
-        gap = @daily_budget - active_total
-        empty_slots = @max_concurrent - active.size
-        slots_to_fill = [empty_slots, remaining_in_queue].min
-        max_share = (slots_to_fill > 0 ? gap / slots_to_fill.to_f : gap) + BUDGET_TOLERANCE
-
-        return { start: snapped, end: end_date, share: daily_share } if daily_share <= max_share
+      if fits_across_span?(timeline, snapped, end_date, daily_share)
+        return { start: snapped, end: end_date, share: daily_share }
       end
 
-      # Advance to next snap boundary for this tier
       date = next_boundary(snapped, tier)
     end
 
     nil
+  end
+
+  # Check viability (concurrent cap + budget not met) and fit (ceiling)
+  # at every transition point across the book's entire span.
+  def fits_across_span?(timeline, snapped, end_date, daily_share)
+    check_dates = [snapped]
+    timeline.each do |e|
+      check_dates << e[:start] if e[:start] > snapped && e[:start] <= end_date
+      check_dates << (e[:end] + 1) if e[:end] >= snapped && e[:end] < end_date
+    end
+
+    check_dates.uniq.all? do |date|
+      active = timeline.select { |e| e[:start] <= date && e[:end] >= date }
+      active_total = active.sum { |e| e[:share] }
+      active.size < @max_concurrent &&
+        active_total < @daily_budget &&
+        active_total + daily_share <= @daily_budget + BUDGET_TOLERANCE
+    end
   end
 
   # Advance past the current snap boundary to the next one for this tier.
