@@ -21,7 +21,12 @@ class BooksController < ApplicationController
     @book = current_user.books.build(book_params)
 
     if @book.save
-      redirect_to @book, notice: "Book was successfully added."
+      if params[:add_to_reading_list] == "1"
+        add_to_reading_list!(@book)
+        redirect_to pipeline_path, notice: "#{@book.title} added and scheduled."
+      else
+        redirect_to @book, notice: "Book was successfully added."
+      end
     else
       render :new, status: :unprocessable_entity
     end
@@ -67,5 +72,16 @@ class BooksController < ApplicationController
 
   def book_params
     params.require(:book).permit(:title, :author, :first_page, :last_page, :words_per_page, :difficulty, :cover_image_url, :isbn)
+  end
+
+  def add_to_reading_list!(book)
+    max_position = current_user.reading_goals.where.not(position: nil).maximum(:position) || 0
+    current_user.reading_goals.create!(
+      book: book,
+      status: :queued,
+      position: max_position + 1,
+      auto_scheduled: true
+    )
+    ReadingListScheduler.new(current_user).schedule!
   end
 end
