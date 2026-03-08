@@ -28,7 +28,7 @@ class OpenLibraryService
       .compact
       .sort_by { |w| -work_score(w) }
       .first(limit)
-  rescue ApiError, Net::TimeoutError, JSON::ParserError, Errno::ECONNREFUSED => e
+  rescue ApiError, Net::OpenTimeout, Net::ReadTimeout, JSON::ParserError, Errno::ECONNREFUSED => e
     Rails.logger.error("OpenLibrary search error: #{e.message}")
     []
   end
@@ -46,7 +46,7 @@ class OpenLibraryService
       .map { |entry| normalize_edition(entry) }
       .compact
       .sort_by { |e| -edition_score(e) }
-  rescue ApiError, Net::TimeoutError, JSON::ParserError, Errno::ECONNREFUSED => e
+  rescue ApiError, Net::OpenTimeout, Net::ReadTimeout, JSON::ParserError, Errno::ECONNREFUSED => e
     Rails.logger.error("OpenLibrary editions error: #{e.message}")
     []
   end
