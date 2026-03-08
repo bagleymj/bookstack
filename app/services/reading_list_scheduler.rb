@@ -99,75 +99,64 @@ class ReadingListScheduler
 
   # --- Placement ---
 
-  # Walk slot openings on the timeline. At each opening, try every tier
-  # and pick the one whose daily share is closest to the target (budget
-  # gap / slots to fill). Prefer tiers within ±10 min tolerance that
-  # start earliest. If nothing is within tolerance, take the closest.
+  # Walk slot openings. At each opening, try tiers shortest-first and
+  # take the first one whose daily share fits within the per-slot budget.
+  # This prefers quick reads — a book is read in 1 week unless it's too
+  # intense, then 2 weeks, then a month, etc.
   def find_best_placement(timeline, book_minutes, remaining_in_queue)
     date = next_reading_day(Date.current)
-    best = nil
+    longest_fallback = nil
 
     200.times do
       active = timeline.select { |e| e[:start] <= date && e[:end] >= date }
 
       if active.size < @max_concurrent
-        candidate = best_tier_at(date, timeline, book_minutes, remaining_in_queue)
+        placement = try_tiers_shortest_first(date, timeline, book_minutes, remaining_in_queue)
+        return placement if placement
 
-        if candidate
-          # Within tolerance at earliest opening — use it
-          return candidate if candidate[:within_tolerance]
-
-          # Track best outside-tolerance option as fallback
-          if best.nil? || candidate[:deviation] < best[:deviation]
-            best = candidate
-          end
-        end
+        # Track longest-tier fallback for books that don't fit any budget
+        longest_fallback ||= try_single_tier(date, timeline, TIERS.last, book_minutes)
       end
 
       next_end = active.map { |e| e[:end] }.min
       date = next_end ? next_reading_day(next_end + 1) : next_reading_day(date + 1)
     end
 
-    best || default_placement(book_minutes)
+    longest_fallback || default_placement(book_minutes)
   end
 
-  # Try all tiers at a given slot opening. Each tier snaps to its own
-  # boundary (Monday or 1st) so the actual start date varies. Prefer
-  # within-tolerance tiers with the earliest start date.
-  def best_tier_at(open_date, timeline, book_minutes, remaining_in_queue)
-    best = nil
-
+  # Try tiers from shortest to longest. Return the first one where the
+  # book's daily share fits: share ≤ (gap / slots_to_fill) + tolerance.
+  def try_tiers_shortest_first(open_date, timeline, book_minutes, remaining_in_queue)
     TIERS.each do |tier|
-      snapped = snap_to_boundary(open_date, tier)
-      end_date = calendar_end(snapped, tier)
-      reading_days = count_reading_days(snapped, end_date)
-      next if reading_days <= 0
+      result = try_single_tier(open_date, timeline, tier, book_minutes)
+      next unless result
 
-      daily_share = book_minutes.to_f / reading_days
-
-      # Check capacity at the snapped date (may differ from open_date)
-      active = timeline.select { |e| e[:start] <= snapped && e[:end] >= snapped }
-      next if active.size >= @max_concurrent
-
+      active = timeline.select { |e| e[:start] <= result[:start] && e[:end] >= result[:start] }
       active_total = active.sum { |e| e[:share] }
       gap = @daily_budget - active_total
       empty_slots = @max_concurrent - active.size
       slots_to_fill = [empty_slots, remaining_in_queue].min
-      target_share = slots_to_fill > 0 ? gap / slots_to_fill.to_f : gap
+      max_share = (slots_to_fill > 0 ? gap / slots_to_fill.to_f : gap) + BUDGET_TOLERANCE
 
-      deviation = (daily_share - target_share).abs
-      within = deviation <= BUDGET_TOLERANCE
-
-      if best.nil? ||
-         (within && !best[:within_tolerance]) ||
-         (within == best[:within_tolerance] && snapped < best[:start]) ||
-         (within == best[:within_tolerance] && snapped == best[:start] && deviation < best[:deviation])
-        best = { start: snapped, end: end_date, share: daily_share,
-                 deviation: deviation, within_tolerance: within }
-      end
+      return result if result[:share] <= max_share
     end
 
-    best
+    nil
+  end
+
+  # Snap a single tier at the given date and return placement if valid.
+  def try_single_tier(open_date, timeline, tier, book_minutes)
+    snapped = snap_to_boundary(open_date, tier)
+    end_date = calendar_end(snapped, tier)
+    reading_days = count_reading_days(snapped, end_date)
+    return nil if reading_days <= 0
+
+    active = timeline.select { |e| e[:start] <= snapped && e[:end] >= snapped }
+    return nil if active.size >= @max_concurrent
+
+    daily_share = book_minutes.to_f / reading_days
+    { start: snapped, end: end_date, share: daily_share }
   end
 
   # Fallback when no tier fits after exhausting openings.
@@ -177,7 +166,7 @@ class ReadingListScheduler
     share = [share, 1].max
     reading_days = [(book_minutes.to_f / share).ceil, 1].max
     end_date = advance_by_reading_days(start, reading_days)
-    { start: start, end: end_date, share: share, deviation: 0, within_tolerance: true }
+    { start: start, end: end_date, share: share }
   end
 
   # --- Snap & calendar ---
