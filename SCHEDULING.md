@@ -152,8 +152,10 @@ which books are active before the next Monday. Within the week:
   but no new book enters until the next Monday. The remaining days of the
   week simply have less total reading (the belt runs lighter).
 - **Under-reading** redistributes within the week: remaining pages spread
-  across remaining days for that book. If by week's end the book can't
-  catch up without spiking, tier promotion kicks in on Monday.
+  across remaining days for that book. If redistribution would create a
+  spike (daily load exceeds the derived budget), tier promotion kicks in
+  immediately — the book's end date extends by one week and quotas
+  regenerate across the longer range.
 - **New books only enter on Mondays**, after the system has absorbed the
   previous week's actuals and re-leveled the pipeline.
 
@@ -350,9 +352,13 @@ Each day, the system adjusts quotas for the current week's committed books:
 3. **Regenerates today's quotas**: The user sees fresh assignments that
    reflect yesterday's reality.
 
-Daily reflow does **not** change which books are active, add new books,
-or promote tiers. It only adjusts page quotas within the current week's
-committed work cell.
+Daily reflow does **not** change which books are active or add new books.
+It adjusts page quotas within the committed set, and **extends end dates**
+when redistribution would create a spike (daily load > derived budget ×
+1.1). Extending a book's end date is not a work cell change — the same
+books remain active, one just rides the belt longer. This enforces
+Invariant 4 (no spikes) on every daily cycle, not just at Monday
+boundaries.
 
 ### Weekly reflow (Monday boundary)
 
@@ -396,13 +402,17 @@ Example:
 
 **Tier promotion rules:**
 
-1. Only promote to the next available tier (1w → 2w, not 1w → 4w)
+1. Promotion extends the end date by **one week at a time**. Multiple
+   extensions may occur in a single reflow if the load remains above
+   budget (capped at 5 extensions per cycle for safety)
 2. Promotion preserves any pages already read — only remaining work is
    redistributed
-3. The end date extends to the new tier's boundary (always a Sunday)
+3. The end date always extends by full weeks (7 days)
 4. Promotion is automatic — no user intervention needed
-5. Promotion triggers a full pipeline re-level (other books may adjust
-   to fill or accommodate the changed load profile)
+5. Promotion fires **daily** during reflow, not only at Monday boundaries.
+   The no-spike invariant is more fundamental than the weekly boundary
+6. At the weekly Monday boundary, the full scheduler also checks tier
+   viability and may re-level the entire pipeline
 
 ### Backfill on promotion
 
@@ -670,9 +680,9 @@ These metrics should be available in the UI (pipeline view, dashboard):
    its daily share beyond what the budget allows.
 
 9. **Respect the weekly work cell.** Never change which books are active
-   mid-week. Daily reflow adjusts quotas within the committed set;
-   pipeline changes (new books, promotions, backfills) happen at Monday
-   boundaries only.
+   mid-week. Daily reflow adjusts quotas within the committed set and
+   may extend end dates to prevent spikes (same books, longer duration).
+   Adding new books and backfills happen at Monday boundaries only.
 
 10. **Honor ad-hoc reading.** Pages read against any book count toward
     that book's progress and affect future scheduling. But ad-hoc sessions
