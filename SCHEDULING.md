@@ -298,21 +298,24 @@ starts and fill gaps.
   (10 min). Any overshoot is worse than any valley — a placement that
   spikes the load always loses to one that underfills it.
 - **Undershoot** = how far daily load falls below budget, measured
-  **globally** across the entire scheduled timeline — not just within
-  the candidate book's span. Valleys anywhere in the pipeline count
-  against a placement. Among no-overshoot placements, the shallowest
-  global valley wins.
+  **globally** across the entire scheduled timeline — but only on days
+  that already have load from OTHER books. Days where this candidate
+  book would be the sole source of load are excluded from undershoot
+  scoring — future books will fill those days, so penalizing them
+  forces short tiers and prevents the overlapping that heijunka demands.
 - Load within the tolerance band (`budget` to `budget + 10 min`) scores
   as perfect — no overshoot, no undershoot.
 - Days with no scheduled load and outside the candidate's span are
   ignored (they're unscheduled future, not valleys).
 
 This is true heijunka: the algorithm fills UP to the budget (minimizing
-valleys) without exceeding it (preventing spikes). **Global undershoot
-scoring** is the key mechanism that drives overlapping tiers — a longer
-tier that layers on top of existing load to fill a gap elsewhere in the
-timeline scores better than a short tier that perfectly fills one week
-but leaves the rest of the timeline underloaded.
+valleys) without exceeding it (preventing spikes). **Fill-only undershoot
+scoring** is the key mechanism that drives overlapping tiers. By only
+measuring undershoot on days with existing load, the algorithm is free
+to choose longer tiers (lower daily share) knowing that future books
+will layer on top. A short tier that maxes out one week but leaves the
+rest of the timeline empty is NOT preferred over a longer tier that
+overlaps with existing load to fill valleys.
 
 ```
 for each book in queue order:
@@ -323,9 +326,9 @@ for each book in queue order:
       # Score overshoot within the book's span only
       for each day in span:
         overshoot = max(0, projected - budget - tolerance)
-      # Score undershoot GLOBALLY across entire scheduled timeline
+      # Score undershoot GLOBALLY, but only on days with existing load
       for each day in [today..max(timeline_end, book_end)]:
-        if day has load or is in span:
+        if day has existing load from other books:
           undershoot = max(0, budget - projected)
       score = [max_overshoot, max_undershoot]
       if score < best_score: track this placement

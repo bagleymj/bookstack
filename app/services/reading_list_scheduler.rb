@@ -202,13 +202,17 @@ class ReadingListScheduler
   end
 
   # Score a candidate placement as [max_overshoot, max_undershoot].
-  # Overshoot is measured within the book's span only (the book can only
-  # cause spikes where it adds load). Undershoot is measured GLOBALLY
-  # across the entire scheduled timeline — valleys anywhere in the
-  # pipeline count against a placement. This is the key heijunka insight:
-  # a longer tier that overlaps with existing load to fill valleys scores
-  # better than a short tier that perfectly fills one week but leaves
-  # the rest of the timeline empty.
+  #
+  # Overshoot: measured within the book's span only. The book can only
+  # cause spikes where it adds load.
+  #
+  # Undershoot: measured only on days with EXISTING load from other books.
+  # Days where this book is the sole source of load (no existing load)
+  # are NOT penalized — future books will fill those days. This is the
+  # key heijunka mechanism: it frees the algorithm to choose LONGER tiers
+  # that overlap with existing load to fill valleys. Without this, short
+  # tiers always win because their higher share produces less undershoot,
+  # but they prevent the overlapping that heijunka requires.
   def placement_score(start_date, end_date, daily_share)
     max_overshoot = 0.0
     max_undershoot = 0.0
@@ -222,20 +226,26 @@ class ReadingListScheduler
       next if budget <= 0
 
       in_span = date >= start_date && date <= end_date
-      projected = @load_profile[date] + (in_span ? share_for_date(daily_share, date) : 0)
+      existing = @load_profile[date]
+      projected = existing + (in_span ? share_for_date(daily_share, date) : 0)
 
-      # Only count days that have scheduled load or are within the candidate span.
-      # Completely empty future days (no existing load, not in this book's span)
-      # are not valleys — they're just unscheduled.
-      next if !in_span && @load_profile[date] <= 0
+      # Skip days with no existing load and outside this book's span
+      next if !in_span && existing <= 0
 
+      # Overshoot: only within span (book can only spike where it adds load)
       if in_span
         over = projected - budget - CEILING_TOLERANCE
         max_overshoot = over if over > 0 && over > max_overshoot
       end
 
-      under = budget - projected
-      max_undershoot = under if under > 0 && under > max_undershoot
+      # Undershoot: only on days with existing load from OTHER books.
+      # Days where this book is the sole source of load will be filled
+      # by future books — penalizing them forces short tiers and prevents
+      # the overlapping that heijunka demands.
+      if existing > 0
+        under = budget - projected
+        max_undershoot = under if under > 0 && under > max_undershoot
+      end
     end
     [max_overshoot, max_undershoot]
   end
