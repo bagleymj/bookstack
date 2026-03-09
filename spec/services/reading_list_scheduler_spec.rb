@@ -250,6 +250,50 @@ RSpec.describe ReadingListScheduler do
         "Valley too deep: min=#{min_load.round(1)}, max=#{max_load.round(1)}. " \
         "Load should be leveled, not peaked."
     end
+
+    it "fills to budget — no persistent shortfall across the timeline" do
+      # True heijunka: every reading day should be close to the derived budget.
+      # A 30-minute daily shortfall is unacceptable — it means the algorithm
+      # is leaving capacity on the table.
+      10.times { |i| create_queued_book(pages: 300, position: i + 1, title: "Book #{i}") }
+
+      scheduler = ReadingListScheduler.new(user)
+      scheduler.schedule!
+
+      goals = user.reading_goals.active.reload
+      budget = scheduler.target_budget
+      next unless budget&.positive?
+
+      # Weekend mode is :same, so budget applies uniformly
+      all_starts = goals.map(&:started_on)
+      all_ends = goals.map(&:target_completion_date)
+      timeline_start = all_starts.min
+      timeline_end = all_ends.max
+
+      wpm = user.effective_reading_speed
+      weekdays = (timeline_start..timeline_end).select { |d| !d.on_weekend? }
+      daily_loads = weekdays.map do |date|
+        goals.sum do |g|
+          next 0.0 unless date >= g.started_on && date <= g.target_completion_date
+          book = g.book
+          minutes = (book.remaining_words.to_f / wpm).ceil
+          reading_days = (g.started_on..g.target_completion_date).count { |d| !d.on_weekend? }
+          reading_days > 0 ? minutes.to_f / reading_days : 0.0
+        end
+      end
+
+      # No day should fall more than 20% below budget within the scheduled timeline
+      loaded_days = daily_loads.select { |load| load > 0 }
+      next if loaded_days.empty?
+
+      shortfall_days = loaded_days.count { |load| load < budget * 0.8 }
+      total_days = loaded_days.size
+      shortfall_pct = (shortfall_days.to_f / total_days * 100).round(1)
+
+      expect(shortfall_pct).to be < 15,
+        "#{shortfall_pct}% of days fall >20% below budget (#{budget.round} min). " \
+        "Heijunka demands consistent load, not persistent valleys."
+    end
   end
 
   # ─── Concurrency Limits ────────────────────────────────────────

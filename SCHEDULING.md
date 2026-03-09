@@ -349,6 +349,24 @@ prefers longer tiers that overlap with existing books to fill valleys.
 Book C might get a 2-week tier overlapping Books A and B rather than a
 1-week tier that just adds another sequential block.
 
+### Phase 3.5: Refinement pass
+
+The greedy Phase 3 places books one at a time in queue order. Early
+books are placed before the timeline exists, so they get suboptimal
+short tiers — there's nothing to overlay, and a high share (short tier)
+looks like less undershoot. This leaves persistent valleys.
+
+After all books are placed, the scheduler runs up to 3 refinement
+passes. Each pass re-places every book (remove from profile → find best
+placement with full visibility → re-add). With the full load profile
+visible, early books now see the valley they created and choose longer,
+overlapping tiers that fill it.
+
+Refinement converges because each pass monotonically reduces the global
+max valley (a book only moves if `find_leveled_placement` finds a
+strictly better score with the current profile). Passes stop when no
+placement changes.
+
 ### Phase 4: Verify throughput
 
 After all books are placed, count projected completions:

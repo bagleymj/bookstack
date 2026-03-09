@@ -74,6 +74,12 @@ class ReadingListScheduler
       @placements << { goal: goal, placement: placement, tier: placement[:tier], book_minutes: book_minutes }
     end
 
+    # Phase 3.5: Refine placements with full timeline visibility
+    # The greedy Phase 3 places early books before the timeline exists,
+    # so they get suboptimal short tiers. Re-place each book now that
+    # the full load profile is established. Converges in 2-3 passes.
+    refine_placements!
+
     # Phase 4: Verify throughput
     verify_throughput!
 
@@ -314,6 +320,46 @@ class ReadingListScheduler
     end_date = calendar_end(start, tier)
     share = compute_weekday_share(book_minutes, start, end_date)
     { start: start, end: end_date, share: share, tier: tier }
+  end
+
+  # ─── Phase 3.5: Refinement ──────────────────────────────────────
+
+  # Re-place each book with full timeline visibility. The greedy Phase 3
+  # places early books before the load profile exists, giving them
+  # suboptimal short tiers. Now that all books are placed, re-placing
+  # each one lets it see the full profile and choose a tier that fills
+  # existing valleys through overlapping.
+  MAX_REFINEMENT_PASSES = 3
+
+  def refine_placements!
+    MAX_REFINEMENT_PASSES.times do
+      changed = false
+      @placements.each do |entry|
+        next if entry[:goal].has_reading_sessions?
+
+        goal = entry[:goal]
+        old_start = goal.started_on
+        old_end = goal.target_completion_date
+        old_tier = entry[:tier]
+        old_share = entry[:placement][:share]
+
+        # Remove this book from the profile so it doesn't influence its own re-placement
+        remove_range_from_profiles(old_start, old_end, old_share)
+
+        new_placement = find_leveled_placement(entry[:book_minutes])
+        unless new_placement
+          add_range_to_profiles(old_start, old_end, old_share)
+          next
+        end
+
+        apply_placement!(goal, new_placement)
+        add_placement_to_profiles(new_placement)
+        changed = true if new_placement[:tier] != old_tier || new_placement[:start] != old_start
+        entry[:placement] = new_placement
+        entry[:tier] = new_placement[:tier]
+      end
+      break unless changed
+    end
   end
 
   # ─── Phase 4 ────────────────────────────────────────────────────
