@@ -59,6 +59,7 @@ class ReadingListScheduler
     # Phase 3: Level-load tier assignment
     @load_profile = Hash.new(0.0)
     @concurrent_count = Hash.new(0)
+    @timeline_end = nil
 
     locked_goals.each { |goal| add_goal_to_profiles(goal) }
 
@@ -195,19 +196,38 @@ class ReadingListScheduler
   end
 
   # Score a candidate placement as [max_overshoot, max_undershoot].
-  # Ruby's lexicographic array comparison ensures any overshoot beyond
-  # ceiling tolerance is worse than any valley. Within the tolerance band
-  # (budget..budget+CEILING_TOLERANCE), load is scored as perfect.
+  # Overshoot is measured within the book's span only (the book can only
+  # cause spikes where it adds load). Undershoot is measured GLOBALLY
+  # across the entire scheduled timeline — valleys anywhere in the
+  # pipeline count against a placement. This is the key heijunka insight:
+  # a longer tier that overlaps with existing load to fill valleys scores
+  # better than a short tier that perfectly fills one week but leaves
+  # the rest of the timeline empty.
   def placement_score(start_date, end_date, daily_share)
     max_overshoot = 0.0
     max_undershoot = 0.0
-    (start_date..end_date).each do |date|
+
+    score_start = snap_to_monday(Date.current)
+    score_end = [@timeline_end, end_date].compact.max
+
+    (score_start..score_end).each do |date|
       next unless reading_day?(date)
       budget = budget_for_date(date)
       next if budget <= 0
-      projected = @load_profile[date] + share_for_date(daily_share, date)
-      over = projected - budget - CEILING_TOLERANCE
-      max_overshoot = over if over > 0 && over > max_overshoot
+
+      in_span = date >= start_date && date <= end_date
+      projected = @load_profile[date] + (in_span ? share_for_date(daily_share, date) : 0)
+
+      # Only count days that have scheduled load or are within the candidate span.
+      # Completely empty future days (no existing load, not in this book's span)
+      # are not valleys — they're just unscheduled.
+      next if !in_span && @load_profile[date] <= 0
+
+      if in_span
+        over = projected - budget - CEILING_TOLERANCE
+        max_overshoot = over if over > 0 && over > max_overshoot
+      end
+
       under = budget - projected
       max_undershoot = under if under > 0 && under > max_undershoot
     end
@@ -277,6 +297,7 @@ class ReadingListScheduler
       @load_profile[date] += share_for_date(daily_share, date)
       @concurrent_count[date] += 1
     end
+    @timeline_end = [@timeline_end, end_date].compact.max if @timeline_end != false
   end
 
   def remove_range_from_profiles(start_date, end_date, daily_share)
