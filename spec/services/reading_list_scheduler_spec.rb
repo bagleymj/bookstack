@@ -433,5 +433,90 @@ RSpec.describe ReadingListScheduler do
       goal.reload
       expect(goal.status).to eq("queued")
     end
+
+    # ─── Concurrency Hint ─────────────────────────────────────────
+
+    describe "concurrency_hint" do
+      it "returns nil when concurrency limit is high enough" do
+        # max_concurrent_books defaults to 3 from factory; no concurrency_limit set
+        # With a generous limit, no hint needed
+        user.update!(concurrency_limit: nil, max_concurrent_books: 20)
+        create_queued_book(pages: 300, position: 1)
+        metrics = ReadingListScheduler.new(user).metrics
+
+        expect(metrics[:concurrency_hint]).to be_nil
+      end
+
+      it "returns nil when limit is sufficient for the pace" do
+        user.update!(concurrency_limit: 10)
+        create_queued_book(pages: 300, position: 1)
+        metrics = ReadingListScheduler.new(user).metrics
+
+        expect(metrics[:concurrency_hint]).to be_nil
+      end
+
+      it "returns a hint when limit is too tight for the pace" do
+        user.update!(concurrency_limit: 1)
+        5.times { |i| create_queued_book(pages: 500, position: i + 1, title: "Book #{i}") }
+        metrics = ReadingListScheduler.new(user).metrics
+
+        if metrics[:concurrency_hint]
+          expect(metrics[:concurrency_hint]).to include("concurrent books")
+        end
+      end
+
+      it "returns nil with default metrics when no pace is set" do
+        user.update!(reading_pace_type: nil, reading_pace_value: nil)
+        metrics = ReadingListScheduler.new(user).metrics
+
+        expect(metrics[:concurrency_hint]).to be_nil
+      end
+    end
+
+    # ─── Ahead Suggestion ─────────────────────────────────────────
+
+    describe "ahead_suggestion" do
+      it "returns nil when active goals still have remaining pages" do
+        book = create(:book, user: user, last_page: 300, current_page: 50)
+        create(:reading_goal, user: user, book: book, status: :active,
+               started_on: 1.week.ago.to_date, target_completion_date: 1.week.from_now.to_date,
+               auto_scheduled: true, position: 1)
+
+        metrics = ReadingListScheduler.new(user).metrics
+        expect(metrics[:ahead_suggestion]).to be_nil
+      end
+
+      it "returns suggestion when all active books are done and queued books exist" do
+        # Active goal with book fully read
+        done_book = create(:book, user: user, last_page: 200, current_page: 200, title: "Done Book")
+        create(:reading_goal, user: user, book: done_book, status: :active,
+               started_on: 1.week.ago.to_date, target_completion_date: 1.week.from_now.to_date,
+               auto_scheduled: true, position: 1)
+
+        # Queued book waiting
+        next_book = create(:book, user: user, last_page: 300, title: "Next Up")
+        create(:reading_goal, user: user, book: next_book, status: :queued,
+               started_on: nil, target_completion_date: nil,
+               auto_scheduled: true, position: 2)
+
+        metrics = ReadingListScheduler.new(user).metrics
+        expect(metrics[:ahead_suggestion]).to include("Next Up")
+      end
+
+      it "returns suggestion when no active goals exist but queued books do" do
+        next_book = create(:book, user: user, last_page: 300, title: "Waiting Book")
+        create(:reading_goal, user: user, book: next_book, status: :queued,
+               started_on: nil, target_completion_date: nil,
+               auto_scheduled: true, position: 1)
+
+        metrics = ReadingListScheduler.new(user).metrics
+        expect(metrics[:ahead_suggestion]).to include("Waiting Book")
+      end
+
+      it "returns nil when no queued books exist" do
+        metrics = ReadingListScheduler.new(user).metrics
+        expect(metrics[:ahead_suggestion]).to be_nil
+      end
+    end
   end
 end

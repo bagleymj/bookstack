@@ -22,13 +22,16 @@ class DailyReflow
     promoted_ids = promote_spiking_goals!(goals)
 
     # In heijunka mode, run the scheduler daily to fill open slots and re-level
-    # the pipeline. The scheduler handles all schedulable goals (queued + active
-    # without sessions). Only locked goals (active with sessions) need the
-    # reflow's page redistribution.
+    # the pipeline. The scheduler handles auto-scheduled goals with positions
+    # that don't have sessions. Redistribute everything else: locked goals
+    # (active with sessions) and manual goals (not auto-scheduled / no position).
     if heijunka_mode?
       ReadingListScheduler.new(@user).schedule!
-      locked = goals.select(&:has_reading_sessions?)
-      locked.each { |goal| redistribute_remaining(goal) unless promoted_ids.include?(goal.id) }
+      goals.each do |goal|
+        next if promoted_ids.include?(goal.id)
+        next if goal.auto_scheduled? && goal.position.present? && !goal.has_reading_sessions?
+        redistribute_remaining(goal)
+      end
     else
       goals.each { |goal| redistribute_remaining(goal) unless promoted_ids.include?(goal.id) }
     end

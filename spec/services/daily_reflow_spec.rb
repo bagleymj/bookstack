@@ -113,6 +113,8 @@ RSpec.describe DailyReflow do
 
     before do
       promo_user.update_column(:quotas_generated_on, nil)
+      # Stub the scheduler so promotion tests focus on promotion behavior only
+      allow_any_instance_of(ReadingListScheduler).to receive(:schedule!)
     end
 
     context "when daily load exceeds budget" do
@@ -298,6 +300,95 @@ RSpec.describe DailyReflow do
         expect(goal_a.reload.target_completion_date).to be > Date.current + 9
         expect(goal_b.reload.target_completion_date).to be > Date.current + 4
       end
+    end
+  end
+
+  # ─── Scheduler Integration ───────────────────────────────────
+
+  describe "scheduler integration in heijunka mode" do
+    let(:heijunka_user) do
+      create(:user,
+        reading_pace_type: "books_per_year",
+        reading_pace_value: 50,
+        reading_pace_set_on: Date.current.beginning_of_year,
+        default_reading_speed_wpm: 250,
+        default_words_per_page: 250,
+        max_concurrent_books: 3,
+        weekend_mode: :same)
+    end
+
+    before { heijunka_user.update_column(:quotas_generated_on, nil) }
+
+    it "calls ReadingListScheduler#schedule! during reflow" do
+      scheduler = instance_double(ReadingListScheduler)
+      allow(ReadingListScheduler).to receive(:new).with(heijunka_user).and_return(scheduler)
+      allow(scheduler).to receive(:schedule!)
+      allow(scheduler).to receive(:metrics).and_return({ derived_budget: 40 })
+
+      DailyReflow.new(heijunka_user).reflow!
+
+      expect(scheduler).to have_received(:schedule!)
+    end
+
+    it "only redistributes locked goals (those with sessions)" do
+      # Create two active goals — one locked (has sessions), one not
+      locked_book = create(:book, user: heijunka_user, last_page: 200, current_page: 50)
+      unlocked_book = create(:book, user: heijunka_user, last_page: 200, current_page: 1)
+
+      locked_goal = create(:reading_goal, user: heijunka_user, book: locked_book,
+                           status: :active, started_on: 1.week.ago.to_date,
+                           target_completion_date: 1.week.from_now.to_date,
+                           auto_scheduled: true, position: 1)
+      unlocked_goal = create(:reading_goal, user: heijunka_user, book: unlocked_book,
+                             status: :active, started_on: 1.week.ago.to_date,
+                             target_completion_date: 1.week.from_now.to_date,
+                             auto_scheduled: true, position: 2)
+
+      # Clear auto-generated quotas and add manual ones
+      locked_goal.daily_quotas.destroy_all
+      unlocked_goal.daily_quotas.destroy_all
+      (Date.current..1.week.from_now.to_date).each do |date|
+        locked_goal.daily_quotas.create!(date: date, target_pages: 20, actual_pages: 0, status: :pending)
+        unlocked_goal.daily_quotas.create!(date: date, target_pages: 20, actual_pages: 0, status: :pending)
+      end
+
+      # Lock one goal with a reading session
+      create(:reading_session, user: heijunka_user, book: locked_book,
+             start_page: 1, end_page: 50, pages_read: 49,
+             started_at: 1.day.ago, ended_at: 1.day.ago + 30.minutes,
+             duration_seconds: 1800)
+
+      # Stub the scheduler to avoid full scheduling side effects
+      scheduler = instance_double(ReadingListScheduler)
+      allow(ReadingListScheduler).to receive(:new).with(heijunka_user).and_return(scheduler)
+      allow(scheduler).to receive(:schedule!)
+      allow(scheduler).to receive(:metrics).and_return({ derived_budget: 40 })
+
+      heijunka_user.reload
+      DailyReflow.new(heijunka_user).reflow!
+
+      # Locked goal should have redistributed quotas (sum = remaining pages)
+      locked_quotas = DailyQuota.where(reading_goal_id: locked_goal.id)
+                                .where("date >= ?", Date.current)
+                                .where.not(status: :missed)
+      expect(locked_quotas.sum(:target_pages)).to eq(locked_book.remaining_pages)
+    end
+
+    it "does not call schedule! when not in heijunka mode" do
+      non_heijunka_user = create(:user, reading_pace_type: nil, reading_pace_value: nil, weekend_mode: :same)
+      non_heijunka_user.update_column(:quotas_generated_on, nil)
+
+      book = create(:book, user: non_heijunka_user, last_page: 100, current_page: 1)
+      g = create(:reading_goal, user: non_heijunka_user, book: book, status: :active,
+                 started_on: 3.days.ago.to_date, target_completion_date: 4.days.from_now.to_date)
+      g.daily_quotas.destroy_all
+      (Date.current..4.days.from_now.to_date).each do |date|
+        g.daily_quotas.create!(date: date, target_pages: 20, actual_pages: 0, status: :pending)
+      end
+      non_heijunka_user.reload
+
+      expect(ReadingListScheduler).not_to receive(:new)
+      DailyReflow.new(non_heijunka_user).reflow!
     end
   end
 end
