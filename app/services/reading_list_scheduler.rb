@@ -274,18 +274,21 @@ class ReadingListScheduler
     }
   end
 
-  # Score: [max_overshoot_beyond_ceiling, max_abs_deviation_from_budget, mean_sq_deviation]
+  # Score: [max_overshoot_beyond_ceiling, max_abs_deviation_from_budget, weighted_mean_sq_deviation]
   # 1. Hard constraint: never exceed budget + ceiling tolerance
   # 2. Minimax: minimize the worst absolute deviation from budget (either direction)
-  # 3. Tiebreaker: minimize overall variance from budget
+  # 3. Tiebreaker: minimize variance, weighted so early-timeline deviations
+  #    cost more than late ones. This front-loads the schedule — valleys
+  #    naturally drift toward the end where books run out.
   def compute_state_score(load_profile, timeline_end)
     score_start = snap_to_monday(Date.current)
     score_end = timeline_end || score_start
+    timeline_span = [(score_end - score_start).to_i, 1].max
 
     max_overshoot = 0.0
     max_abs_dev = 0.0
-    sum_sq_dev = 0.0
-    count = 0
+    sum_weighted_sq = 0.0
+    total_weight = 0.0
 
     (score_start..score_end).each do |date|
       next unless reading_day?(date)
@@ -293,7 +296,6 @@ class ReadingListScheduler
       next if budget <= 0
 
       projected = load_profile[date]
-      count += 1
 
       over = projected - budget - CEILING_TOLERANCE
       max_overshoot = over if over > 0 && over > max_overshoot
@@ -301,11 +303,17 @@ class ReadingListScheduler
       dev = (projected - budget).abs
       max_abs_dev = dev if dev > max_abs_dev
 
-      sum_sq_dev += (projected - budget) ** 2
+      # Front-loading: early dates weighted ~2x, late dates ~1x.
+      # Valleys drift toward the end of the timeline where books
+      # naturally thin out, rather than appearing at the start.
+      remaining = (score_end - date).to_i
+      weight = 1.0 + remaining.to_f / timeline_span
+      sum_weighted_sq += (projected - budget) ** 2 * weight
+      total_weight += weight
     end
 
-    mean_sq_dev = count > 0 ? sum_sq_dev / count : 0.0
-    [max_overshoot, max_abs_dev, mean_sq_dev]
+    weighted_mean_sq = total_weight > 0 ? sum_weighted_sq / total_weight : 0.0
+    [max_overshoot, max_abs_dev, weighted_mean_sq]
   end
 
   def fits_concurrency_in_state?(state, start_date, end_date)
