@@ -1,8 +1,15 @@
 class ApplicationController < ActionController::Base
   before_action :redirect_to_onboarding
+  before_action :lazy_daily_reflow
   helper_method :current_active_session
 
   private
+
+  def lazy_daily_reflow
+    return unless user_signed_in?
+    return if devise_controller?
+    DailyReflow.new(current_user).reflow_if_stale!
+  end
 
   def redirect_to_onboarding
     return unless user_signed_in?
