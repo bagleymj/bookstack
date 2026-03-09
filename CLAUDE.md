@@ -73,11 +73,19 @@ bin/rails console
 
 ### Scheduler Design (ReadingListScheduler)
 
-The scheduler uses a **fixed logical tier system** to place books into week-count buckets. **Do NOT replace this with computed durations, target-share-based end dates, or any approach that removes the tier concept.** The tiers are:
+The scheduler implements **heijunka (production leveling) for books**. The
+full design is documented in [`SCHEDULING.md`](SCHEDULING.md) — read it
+before making any changes to scheduling logic.
 
-`[:week, :two_weeks, :four_weeks, :twelve_weeks, :twenty_six_weeks, :fifty_two_weeks]`
+**Key invariants (see SCHEDULING.md for details):**
 
-All tiers snap to Monday boundaries. Tiers are tried shortest-first: a book goes into the shortest tier where it fits under the daily budget ceiling (+ 10 min tolerance). Short books land in week tiers; long books escalate to longer tiers at a lower daily clip, padding the schedule. Stacking is a natural outcome of the ceiling math, not a goal in itself.
+1. **Pace is the constraint.** The user's pace target (e.g. 50 books/year) drives everything. The daily reading budget is derived from the pace target — never the reverse.
+2. **Daily load is leveled.** The scheduler selects tiers to minimize variance in daily reading time across the timeline — no spikes, no valleys.
+3. **Throughput is verified.** After placement, the scheduler must confirm that projected completions match the pace target. An unverified schedule is a bug.
+4. **Recovery is rate-based, never spike-based.** Deficits from missed reading are spread evenly over remaining time, never crammed into a catch-up period.
+5. **The max daily budget is a hard ceiling.** If pace requires more reading than the user allows, surface the conflict — don't silently over-schedule.
+
+**Tier system**: Books are placed into fixed-duration tiers (1w, 2w, 3w, 4w, 6w, 12w, 26w, 52w) that snap to Monday boundaries. Tiers serve psychological purposes (predictable rhythms, parallel variety) and are a core design element — **do NOT replace tiers with arbitrary-duration placements.**
 
 ### Key Patterns
 
