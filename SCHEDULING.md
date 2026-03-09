@@ -68,6 +68,8 @@ steady and matches the pace target.
 | **Max budget** | User-set ceiling on daily reading time (the system will never schedule above this) |
 | **Deficit/surplus** | Gap between expected and actual completions at any point in time |
 | **Tier promotion** | Moving a book to a longer tier when it can't complete in its current tier without spiking |
+| **Work cell** | The current week's committed books — fixed from Monday to Sunday, no mid-week changes |
+| **Ad-hoc session** | Reading logged against a book not currently on the pipeline; counts toward future scheduling |
 
 ## The Five Invariants
 
@@ -119,14 +121,35 @@ adapts automatically and continuously.
 
 These are non-negotiable rules that the scheduler must always obey:
 
-### Monday starts
+### Monday starts (strategic) / Weekly commitment (tactical)
 
-Books may only begin on Mondays. This is a routing constraint on the
-conveyor belt — entry points are fixed at Monday boundaries. Tier durations
-are measured in whole weeks from the start Monday. This constraint exists
-for psychological consistency ("I start new books on Mondays") and does not
-affect the leveling algorithm — it simply restricts the set of valid start
-dates.
+The Monday rule operates at two levels:
+
+**Strategic (planning):** When the scheduler places a book from the queue
+into the pipeline, it always starts on a Monday. Tier durations are
+measured in whole weeks from that Monday. The pipeline chart shows clean,
+week-aligned blocks. This exists for psychological consistency and does not
+affect the leveling algorithm — it simply restricts the set of valid
+planned start dates.
+
+**Tactical (execution):** The books assigned for the current week are a
+**committed work cell**. The user has those books physically on hand. The
+system does not swap books mid-week, add new books mid-week, or change
+which books are active before the next Monday. Within the week:
+
+- **Over-reading** is banked: pages read ahead reduce future quotas for
+  that book. If the user finishes a book early, the completion is recorded
+  but no new book enters until the next Monday. The remaining days of the
+  week simply have less total reading (the belt runs lighter).
+- **Under-reading** redistributes within the week: remaining pages spread
+  across remaining days for that book. If by week's end the book can't
+  catch up without spiking, tier promotion kicks in on Monday.
+- **New books only enter on Mondays**, after the system has absorbed the
+  previous week's actuals and re-leveled the pipeline.
+
+This means the pipeline re-levels weekly at the Monday boundary, not
+mid-week. The daily reflow (Invariant 5) adjusts quotas within the current
+week's committed books, but does not change which books are active.
 
 ### Book commitment
 
@@ -139,20 +162,25 @@ The system may **adjust** a committed book (promote it to a longer tier,
 adjust its daily share) but will never abandon it or swap it out without
 explicit user action.
 
-### Automatic daily reflow
+### Automatic reflow (daily quotas, weekly pipeline)
 
-The scheduler must produce correct quotas for today based on everything
-that actually happened through yesterday. This means:
+The system reflows at two cadences:
 
-- If the user read more than planned yesterday, today's quotas ease off
-- If the user read less, today's quotas absorb the difference (spread
-  across all active books, not dumped on one)
-- If a book was completed, the next queued book enters on the next Monday
-- If a book fell behind within its tier, the remaining pages redistribute
-  across remaining days in the tier
+**Daily (within the week):** Today's quotas reflect everything that
+happened through yesterday. If the user read more than planned, today's
+quotas for that book ease off. If they read less, remaining pages
+redistribute across remaining days in the week. This happens automatically
+— no manual "redistribute" button, no "catch up" action.
 
-No manual "redistribute" button. No "catch up" action. The system
-continuously reflects reality.
+**Weekly (Monday boundary):** The full pipeline re-levels. The scheduler
+measures actuals on the cumulative curve, recomputes the daily budget,
+checks tier viability for all active books (promoting if needed), pulls
+queued books into newly available slots, and regenerates quotas for the
+coming week. This is when the strategic decisions happen — new books enter,
+tiers adjust, the budget shifts.
+
+The user never needs to intervene. The system continuously reflects
+reality.
 
 ## Algorithm
 
@@ -260,29 +288,43 @@ tier span.
 
 ## Continuous Reflow
 
-The scheduler doesn't just run at planning time — it runs continuously
-in response to real-world events. Every run re-evaluates the entire
-pipeline based on current reality.
+The scheduler operates at two cadences: **daily** (lightweight, within the
+committed week) and **weekly** (full re-level at Monday boundaries).
 
-### Daily reflow cycle
+### Daily reflow (within the week)
 
-Each day (or whenever reading activity is recorded), the system:
+Each day, the system adjusts quotas for the current week's committed books:
 
 1. **Observes**: What was actually read yesterday? Which quotas were met,
    exceeded, or missed?
-2. **Measures**: Where does the user stand on the cumulative production
-   curve? What's the current deficit/surplus?
-3. **Adjusts budget**: Recomputes the daily budget from remaining books
-   and remaining days.
-4. **Redistributes within tiers**: For each active book, redistributes
-   its remaining pages across its remaining days. If the user read ahead
-   in one book, that book's daily share drops. If they fell behind, it
+2. **Redistributes within each book**: For each active book, redistributes
+   its remaining pages across remaining days in the current tier. If the
+   user read ahead, that book's daily share drops. If they fell behind, it
    nudges up — but only within what the leveled budget allows.
-5. **Checks tier viability**: Can each active book still complete within
-   its assigned tier at a sustainable daily share? (See "Tier promotion"
-   below.)
-6. **Regenerates today's quotas**: The user sees fresh assignments that
-   reflect all of yesterday's reality.
+3. **Regenerates today's quotas**: The user sees fresh assignments that
+   reflect yesterday's reality.
+
+Daily reflow does **not** change which books are active, add new books,
+or promote tiers. It only adjusts page quotas within the current week's
+committed work cell.
+
+### Weekly reflow (Monday boundary)
+
+On Monday (or whenever the scheduler runs after a week boundary), the
+full pipeline re-levels:
+
+1. **Measures**: Where does the user stand on the cumulative production
+   curve? What's the current deficit/surplus?
+2. **Adjusts budget**: Recomputes the daily budget from remaining books
+   and remaining days.
+3. **Checks tier viability**: Can each active book still complete within
+   its assigned tier at a sustainable daily share? Promotes if not.
+4. **Fills open slots**: If a book completed last week or a promotion
+   freed capacity, pulls the next queued book into the pipeline.
+5. **Re-levels the timeline**: Adjusts tier assignments for unstarted
+   books to minimize load variance.
+6. **Generates the coming week's quotas**: Fresh daily assignments for
+   all active books.
 
 ### Tier promotion (line rebalancing)
 
@@ -337,9 +379,13 @@ After promotion (Book A → 2-week tier):
   Total: 45 min/day (leveled)
 ```
 
-Backfill only happens if:
+Backfill only happens at the **Monday boundary** (weekly reflow), because:
+- The current week's books are a committed work cell — no mid-week changes
+- The user needs to have the book physically on hand
+- Backfill requires a full re-level to maintain load consistency
+
+Backfill conditions:
 - There are queued books available
-- The backfill book starts on a Monday (honoring the start constraint)
 - Adding the book doesn't cause a spike elsewhere in the timeline
 - The leveling math supports it
 
@@ -411,6 +457,32 @@ It promotes the book to a 2-week tier, redistributes its pages at a
 comfortable daily rate, and may backfill a short book into the freed
 capacity. The daily budget stays level. The pace target stays on track.
 
+### Spontaneous reading (ad-hoc sessions)
+
+The user picks up a book that's further down the queue — not currently
+scheduled — and reads 50 pages on a Sunday afternoon. This is real
+progress and the system should honor it.
+
+**How it works**: The user logs an ad-hoc reading session against any book
+in their collection, regardless of whether it's currently on the pipeline.
+The pages are recorded. When the scheduler next runs (Monday reflow):
+
+- The book now has fewer remaining pages
+- When it eventually enters the pipeline, it gets a shorter tier or lower
+  daily share than it would have otherwise
+- If enough pages were read ad-hoc, the book might skip straight to a
+  1-week tier or even be mostly done before it's "officially" scheduled
+
+**What it does NOT do**:
+- Does not pull the book into the current week (weekly commitment stands)
+- Does not change the queue order (the book stays at its position)
+- Does not count as a "completion" until the book is actually finished
+- Does not affect the current week's quotas for other books
+
+Ad-hoc sessions are the system's way of absorbing spontaneous reading
+without disrupting the leveled plan. The work counts, the schedule adjusts,
+but the weekly commitment remains stable.
+
 ## Tier System
 
 Tiers are preserved for psychological reasons (see CLAUDE.md). They provide:
@@ -477,20 +549,31 @@ Three modes (unchanged from current):
   on the pipeline. The system may promote its tier but will never remove it
   without explicit user action.
 
+- **Does not change the work cell mid-week.** The books committed for the
+  current week are fixed. No new books enter, no books are swapped out.
+  Adjustments to quotas happen within the committed set. Pipeline changes
+  happen at the Monday boundary.
+
 ## Triggers
 
-The scheduler runs on any of these events:
-- Reading session recorded (pages read)
-- New day begins (daily reflow)
+### Daily reflow triggers (lightweight, within-week adjustment)
+- Reading session recorded (adjusts quotas for remaining days this week)
+- New day begins (regenerates today's quotas from yesterday's actuals)
+- Book completed mid-week (records completion; no new book enters until Monday)
+
+### Weekly reflow triggers (full re-level at Monday boundary)
+- Monday boundary crossed (primary trigger)
 - Book added to reading list
 - Reading list reordered
-- Book completed or abandoned
+- Book completed or abandoned (queues a full re-level on next Monday)
 - Goal manually rescheduled (drag on pipeline)
 - Goal deleted
 - User changes pace target or reading preferences
+- Ad-hoc reading session recorded (flags book for re-evaluation on Monday)
 
-Every run executes the full algorithm: measure actuals → compute budget →
-level-load → verify throughput → generate quotas.
+Weekly reflow executes the full algorithm: measure actuals → compute
+budget → check tier viability → fill open slots → level-load → verify
+throughput → generate quotas.
 
 ## Key Metrics to Surface
 
@@ -542,3 +625,12 @@ These metrics should be available in the UI (pipeline view, dashboard):
 8. **Promote, don't spike.** When a book can't complete in its tier at
    the leveled daily budget, promote it to the next tier. Never increase
    its daily share beyond what the budget allows.
+
+9. **Respect the weekly work cell.** Never change which books are active
+   mid-week. Daily reflow adjusts quotas within the committed set;
+   pipeline changes (new books, promotions, backfills) happen at Monday
+   boundaries only.
+
+10. **Honor ad-hoc reading.** Pages read against any book count toward
+    that book's progress and affect future scheduling. But ad-hoc sessions
+    never disrupt the current week's committed work cell.
