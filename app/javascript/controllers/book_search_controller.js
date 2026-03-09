@@ -47,11 +47,19 @@ export default class extends Controller {
 
   showEditSearch() {
     if (this.hasEditToggleTarget) this.editToggleTarget.classList.add("hidden")
+
+    // If we have a work key, skip straight to editions — no search box needed
+    if (this.workKeyValue) {
+      this.showCurrentEditions()
+      return
+    }
+
+    // No work key — fall back to the full search bar
     if (this.hasEditSearchTarget) this.editSearchTarget.classList.remove("hidden")
-    // Re-bind keyboard handler now that input is visible
     if (this.hasInputTarget) {
       this.inputTarget.removeEventListener("keydown", this.boundKeydown)
       this.inputTarget.addEventListener("keydown", this.boundKeydown)
+      this.inputTarget.focus()
     }
   }
 
@@ -64,6 +72,8 @@ export default class extends Controller {
 
   showCurrentEditions() {
     if (!this.workKeyValue) return
+    // Show the container (for the results dropdown) but keep the search input hidden
+    if (this.hasEditSearchTarget) this.editSearchTarget.classList.remove("hidden")
     // Create a minimal work object to fetch editions directly
     const work = {
       key: this.workKeyValue,
@@ -518,6 +528,12 @@ export default class extends Controller {
   }
 
   showWorksView() {
+    // In edit mode with a work key, there's no works list to go back to — just close
+    if (this.modeValue === "edit" && this.workKeyValue) {
+      this.hideEditSearch()
+      return
+    }
+
     this.viewMode = "works"
     this.selectedWork = null
     if (this.lastResults.length > 0) {

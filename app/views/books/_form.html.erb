@@ -45,40 +45,35 @@
       </button>
     </div>
 
-    <!-- Search bar (hidden until "Change edition" is clicked) -->
+    <!-- Edition search panel (hidden until "Change edition" is clicked) -->
     <div data-book-search-target="editSearch" class="hidden">
-      <div class="relative">
-        <label class="block text-sm font-medium text-gray-700 mb-1">Search for a different edition</label>
+      <% unless book.open_library_work_key.present? %>
+        <!-- Full search bar — only shown when no work key (can't jump to editions directly) -->
         <div class="relative">
-          <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-            <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-            </svg>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Search for a different edition</label>
+          <div class="relative">
+            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+              <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+              </svg>
+            </div>
+            <input type="text"
+                   data-book-search-target="input"
+                   data-action="input->book-search#search"
+                   class="block w-full rounded-lg border-gray-300 pl-10 pr-4 py-3 text-base shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                   placeholder="Search by title, author, or ISBN...">
           </div>
-          <input type="text"
-                 data-book-search-target="input"
-                 data-action="input->book-search#search"
-                 class="block w-full rounded-lg border-gray-300 pl-10 pr-4 py-3 text-base shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                 placeholder="Search by title, author, or ISBN...">
         </div>
+      <% end %>
 
-        <!-- Search Results Dropdown -->
+      <!-- Editions dropdown (populated by JS) -->
+      <div class="relative">
         <div data-book-search-target="results"
              class="hidden absolute z-20 mt-1 w-full bg-white rounded-lg shadow-lg border border-gray-200 max-h-96 overflow-y-auto">
         </div>
       </div>
 
-      <!-- Quick editions link (shown when work key is available) -->
-      <% if book.open_library_work_key.present? %>
-        <button type="button" data-action="book-search#showCurrentEditions" class="mt-2 inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-500 transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
-          </svg>
-          Show other editions of this work
-        </button>
-      <% end %>
-
-      <button type="button" data-action="book-search#hideEditSearch" class="mt-2 ml-4 text-sm text-gray-500 hover:text-gray-700 transition-colors">
+      <button type="button" data-action="book-search#hideEditSearch" class="mt-2 text-sm text-gray-500 hover:text-gray-700 transition-colors">
         Cancel
       </button>
     </div>
