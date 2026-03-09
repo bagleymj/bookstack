@@ -52,6 +52,9 @@ class DashboardController < ApplicationController
 
     # Reading pace progress
     @reading_pace_progress = current_user.reading_pace_progress
+
+    # Heijunka metrics (derived budget, pace status, etc.)
+    @heijunka = ReadingListScheduler.new(current_user).metrics
   end
 
   private

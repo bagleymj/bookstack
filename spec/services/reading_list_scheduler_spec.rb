@@ -93,12 +93,10 @@ RSpec.describe ReadingListScheduler do
       expect(user.reading_goals.active.count).to eq(0)
     end
 
-    it "does nothing with minutes_per_day pace type" do
-      user.update!(reading_pace_type: "minutes_per_day", reading_pace_value: 60)
-      create_queued_book(pages: 300, position: 1)
-      schedule!
-
-      expect(user.reading_goals.active.count).to eq(0)
+    it "rejects minutes_per_day as an invalid pace type" do
+      expect {
+        user.update!(reading_pace_type: "minutes_per_day", reading_pace_value: 60)
+      }.to raise_error(ActiveRecord::RecordInvalid)
     end
 
     it "works with books_per_month pace type" do
@@ -375,6 +373,65 @@ RSpec.describe ReadingListScheduler do
       end
 
       expect(second_run).to eq(first_run)
+    end
+  end
+
+  # ─── Metrics ────────────────────────────────────────────────────
+
+  describe "#metrics" do
+    it "returns default metrics when no pace is set" do
+      user.update!(reading_pace_type: nil, reading_pace_value: nil)
+      metrics = ReadingListScheduler.new(user).metrics
+
+      expect(metrics[:pace_status]).to be_nil
+      expect(metrics[:derived_budget]).to eq(0)
+      expect(metrics[:pace_target]).to eq(0)
+    end
+
+    it "returns derived budget and pace status with active pace" do
+      create_queued_book(pages: 300, position: 1)
+      metrics = ReadingListScheduler.new(user).metrics
+
+      expect(metrics[:pace_target]).to eq(50)
+      expect(metrics[:derived_budget]).to be > 0
+      expect(metrics[:pace_status]).to be_a(String)
+    end
+
+    it "reports queue warning when not enough books are queued" do
+      # Only 1 book queued, pace target is 50/year
+      create_queued_book(pages: 300, position: 1)
+      metrics = ReadingListScheduler.new(user).metrics
+
+      expect(metrics[:queue_warning]).to include("books")
+    end
+
+    it "reports no queue warning when projected completions meet pace" do
+      pace_start = user.reading_pace_set_on
+      pace_window_end = pace_start + 365
+
+      # Create enough completed + scheduled goals to meet pace target of 50
+      # Spread them throughout the pace window
+      50.times do |i|
+        book = create(:book, user: user, last_page: 100, title: "Book #{i}")
+        completion_date = pace_start + ((i + 1) * 7)
+        next if completion_date > pace_window_end
+        create(:reading_goal, user: user, book: book, status: :active,
+               started_on: completion_date - 7, target_completion_date: completion_date,
+               auto_scheduled: true, position: i + 1)
+      end
+
+      metrics = ReadingListScheduler.new(user).metrics
+      expect(metrics[:queue_warning]).to be_nil
+    end
+
+    it "is read-only — does not modify any goals" do
+      create_queued_book(pages: 300, position: 1)
+      goal = user.reading_goals.first
+
+      ReadingListScheduler.new(user).metrics
+
+      goal.reload
+      expect(goal.status).to eq("queued")
     end
   end
 end

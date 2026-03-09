@@ -13,6 +13,24 @@ RSpec.describe "API V1 Profile", type: :request do
       expect(json_response["profile"]["default_words_per_page"]).to eq(user.default_words_per_page)
       expect(json_response["profile"]).to have_key("stats")
     end
+
+    it "includes pace and concurrency fields" do
+      user.update!(reading_pace_type: "books_per_year", reading_pace_value: 50, concurrency_limit: 3)
+      get "/api/v1/profile", headers: headers
+
+      profile = json_response["profile"]
+      expect(profile["reading_pace_type"]).to eq("books_per_year")
+      expect(profile["reading_pace_value"]).to eq(50)
+      expect(profile["reading_pace_label"]).to eq("books/year")
+      expect(profile["concurrency_limit"]).to eq(3)
+      expect(profile["derived_daily_minutes"]).to be_a(Integer)
+    end
+
+    it "returns nil concurrency_limit when not set" do
+      get "/api/v1/profile", headers: headers
+
+      expect(json_response["profile"]["concurrency_limit"]).to be_nil
+    end
   end
 
   describe "PATCH /api/v1/profile" do
@@ -24,6 +42,33 @@ RSpec.describe "API V1 Profile", type: :request do
       expect(response).to have_http_status(:ok)
       expect(json_response["profile"]["name"]).to eq("Updated Name")
       expect(json_response["profile"]["default_words_per_page"]).to eq(300)
+    end
+
+    it "updates concurrency_limit" do
+      patch "/api/v1/profile", params: {
+        profile: { concurrency_limit: 5 }
+      }, headers: headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json_response["profile"]["concurrency_limit"]).to eq(5)
+    end
+
+    it "updates pace fields" do
+      patch "/api/v1/profile", params: {
+        profile: { reading_pace_type: "books_per_month", reading_pace_value: 4 }
+      }, headers: headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json_response["profile"]["reading_pace_type"]).to eq("books_per_month")
+      expect(json_response["profile"]["reading_pace_value"]).to eq(4)
+    end
+
+    it "rejects minutes_per_day pace type" do
+      patch "/api/v1/profile", params: {
+        profile: { reading_pace_type: "minutes_per_day", reading_pace_value: 30 }
+      }, headers: headers, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
     end
 
     it "returns errors for invalid update" do

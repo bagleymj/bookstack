@@ -14,6 +14,34 @@ class ReadingListScheduler
     @user = user
   end
 
+  def metrics
+    return default_metrics unless throughput_pace?
+
+    measure_actuals!
+    budget = compute_target_budget
+    target = annual_pace.round
+
+    pace_window_end = @pace_start + 365
+    scheduled_completions = @user.reading_goals
+      .where(status: [:active, :queued])
+      .where.not(target_completion_date: nil)
+      .where("target_completion_date <= ?", pace_window_end)
+      .count
+    projected = @actual_completed + scheduled_completions
+
+    queued_count = @user.reading_goals.where(status: :queued, auto_scheduled: true).count
+
+    {
+      pace_status: pace_status_label(target),
+      deficit: @deficit.round(1),
+      derived_budget: budget.round,
+      projected_completions: projected,
+      pace_target: target,
+      queue_depth: queued_count,
+      queue_warning: queue_warning(queued_count, target, projected)
+    }
+  end
+
   def schedule!
     return unless throughput_pace?
 
@@ -428,5 +456,28 @@ class ReadingListScheduler
 
   def effective_concurrency_limit
     @user.concurrency_limit || @user.max_concurrent_books
+  end
+
+  # ─── Metrics Helpers ────────────────────────────────────────────
+
+  def default_metrics
+    { pace_status: nil, deficit: 0, derived_budget: 0,
+      projected_completions: 0, pace_target: 0, queue_depth: 0, queue_warning: nil }
+  end
+
+  def pace_status_label(target)
+    return "on pace" if @deficit.abs < 0.5
+    behind = @deficit.round
+    if behind > 0
+      "#{behind} #{'book'.pluralize(behind)} behind"
+    else
+      "#{behind.abs} #{'book'.pluralize(behind.abs)} ahead"
+    end
+  end
+
+  def queue_warning(queued_count, target, projected)
+    shortfall = target - projected
+    return nil if shortfall <= 0
+    "Add #{shortfall}+ books to maintain your pace"
   end
 end

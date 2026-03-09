@@ -9,13 +9,16 @@ module Api
                             .ordered_by_start
                             .includes(:book, :daily_quotas)
 
+        scheduler = ReadingListScheduler.new(current_user)
+
         render json: {
           pipeline: {
             start_date: goals.minimum(:started_on) || Date.current,
             end_date: goals.maximum(:target_completion_date) || 3.months.from_now.to_date
           },
           goals: goals.map(&:as_pipeline_data),
-          includes_weekends: current_user.includes_weekends?
+          includes_weekends: current_user.includes_weekends?,
+          heijunka: scheduler.metrics
         }
       end
 

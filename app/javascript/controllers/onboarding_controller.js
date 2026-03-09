@@ -39,16 +39,6 @@ export default class extends Controller {
         { value: 3, label: "3", sub: "" }
       ]
     },
-    minutes_per_day: {
-      label: "How many minutes per day?",
-      unit: "minutes per day",
-      daysInPeriod: null,
-      presets: [
-        { value: 15, label: "15 min", sub: "" },
-        { value: 30, label: "30 min", sub: "" },
-        { value: 60, label: "1 hour", sub: "" }
-      ]
-    }
   }
 
   connect() {
@@ -114,7 +104,7 @@ export default class extends Controller {
   // -- Concurrent books --
   selectConcurrent(event) {
     const value = event.currentTarget.dataset.value
-    this.element.querySelector('[name="user[max_concurrent_books]"]').value = value
+    this.element.querySelector('[name="user[concurrency_limit]"]').value = value
     this._updatePresetButtons(event.currentTarget, "click->onboarding#selectConcurrent")
   }
 
@@ -224,19 +214,13 @@ export default class extends Controller {
     }
 
     const config = this.constructor.goalConfigs[this.selectedGoalType]
-    let dailyMinutes
-
-    if (this.selectedGoalType === "minutes_per_day") {
-      dailyMinutes = paceValue
-    } else {
-      const wpp = parseFloat(this.element.querySelector('[name="user[default_words_per_page]"]').value) || 250
-      const wpm = parseFloat(this.element.querySelector('[name="user[default_reading_speed_wpm]"]').value) || 200
-      const avgPages = 300
-      const wordsPerBook = avgPages * wpp
-      const minutesPerBook = wordsPerBook / wpm
-      const booksPerDay = paceValue / config.daysInPeriod
-      dailyMinutes = Math.ceil(minutesPerBook * booksPerDay)
-    }
+    const wpp = parseFloat(this.element.querySelector('[name="user[default_words_per_page]"]').value) || 250
+    const wpm = parseFloat(this.element.querySelector('[name="user[default_reading_speed_wpm]"]').value) || 200
+    const avgPages = 300
+    const wordsPerBook = avgPages * wpp
+    const minutesPerBook = wordsPerBook / wpm
+    const booksPerDay = paceValue / config.daysInPeriod
+    const dailyMinutes = Math.ceil(minutesPerBook * booksPerDay)
 
     this.derivedMinutesTarget.textContent = dailyMinutes
     this.derivedInfoTarget.classList.remove("hidden")

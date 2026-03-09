@@ -5,7 +5,7 @@ class ProfilesController < ApplicationController
   end
 
   def update
-    scheduling_fields = %w[max_concurrent_books weekday_reading_minutes weekend_reading_minutes weekend_mode]
+    scheduling_fields = %w[concurrency_limit weekend_reading_minutes weekend_mode reading_pace_type reading_pace_value]
     old_values = current_user.attributes.slice(*scheduling_fields)
 
     cleaned_params = profile_params
@@ -13,16 +13,13 @@ class ProfilesController < ApplicationController
       cleaned_params = cleaned_params.merge(reading_pace_type: nil, reading_pace_value: nil, reading_pace_set_on: nil)
     elsif current_user.reading_pace_type != cleaned_params[:reading_pace_type] ||
           current_user.reading_pace_value.to_s != cleaned_params[:reading_pace_value]
-      # Reset the pace start date when the pace changes
       cleaned_params = cleaned_params.merge(reading_pace_set_on: Date.current)
     end
 
     if current_user.update(cleaned_params)
-      current_user.apply_pace_to_schedule! if current_user.reading_pace_type.present?
       new_values = current_user.reload.attributes.slice(*scheduling_fields)
-      if old_values != new_values
-        ReadingListScheduler.new(current_user).schedule! if current_user.reading_goals.where(auto_scheduled: true).exists?
-        regenerate_future_quotas!
+      if old_values != new_values && current_user.reading_goals.where(auto_scheduled: true).exists?
+        ReadingListScheduler.new(current_user).schedule!
       end
       redirect_to profile_path, notice: "Profile updated."
     else
@@ -32,22 +29,12 @@ class ProfilesController < ApplicationController
 
   private
 
-  def regenerate_future_quotas!
-    current_user.reading_goals.active.includes(:book, :daily_quotas).find_each do |goal|
-      from = [Date.current, goal.started_on].compact.max
-      goal.daily_quotas.where("date >= ?", from).destroy_all
-      goal.daily_quotas.reload
-      ProfileAwareQuotaCalculator.new(goal, current_user).generate_quotas!(from_date: from)
-    end
-  end
-
   def profile_params
     params.require(:user).permit(
       :name,
       :default_words_per_page,
       :default_reading_speed_wpm,
-      :max_concurrent_books,
-      :weekday_reading_minutes,
+      :concurrency_limit,
       :weekend_reading_minutes,
       :weekend_mode,
       :reading_pace_type,
