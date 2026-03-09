@@ -65,7 +65,7 @@ steady and matches the pace target.
 | **Tier** | A fixed calendar duration for a book (1w, 2w, 3w, 4w, 6w, 12w, 26w, 52w) |
 | **Daily share** | A single book's contribution to the daily budget (book_minutes / reading_days) |
 | **WIP** | Work in progress — number of books being read concurrently |
-| **Max budget** | User-set ceiling on daily reading time (the system will never schedule above this) |
+| **Derived budget** | The daily reading minutes computed by the scheduler from pace + book mix (an output, not an input) |
 | **Deficit/surplus** | Gap between expected and actual completions at any point in time |
 | **Tier promotion** | Moving a book to a longer tier when it can't complete in its current tier without spiking |
 | **Work cell** | The current week's committed books — fixed from Monday to Sunday, no mid-week changes |
@@ -269,10 +269,10 @@ The deficit is inherently captured: if the user is behind,
 ahead, fewer books remain → budget eases off. This is **rate-based
 recovery** — correction proportional to error, spread over remaining time.
 
-**Ceiling guard**: The adjusted daily budget is capped at
-`user.max_daily_reading_minutes`. If the required budget exceeds the
-ceiling, the system surfaces the conflict rather than silently
-over-scheduling.
+There is no ceiling on the derived budget. The budget is what the pace
+and book mix require. If the user wants a lower daily commitment, they
+adjust their pace target or choose shorter books. The controls are the
+inputs (pace, book selection), not the output (budget).
 
 ### Phase 3: Level-load tier assignment
 
@@ -316,8 +316,7 @@ If `projected_completions < pace_target`:
 - The pipeline is under-loaded. Either:
   - The queue doesn't have enough books (surface to user: "Add N more books
     to maintain your pace")
-  - The daily budget needs to increase (check against max ceiling)
-  - Some books could move to shorter tiers
+  - Some books could move to shorter tiers (increases daily budget)
 
 If `projected_completions > pace_target + tolerance`:
 - The pipeline is over-loaded. Ease off — move some books to longer tiers
@@ -487,8 +486,9 @@ The user gets ahead — surplus grows. On the next scheduler run:
 When several large books are added:
 - Average book minutes in the rolling window increases
 - The daily budget adjusts upward accordingly
-- But the **max budget ceiling** prevents unsustainable spikes
-- If the math doesn't work within the ceiling, the user is notified
+- The system surfaces the new budget so the user can see the impact:
+  "Adding these books increases your daily reading to 75 min/day.
+  Lower your pace or remove books to reduce it."
 
 ### Queue running low
 
@@ -581,10 +581,6 @@ Three modes (unchanged from current):
   spread evenly across remaining time. The system will never schedule a
   "catch-up week."
 
-- **Does not exceed the max budget ceiling.** If the math requires more
-  daily reading than the user allows, the system surfaces the conflict
-  rather than silently over-scheduling.
-
 - **Does not schedule books the user hasn't queued.** It can *recommend*
   adding books, but never auto-adds.
 
@@ -630,7 +626,7 @@ These metrics should be available in the UI (pipeline view, dashboard):
 2. **Current daily budget**: "42 min/day" (derived, not set)
 3. **Projected completions**: "47 of 50 books by Dec 31" (if queue is short)
 4. **Queue depth warning**: "Add 3+ books to maintain pace through August"
-5. **Budget vs. ceiling**: "Your pace requires 45 min/day (max: 60)"
+5. **Budget impact**: "Your pace requires 45 min/day with your current book mix"
 
 ## Relationship to Existing Code
 
@@ -639,7 +635,7 @@ These metrics should be available in the UI (pipeline view, dashboard):
 | `ReadingListScheduler` | The core engine — must implement all phases |
 | `ProfileAwareQuotaCalculator` | Phase 5 — distributes pages within a placed tier (unchanged) |
 | `QuotaRedistributor` | Subsumed by continuous reflow — may be simplified or removed |
-| `User#reading_pace_*` | Source of pace target and max budget |
+| `User#reading_pace_*` | Source of pace target |
 | `User#derive_daily_minutes_from_pace` | Replaced by Phase 2 budget computation |
 | `ReadingGoal` | Carries placement result (started_on, target_completion_date) |
 | Pipeline chart (D3) | Visualizes the leveled load + cumulative curve |
@@ -662,8 +658,8 @@ These metrics should be available in the UI (pipeline view, dashboard):
 5. **Respect committed books.** Any book with reading sessions stays on
    the pipeline. The system may promote its tier but never removes it.
 
-6. **Surface conflicts, don't hide them.** If pace is unachievable within
-   the max budget, tell the user. Don't silently under-deliver.
+6. **Surface impacts, don't hide them.** Always show the derived daily
+   budget so the user understands the cost of their pace + book mix.
 
 7. **No manual intervention required.** The system must adapt to reality
    automatically. If a feature requires the user to manually trigger
@@ -692,51 +688,44 @@ These metrics should be available in the UI (pipeline view, dashboard):
 
 ## Implementation Gaps
 
-Known gaps that must be resolved before coding begins:
+Status of all identified gaps:
 
-### Gap 1: `max_daily_reading_minutes` column
+### ~~Gap 1: `max_daily_reading_minutes` column~~ — ELIMINATED
 
-The max budget ceiling (`user.max_daily_reading_minutes`) is referenced
-throughout this design but **does not exist** as a database column. The
-current schema has `daily_reading_minutes` (the user's self-set budget)
-but not a hard ceiling for the scheduler.
-
-**Decision needed:** Add a `max_daily_reading_minutes` column to `users`,
-or repurpose `daily_reading_minutes` as the ceiling once pace becomes the
-primary input (since the old budget-first field becomes the ceiling in
-the new model).
+No max ceiling needed. The budget is derived from pace + book mix. The
+user controls it by adjusting pace or choosing different books. Adding
+a ceiling would re-introduce the budget-first thinking we're eliminating.
 
 ### Gap 2: `concurrency_limit` column
 
-The concurrency hard cap is referenced in this design but does not exist
-in the schema. Needs a `concurrency_limit` integer column on `users`
-(nullable = no limit).
+The concurrency hard cap does not exist in the schema. Needs a
+`concurrency_limit` integer column on `users` (nullable = no limit).
 
-### Gap 3: Phase 3 variance minimization — objective function
+### ~~Gap 3: Phase 3 objective function~~ — RESOLVED
 
-The tier selection criterion says "minimize variance in daily load" but
-doesn't specify the exact objective function. Options:
+**Decision: Minimax.** Minimize the maximum daily load across any day in
+the book's span. This directly prevents spikes, which is the core
+heijunka guarantee. When multiple tiers produce similar max loads, prefer
+the shorter tier (higher throughput per slot).
 
-- **Minimize standard deviation** of daily loads across the book's span
-- **Minimize max deviation** from the target daily budget (minimax)
-- **Minimize sum of squared deviations** from the mean daily load
+### ~~Gap 4: Phase 4 feedback loop~~ — RESOLVED
 
-Minimax (minimize the worst day) is probably the right choice for
-heijunka, since it directly prevents spikes. But this needs to be tested
-against real book data to confirm it produces sensible placements.
+**Algorithm:**
 
-### Gap 4: Phase 4 feedback loop — iteration procedure
-
-Phase 4 says "if projected completions don't match pace, adjust." But
-the adjustment procedure isn't defined:
-
-- How many iterations are allowed?
-- In what order are adjustments attempted (shorten tiers first? lengthen
-  tiers? adjust budget?)?
-- What's the termination condition (exact match? within tolerance band?)?
-- What happens if no valid schedule exists within the max budget ceiling?
-
-This needs a concrete algorithm, not just a description of the goal.
+1. After Phase 3 places all books, count projected completions within
+   the pace window.
+2. **Tolerance band**: ±2 books (or ±5%, whichever is larger).
+3. **If under-loaded** (too few completions):
+   a. Try shortening the longest-tier unstarted book by one tier step.
+   b. Re-check. Repeat up to 5 iterations.
+   c. If still under: surface "Add N more books to maintain pace."
+4. **If over-loaded** (too many completions):
+   a. Try lengthening the shortest-tier unstarted book by one tier step.
+   b. Re-check. Repeat up to 5 iterations.
+   c. If still over: accept (being ahead of pace is fine).
+5. **Termination**: Stop when within tolerance or after 5 iterations.
+6. Never adjust committed books (those with reading sessions). Only
+   modify unstarted/queued placements.
 
 ### ~~Gap 5: Daily reflow execution mechanism~~ — RESOLVED
 
@@ -749,13 +738,11 @@ No background jobs, no cron. Simple timestamp check on access. Stale
 data between visits is a non-issue — the user only sees quotas when
 they open the app, which is exactly when reflow fires.
 
-### Gap 6: `minutes_per_day` deprecation plan
+### ~~Gap 6: `minutes_per_day` deprecation~~ — RESOLVED
 
-Users may currently have `pace_type: "minutes_per_day"`. The migration
-path needs to be defined:
-
-- Show a one-time prompt: "Set a book target instead of daily minutes"?
-- Auto-convert based on historical data (e.g. if they read 60 min/day
-  and average 7 days per book, suggest 52 books/year)?
-- Keep the old value as the max budget ceiling during conversion?
-- Block scheduler execution until a throughput pace is set?
+**Decision: Heijunka-first.** Remove `minutes_per_day` as a pace option.
+Only throughput-based pace types are supported: `books_per_year`,
+`books_per_month`, `books_per_week`. The old `daily_reading_minutes`
+field on users is no longer used by the scheduler (budget is derived).
+It can remain in the schema for now as a legacy field but the scheduler
+ignores it.
