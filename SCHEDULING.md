@@ -97,12 +97,14 @@ causality (budget → pace instead of pace → budget). Existing users with
 `minutes_per_day` should be migrated or prompted to set a throughput
 target. The system must not allow new pace targets in minutes_per_day.
 
-### Invariant 2: Daily load is leveled
+### Invariant 2: Daily load is leveled (asymmetrically)
 
 The sum of daily shares across all concurrent books should be approximately
-equal on every reading day. Peaks and valleys violate heijunka. The
-scheduler selects tiers to **minimize variance** in daily load across the
-timeline, not to find the shortest tier that fits under a ceiling.
+equal on every reading day — and should track the derived budget. Peaks
+and valleys both violate heijunka. The scheduler uses **asymmetric
+scoring**: overshoot beyond a 10-minute tolerance is always worse than
+undershoot. Among no-overshoot placements, the shallowest valley wins.
+This fills load UP to budget without exceeding it.
 
 ### Invariant 3: Throughput is verified
 
@@ -282,34 +284,55 @@ and book mix require. If the user wants a lower daily commitment, they
 adjust their pace target or choose shorter books. The controls are the
 inputs (pace, book selection), not the output (budget).
 
-### Phase 3: Level-load tier assignment
+### Phase 3: Level-load tier assignment (asymmetric heijunka scoring)
 
-For each book in the queue, select the tier that produces the most
-uniform daily load across the timeline. This replaces the current
-"shortest tier under ceiling" heuristic.
+For each book in the queue, find the Monday+tier combo that produces the
+most level daily load across the timeline. The algorithm searches across
+multiple Mondays (not just the first available) to naturally stagger book
+starts and fill gaps.
 
-**Selection criterion**: For each candidate tier, compute what the daily
-load profile would look like if the book were placed there. Choose the
-tier that minimizes the variance (or max deviation) of daily load across
-all reading days in the book's span.
+**Asymmetric scoring**: Each candidate placement is scored as
+`[max_overshoot, max_undershoot]`, compared lexicographically:
+
+- **Overshoot** = how far daily load exceeds `budget + CEILING_TOLERANCE`
+  (10 min). Any overshoot is worse than any valley — a placement that
+  spikes the load always loses to one that underfills it.
+- **Undershoot** = how far daily load falls below budget. Among
+  no-overshoot placements, the shallowest valley wins (closest to budget
+  = most level load).
+- Load within the tolerance band (`budget` to `budget + 10 min`) scores
+  as perfect — no overshoot, no undershoot.
+
+This is true heijunka: the algorithm fills UP to the budget (minimizing
+valleys) without exceeding it (preventing spikes). The tolerance band
+provides flexibility for rounding without penalizing near-budget load.
 
 ```
 for each book in queue order:
-  for each tier (shortest first):
-    candidate_share = book_minutes / reading_days_in_tier
-    projected_load  = existing_daily_loads + candidate_share (for each day in span)
-    variance        = measure deviation from target daily budget
-    track best (tier, start_date) that minimizes variance
+  best_score = [∞, ∞]
+  for each Monday in horizon:
+    for each tier (shortest first):
+      candidate_share = book_minutes / reading_days_in_tier
+      for each day in span:
+        projected = existing_load + candidate_share
+        overshoot = max(0, projected - budget - tolerance)
+        undershoot = max(0, budget - projected)
+      score = [max_overshoot, max_undershoot]
+      if score < best_score: track this placement
 
-  place book in best tier
+    break if perfect score [0, 0]
+    break if good placement found and searched well past its span
+
+  place book in best Monday+tier combo
   update daily load profile
 ```
 
-**Monday snapping**: All tiers still snap to Monday boundaries. This is
-preserved for psychological consistency.
+**Monday snapping**: All tiers snap to Monday boundaries for
+psychological consistency.
 
-**Tie-breaking**: When multiple tiers produce similar variance, prefer
-the shorter tier (higher throughput per slot).
+**Multi-Monday search**: Books naturally stagger across different start
+dates. Book B may start on Monday 2 to fill the gap after Book A
+finishes, rather than stacking on Monday 1 and overshooting.
 
 ### Phase 4: Verify throughput
 
@@ -556,12 +579,14 @@ Tiers are preserved for psychological reasons (see CLAUDE.md). They provide:
 
 ### Tier selection criterion (restated)
 
-**Old**: "Shortest tier where daily_share ≤ budget + tolerance"
-**New**: "Tier that minimizes daily load variance across the timeline"
+**Criterion**: "Monday+tier combo with lowest asymmetric score
+`[max_overshoot, max_undershoot]`"
 
-Both prefer shorter tiers when possible (higher throughput), but the new
-criterion explicitly optimizes for load consistency rather than just
-fitting under a ceiling.
+Overshoot beyond `budget + 10 min` is penalized first (lexicographic
+comparison), so the algorithm never creates spikes. Among spike-free
+options, it minimizes valleys — filling load up to budget. Multi-Monday
+search means books stagger naturally across start dates rather than all
+piling into the first Monday.
 
 ## Weekend Handling
 
@@ -714,10 +739,12 @@ The concurrency hard cap does not exist in the schema. Needs a
 
 ### ~~Gap 3: Phase 3 objective function~~ — RESOLVED
 
-**Decision: Minimax.** Minimize the maximum daily load across any day in
-the book's span. This directly prevents spikes, which is the core
-heijunka guarantee. When multiple tiers produce similar max loads, prefer
-the shorter tier (higher throughput per slot).
+**Decision: Asymmetric heijunka scoring.** Score each placement as
+`[max_overshoot, max_undershoot]` with lexicographic comparison. Overshoot
+beyond `budget + 10 min` tolerance always loses. Among no-overshoot
+placements, minimize the deepest valley. Multi-Monday search staggers
+book starts across the timeline. This fills load UP to budget (true
+heijunka) without creating spikes.
 
 ### ~~Gap 4: Phase 4 feedback loop~~ — RESOLVED
 

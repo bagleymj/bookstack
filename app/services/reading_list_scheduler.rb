@@ -7,6 +7,7 @@ class ReadingListScheduler
   }.freeze
   MAX_ADJUSTMENT_ITERATIONS = 5
   PLACEMENT_HORIZON_WEEKS = 104
+  CEILING_TOLERANCE = 10  # minutes above budget before penalizing overshoot
 
   attr_reader :target_budget, :deficit
 
@@ -161,42 +162,56 @@ class ReadingListScheduler
 
   # ─── Phase 3 ────────────────────────────────────────────────────
 
+  # Find the Monday+tier combo that produces the most level daily load.
+  # Uses asymmetric scoring: overshoot beyond ceiling is always worse than
+  # any valley. Among no-overshoot placements, the shallowest valley wins
+  # (closest to budget = most level). Searches across Mondays to naturally
+  # stagger starts instead of front-loading everything.
   def find_leveled_placement(book_minutes)
-    each_monday do |monday|
-      best_at_monday = nil
-      best_dev = Float::INFINITY
+    best = nil
+    best_score = [Float::INFINITY, Float::INFINITY]
 
+    each_monday do |monday|
       TIERS.each do |tier|
         end_date = calendar_end(monday, tier)
         daily_share = compute_weekday_share(book_minutes, monday, end_date)
         next if daily_share <= 0
         next unless fits_concurrency?(monday, end_date)
 
-        max_dev = compute_max_deviation(monday, end_date, daily_share)
-
-        if max_dev < best_dev
-          best_dev = max_dev
-          best_at_monday = { start: monday, end: end_date, share: daily_share, tier: tier }
+        score = placement_score(monday, end_date, daily_share)
+        if (score <=> best_score) < 0
+          best_score = score
+          best = { start: monday, end: end_date, share: daily_share, tier: tier }
         end
       end
 
-      return best_at_monday if best_at_monday
+      # Perfect fit — no overshoot, no valley
+      break if best_score[0] == 0.0 && best_score[1] == 0.0
+      # Good placement found and we've checked well past its span
+      break if best && best_score[0] == 0.0 && monday > best[:start] + 8 * 7
     end
 
-    default_placement(book_minutes)
+    best || default_placement(book_minutes)
   end
 
-  def compute_max_deviation(start_date, end_date, daily_share)
-    max_dev = 0.0
+  # Score a candidate placement as [max_overshoot, max_undershoot].
+  # Ruby's lexicographic array comparison ensures any overshoot beyond
+  # ceiling tolerance is worse than any valley. Within the tolerance band
+  # (budget..budget+CEILING_TOLERANCE), load is scored as perfect.
+  def placement_score(start_date, end_date, daily_share)
+    max_overshoot = 0.0
+    max_undershoot = 0.0
     (start_date..end_date).each do |date|
       next unless reading_day?(date)
       budget = budget_for_date(date)
       next if budget <= 0
       projected = @load_profile[date] + share_for_date(daily_share, date)
-      deviation = (projected - budget).abs
-      max_dev = deviation if deviation > max_dev
+      over = projected - budget - CEILING_TOLERANCE
+      max_overshoot = over if over > 0 && over > max_overshoot
+      under = budget - projected
+      max_undershoot = under if under > 0 && under > max_undershoot
     end
-    max_dev
+    [max_overshoot, max_undershoot]
   end
 
   def compute_weekday_share(book_minutes, start_date, end_date)
@@ -326,9 +341,22 @@ class ReadingListScheduler
       new_end = calendar_end(goal.started_on, shorter_tier)
       new_share = compute_weekday_share(entry[:book_minutes], goal.started_on, new_end)
       next if new_share <= 0
-      next unless fits_concurrency_for_adjustment?(goal.started_on, new_end, entry)
 
+      # Remove old placement to evaluate the new one cleanly
       remove_range_from_profiles(goal.started_on, goal.target_completion_date, entry[:placement][:share])
+
+      unless fits_concurrency_for_adjustment?(goal.started_on, new_end, entry)
+        add_range_to_profiles(goal.started_on, goal.target_completion_date, entry[:placement][:share])
+        next
+      end
+
+      # Don't shorten if it would exceed the ceiling (preserve leveling)
+      score = placement_score(goal.started_on, new_end, new_share)
+      if score[0] > 0
+        add_range_to_profiles(goal.started_on, goal.target_completion_date, entry[:placement][:share])
+        next
+      end
+
       goal.update!(target_completion_date: new_end)
       new_placement = { start: goal.started_on, end: new_end, share: new_share, tier: shorter_tier }
       add_range_to_profiles(goal.started_on, new_end, new_share)
