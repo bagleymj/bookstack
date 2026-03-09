@@ -5,62 +5,83 @@ class ReadingListScheduler
     week: 1, two_weeks: 2, three_weeks: 3, four_weeks: 4, six_weeks: 6,
     twelve_weeks: 12, twenty_six_weeks: 26, fifty_two_weeks: 52
   }.freeze
-  BUDGET_TOLERANCE = 10 # ±10 minutes from target share
+  MAX_ADJUSTMENT_ITERATIONS = 5
+  PLACEMENT_HORIZON_WEEKS = 104
+
+  attr_reader :target_budget, :deficit
 
   def initialize(user)
     @user = user
-    @max_concurrent = user.max_concurrent_books
   end
 
   def schedule!
-    @daily_budget = compute_daily_budget
+    return unless throughput_pace?
+
+    # Phase 1: Measure actuals
+    measure_actuals!
+
+    # Phase 2: Compute derived daily budget
+    @target_budget = compute_target_budget
+    return if @target_budget <= 0
     compute_weekend_budgets
 
-    timeline = build_locked_timeline
-    schedulable = gather_schedulable_goals
+    # Phase 3: Level-load tier assignment
+    @load_profile = Hash.new(0.0)
+    @concurrent_count = Hash.new(0)
 
-    schedulable.each do |goal|
-      book_minutes = estimate_total_minutes(goal.book)
-      placement = find_best_placement(timeline, book_minutes)
+    locked_goals.each { |goal| add_goal_to_profiles(goal) }
 
-      goal.update!(
-        started_on: placement[:start],
-        target_completion_date: placement[:end],
-        status: :active
-      )
+    @placements = []
+    gather_schedulable_goals.each do |goal|
+      book_minutes = estimate_remaining_minutes(goal.book)
+      placement = find_leveled_placement(book_minutes)
+      next unless placement
 
-      goal.daily_quotas.destroy_all
-      goal.daily_quotas.reload
-      ProfileAwareQuotaCalculator.new(goal, @user).generate_quotas!
-
-      timeline << { start: placement[:start], end: placement[:end], share: placement[:share] }
+      apply_placement!(goal, placement)
+      add_placement_to_profiles(placement)
+      @placements << { goal: goal, placement: placement, tier: placement[:tier], book_minutes: book_minutes }
     end
+
+    # Phase 4: Verify throughput
+    verify_throughput!
+
+    # Phase 5: Generate quotas
+    @placements.each { |entry| generate_quotas_for!(entry[:goal]) }
   end
 
   private
 
-  # --- Budget ---
+  # ─── Phase 1 ────────────────────────────────────────────────────
 
-  # Build a rolling window of exactly `annual_pace` books (e.g. 50 for
-  # 50 books/year). Fill reading-list-first (by queue position), then
-  # backfill with most recently completed books. This keeps the budget
-  # predictive — it always represents one full pace cycle — without
-  # being dragged down by distant history or spiked by outliers.
-  def compute_daily_budget
-    window_size = annual_pace.round
-    return fallback_daily_budget if window_size <= 0
-
-    window = build_budget_window(window_size)
-    return fallback_daily_budget if window.empty?
-
-    avg_minutes = window.sum { |book| full_book_minutes(book) }.to_f / window.size
-    books_per_day = annual_pace / 365.0
-    avg_minutes * books_per_day
+  def measure_actuals!
+    @pace_start = @user.reading_pace_set_on || Date.current.beginning_of_year
+    @days_elapsed = [(Date.current - @pace_start).to_i, 1].max
+    @days_remaining = [365 - (Date.current - @pace_start).to_i, 1].max
+    @actual_completed = count_completed_since(@pace_start)
+    @deficit = (annual_pace * @days_elapsed / 365.0) - @actual_completed
   end
 
-  # Reading list books first (up to window_size), then recent completions.
+  def count_completed_since(date)
+    @user.books
+         .where(status: :completed)
+         .where("completed_at >= ?", date.beginning_of_day)
+         .count
+  end
+
+  # ─── Phase 2 ────────────────────────────────────────────────────
+
+  def compute_target_budget
+    books_remaining = [annual_pace - @actual_completed, 0].max
+    return 0 if books_remaining <= 0
+
+    window = build_budget_window([annual_pace.round, 1].max)
+    return 0 if window.empty?
+
+    avg_minutes = window.sum { |book| full_book_minutes(book) }.to_f / window.size
+    (books_remaining * avg_minutes) / @days_remaining
+  end
+
   def build_budget_window(window_size)
-    # Reading list books in queue order (limited to window)
     list_books = @user.reading_goals
                       .where(auto_scheduled: true)
                       .where.not(position: nil)
@@ -72,45 +93,35 @@ class ReadingListScheduler
 
     return list_books if list_books.size >= window_size
 
-    # Backfill with most recently completed books
-    remaining = window_size - list_books.size
+    remaining_slots = window_size - list_books.size
     exclude_ids = list_books.map(&:id)
     completed = @user.books
-                     .finished
+                     .where(status: :completed)
                      .where.not(id: exclude_ids)
                      .order(completed_at: :desc)
-                     .limit(remaining)
+                     .limit(remaining_slots)
+                     .to_a
 
-    list_books + completed.to_a
+    list_books + completed
   end
 
-  # Full reading time for a book (total words, not remaining).
-  # Used for budget calculation so completed books aren't counted as 0.
   def full_book_minutes(book)
     wpm = book.actual_wpm || (@user.effective_reading_speed * book.difficulty_modifier)
     return 60 if wpm.zero?
     (book.total_words.to_f / wpm).ceil
   end
 
-  def fallback_daily_budget
-    @user.derive_daily_minutes_from_pace || default_daily_minutes
-  end
-
-  def default_daily_minutes
-    (@user.weekday_reading_minutes * 5 + @user.weekend_budget * 2) / 7.0
-  end
-
   def compute_weekend_budgets
-    weekly_total = @daily_budget * 7
+    weekly_total = @target_budget * 7
     case @user.weekend_mode
     when "skip"
       @weekday_budget = weekly_total / 5.0
-      @weekend_budget = 0
+      @weekend_budget = 0.0
     when "same"
       @weekday_budget = @weekend_budget = weekly_total / 7.0
     when "capped"
       @weekend_budget = @user.weekend_reading_minutes.to_f
-      @weekday_budget = (weekly_total - @weekend_budget * 2) / 5.0
+      @weekday_budget = [(weekly_total - @weekend_budget * 2) / 5.0, 0.0].max
     end
   end
 
@@ -118,44 +129,46 @@ class ReadingListScheduler
     date.on_weekend? ? @weekend_budget : @weekday_budget
   end
 
-  def share_for_date(share, date)
-    return share unless @user.capped? && date.on_weekend? && @weekday_budget > 0
-    share * (@weekend_budget / @weekday_budget)
-  end
+  # ─── Phase 3 ────────────────────────────────────────────────────
 
-  # --- Placement ---
-
-  # For each Monday boundary, try tiers shortest-first. The first
-  # tier that fits under the ceiling wins. This ensures books stretch
-  # to fill headroom rather than skipping to a later week.
-  def find_best_placement(timeline, book_minutes)
-    date = next_reading_day(Date.current)
-
-    50.times do
-      snapped = next_reading_day(snap_to_monday(date))
+  def find_leveled_placement(book_minutes)
+    each_monday do |monday|
+      best_at_monday = nil
+      best_dev = Float::INFINITY
 
       TIERS.each do |tier|
-        end_date = calendar_end(snapped, tier)
-        reading_days = count_reading_days(snapped, end_date)
-        next if reading_days <= 0
+        end_date = calendar_end(monday, tier)
+        daily_share = compute_weekday_share(book_minutes, monday, end_date)
+        next if daily_share <= 0
+        next unless fits_concurrency?(monday, end_date)
 
-        daily_share = compute_weekday_share(book_minutes, snapped, end_date)
+        max_dev = compute_max_deviation(monday, end_date, daily_share)
 
-        if fits_across_span?(timeline, snapped, end_date, daily_share)
-          return { start: snapped, end: end_date, share: daily_share }
+        if max_dev < best_dev
+          best_dev = max_dev
+          best_at_monday = { start: monday, end: end_date, share: daily_share, tier: tier }
         end
       end
 
-      date = snapped + 7
+      return best_at_monday if best_at_monday
     end
 
     default_placement(book_minutes)
   end
 
-  # Compute the weekday share for a book across a date span.
-  # For skip/same modes, this is simply book_minutes / reading_days.
-  # For capped mode, weekend days count as fractional days based on the
-  # ratio of weekend_budget to weekday_budget.
+  def compute_max_deviation(start_date, end_date, daily_share)
+    max_dev = 0.0
+    (start_date..end_date).each do |date|
+      next unless reading_day?(date)
+      budget = budget_for_date(date)
+      next if budget <= 0
+      projected = @load_profile[date] + share_for_date(daily_share, date)
+      deviation = (projected - budget).abs
+      max_dev = deviation if deviation > max_dev
+    end
+    max_dev
+  end
+
   def compute_weekday_share(book_minutes, start_date, end_date)
     if @user.capped? && @weekday_budget > 0
       ratio = @weekend_budget / @weekday_budget
@@ -169,59 +182,184 @@ class ReadingListScheduler
     end
   end
 
-  # Check viability (concurrent cap + budget not met) and fit (ceiling)
-  # at every transition point across the book's entire span.
-  def fits_across_span?(timeline, snapped, end_date, daily_share)
-    check_dates = [snapped]
-    timeline.each do |e|
-      check_dates << e[:start] if e[:start] > snapped && e[:start] <= end_date
-      check_dates << (e[:end] + 1) if e[:end] >= snapped && e[:end] < end_date
+  def share_for_date(share, date)
+    return share unless @user.capped? && date.on_weekend? && @weekday_budget > 0
+    share * (@weekend_budget / @weekday_budget)
+  end
+
+  def fits_concurrency?(start_date, end_date)
+    limit = effective_concurrency_limit
+    return true unless limit
+    (start_date..end_date).each do |date|
+      next unless reading_day?(date)
+      return false if @concurrent_count[date] >= limit
     end
+    true
+  end
 
-    check_dates.uniq.all? do |date|
-      next true if !@user.includes_weekends? && date.on_weekend?
-
-      date_budget = budget_for_date(date)
-      date_share = share_for_date(daily_share, date)
-
-      active = timeline.select { |e| e[:start] <= date && e[:end] >= date }
-      active_total = active.sum { |e| share_for_date(e[:share], date) }
-      active.size < @max_concurrent &&
-        active_total < date_budget &&
-        active_total + date_share <= date_budget + BUDGET_TOLERANCE
+  def each_monday
+    monday = snap_to_monday(Date.current)
+    PLACEMENT_HORIZON_WEEKS.times do
+      yield monday
+      monday += 7
     end
   end
 
-  # Fallback when no tier fits after exhausting openings.
+  def apply_placement!(goal, placement)
+    goal.update!(
+      started_on: placement[:start],
+      target_completion_date: placement[:end],
+      status: :active
+    )
+  end
+
+  def add_goal_to_profiles(goal)
+    return unless goal.started_on && goal.target_completion_date
+    start = [goal.started_on, Date.current].max
+    book_minutes = estimate_remaining_minutes(goal.book)
+    daily_share = compute_weekday_share(book_minutes, start, goal.target_completion_date)
+    return if daily_share <= 0
+    add_range_to_profiles(start, goal.target_completion_date, daily_share)
+  end
+
+  def add_placement_to_profiles(placement)
+    add_range_to_profiles(placement[:start], placement[:end], placement[:share])
+  end
+
+  def add_range_to_profiles(start_date, end_date, daily_share)
+    (start_date..end_date).each do |date|
+      next unless reading_day?(date)
+      @load_profile[date] += share_for_date(daily_share, date)
+      @concurrent_count[date] += 1
+    end
+  end
+
+  def remove_range_from_profiles(start_date, end_date, daily_share)
+    (start_date..end_date).each do |date|
+      next unless reading_day?(date)
+      @load_profile[date] -= share_for_date(daily_share, date)
+      @concurrent_count[date] -= 1
+    end
+  end
+
   def default_placement(book_minutes)
-    start = next_reading_day(Date.current)
-    share = @weekday_budget / [@max_concurrent, 1].max.to_f
-    share = [share, 1].max
-    reading_days = [(book_minutes.to_f / share).ceil, 1].max
-    end_date = advance_by_reading_days(start, reading_days)
-    { start: start, end: end_date, share: share }
+    start = snap_to_monday(Date.current)
+    tier = TIERS.last
+    end_date = calendar_end(start, tier)
+    share = compute_weekday_share(book_minutes, start, end_date)
+    { start: start, end: end_date, share: share, tier: tier }
   end
 
-  # --- Snap & calendar ---
+  # ─── Phase 4 ────────────────────────────────────────────────────
 
-  def snap_to_monday(date)
-    next_weekday(date, :monday)
-  end
+  def verify_throughput!
+    target = annual_pace.round
+    tolerance = [2, (target * 0.05).ceil].max
 
-  def calendar_end(start_date, tier)
-    start_date + (TIER_WEEKS[tier] * 7) - 1
-  end
+    MAX_ADJUSTMENT_ITERATIONS.times do
+      projected = count_projected_completions
+      break if projected.between?(target - tolerance, target + tolerance)
 
-  # --- Timeline ---
-
-  def build_locked_timeline
-    locked_goals.map do |goal|
-      book_minutes = estimate_total_minutes(goal.book)
-      daily_share = compute_weekday_share(book_minutes, goal.started_on, goal.target_completion_date)
-
-      { start: goal.started_on, end: goal.target_completion_date, share: daily_share }
+      if projected < target - tolerance
+        break unless try_shorten_longest_tier!
+      else
+        break unless try_lengthen_shortest_tier!
+      end
     end
   end
+
+  def count_projected_completions
+    pace_window_end = @pace_start + 365
+
+    locked_count = locked_goals.count do |g|
+      g.target_completion_date && g.target_completion_date <= pace_window_end
+    end
+
+    placed_count = @placements.count do |entry|
+      entry[:goal].target_completion_date <= pace_window_end
+    end
+
+    @actual_completed + locked_count + placed_count
+  end
+
+  def try_shorten_longest_tier!
+    adjustable = @placements
+      .reject { |p| p[:goal].has_reading_sessions? }
+      .sort_by { |p| -TIER_WEEKS[p[:tier]] }
+
+    adjustable.each do |entry|
+      tier_idx = TIERS.index(entry[:tier])
+      next if tier_idx.nil? || tier_idx == 0
+
+      shorter_tier = TIERS[tier_idx - 1]
+      goal = entry[:goal]
+      new_end = calendar_end(goal.started_on, shorter_tier)
+      new_share = compute_weekday_share(entry[:book_minutes], goal.started_on, new_end)
+      next if new_share <= 0
+      next unless fits_concurrency_for_adjustment?(goal.started_on, new_end, entry)
+
+      remove_range_from_profiles(goal.started_on, goal.target_completion_date, entry[:placement][:share])
+      goal.update!(target_completion_date: new_end)
+      new_placement = { start: goal.started_on, end: new_end, share: new_share, tier: shorter_tier }
+      add_range_to_profiles(goal.started_on, new_end, new_share)
+
+      entry[:tier] = shorter_tier
+      entry[:placement] = new_placement
+      return true
+    end
+
+    false
+  end
+
+  def try_lengthen_shortest_tier!
+    adjustable = @placements
+      .reject { |p| p[:goal].has_reading_sessions? }
+      .sort_by { |p| TIER_WEEKS[p[:tier]] }
+
+    adjustable.each do |entry|
+      tier_idx = TIERS.index(entry[:tier])
+      next if tier_idx.nil? || tier_idx >= TIERS.length - 1
+
+      longer_tier = TIERS[tier_idx + 1]
+      goal = entry[:goal]
+      new_end = calendar_end(goal.started_on, longer_tier)
+      new_share = compute_weekday_share(entry[:book_minutes], goal.started_on, new_end)
+      next if new_share <= 0
+
+      remove_range_from_profiles(goal.started_on, goal.target_completion_date, entry[:placement][:share])
+      goal.update!(target_completion_date: new_end)
+      new_placement = { start: goal.started_on, end: new_end, share: new_share, tier: longer_tier }
+      add_range_to_profiles(goal.started_on, new_end, new_share)
+
+      entry[:tier] = longer_tier
+      entry[:placement] = new_placement
+      return true
+    end
+
+    false
+  end
+
+  # Concurrency check that excludes the entry being adjusted (it's temporarily removed)
+  def fits_concurrency_for_adjustment?(start_date, end_date, excluded_entry)
+    limit = effective_concurrency_limit
+    return true unless limit
+    (start_date..end_date).each do |date|
+      next unless reading_day?(date)
+      # The excluded entry was already removed from profiles, so current count is accurate
+      return false if @concurrent_count[date] >= limit
+    end
+    true
+  end
+
+  # ─── Phase 5 ────────────────────────────────────────────────────
+
+  def generate_quotas_for!(goal)
+    goal.daily_quotas.destroy_all
+    goal.daily_quotas.reload
+    ProfileAwareQuotaCalculator.new(goal, @user).generate_quotas!
+  end
+
+  # ─── Timeline & Goals ──────────────────────────────────────────
 
   def locked_goals
     @locked_goals ||= @user.reading_goals
@@ -230,8 +368,6 @@ class ReadingListScheduler
                             .includes(:book)
                             .select(&:has_reading_sessions?)
   end
-
-  # --- Schedulable goals ---
 
   def gather_schedulable_goals
     @user.reading_goals
@@ -243,11 +379,19 @@ class ReadingListScheduler
          .reject { |g| g.active? && g.has_reading_sessions? }
   end
 
-  # --- Day counting ---
+  # ─── Calendar Helpers ──────────────────────────────────────────
+
+  def snap_to_monday(date)
+    return date if date.monday?
+    date + ((1 - date.wday) % 7)
+  end
+
+  def calendar_end(start_date, tier)
+    start_date + (TIER_WEEKS[tier] * 7) - 1
+  end
 
   def count_reading_days(start_date, end_date)
     return 0 if start_date.nil? || end_date.nil?
-
     if @user.includes_weekends?
       (end_date - start_date).to_i + 1
     else
@@ -255,54 +399,34 @@ class ReadingListScheduler
     end
   end
 
-  def advance_by_reading_days(start_date, reading_days)
-    return start_date if reading_days <= 1
-
-    if @user.includes_weekends?
-      start_date + reading_days - 1
-    else
-      date = start_date
-      counted = 0
-      loop do
-        counted += 1 unless date.on_weekend?
-        return date if counted >= reading_days
-        date += 1
-      end
-    end
+  def reading_day?(date)
+    @user.includes_weekends? || !date.on_weekend?
   end
 
-  # --- Date helpers ---
+  # ─── Estimates ─────────────────────────────────────────────────
 
-  def next_weekday(date, day)
-    target_wday = day == :monday ? 1 : 6
-    return date if date.wday == target_wday
-    days_ahead = (target_wday - date.wday) % 7
-    date + days_ahead
-  end
-
-  def next_reading_day(date)
-    return date if @user.includes_weekends?
-    date += 1 while date.on_weekend?
-    date
-  end
-
-  # --- Estimates ---
-
-  def estimate_total_minutes(book)
+  def estimate_remaining_minutes(book)
     wpm = book.actual_wpm || (@user.effective_reading_speed * book.difficulty_modifier)
     return 60 if wpm.zero?
-
     (book.remaining_words.to_f / wpm).ceil
   end
 
   def annual_pace
     return 0 unless @user.reading_pace_value&.positive?
-
     case @user.reading_pace_type
     when "books_per_year"  then @user.reading_pace_value.to_f
     when "books_per_month" then @user.reading_pace_value * 12.0
     when "books_per_week"  then @user.reading_pace_value * 52.0
     else 0
     end
+  end
+
+  def throughput_pace?
+    %w[books_per_year books_per_month books_per_week].include?(@user.reading_pace_type) &&
+      @user.reading_pace_value&.positive?
+  end
+
+  def effective_concurrency_limit
+    @user.concurrency_limit || @user.max_concurrent_books
   end
 end
