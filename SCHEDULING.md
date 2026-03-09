@@ -738,20 +738,16 @@ the adjustment procedure isn't defined:
 
 This needs a concrete algorithm, not just a description of the goal.
 
-### Gap 5: Daily reflow execution mechanism
+### ~~Gap 5: Daily reflow execution mechanism~~ — RESOLVED
 
-The design says daily reflow happens automatically, but doesn't specify
-**how**:
+**Decision: Lazy reflow.** The first time a user accesses the app each
+day, the system checks whether quotas are stale (last generated before
+today). If so, it reflows the current week's quotas based on all activity
+through the previous day, then serves fresh assignments.
 
-- **Lazy (on request):** Recompute quotas when the user opens the app or
-  requests today's reading. Simple, but stale data between visits.
-- **Background job:** A scheduled job (e.g. Sidekiq cron) runs at
-  midnight to regenerate quotas. Always fresh, but adds infrastructure.
-- **Hybrid:** Lazy computation with a timestamp check — if quotas are
-  stale (last generated before today), regenerate on access.
-
-The hybrid approach is likely best for a single-user app, but this needs
-to be decided before implementation.
+No background jobs, no cron. Simple timestamp check on access. Stale
+data between visits is a non-issue — the user only sees quotas when
+they open the app, which is exactly when reflow fires.
 
 ### Gap 6: `minutes_per_day` deprecation plan
 
