@@ -325,15 +325,15 @@ class ReadingListScheduler
     { start: start, end: end_date, share: share, tier: tier }
   end
 
-  # ─── Phase 3.5: Refinement ──────────────────────────────────────
+  # ─── Phase 3.5: Heijunka Refinement ────────────────────────────
 
-  # Re-place each book with full timeline visibility. Greedy Phase 3
-  # picks structurally correct tiers (share ≈ budget/concurrency) but
-  # can't optimize start dates because the full load profile doesn't
-  # exist yet. Refinement shifts start dates and optionally extends
-  # tiers by one step to fill gaps. It NEVER shortens tiers — that
-  # would undo the greedy phase's fair-share tier selection and
-  # concentrate load on valleys, creating new valleys elsewhere.
+  # Start-date refinement with full-timeline minimax scoring.
+  # Greedy Phase 3 places books one-at-a-time and can't see the full
+  # picture. Refinement removes each book and tries ALL Mondays at
+  # the SAME tier, picking the start date that minimizes the deepest
+  # valley across the full timeline. Tiers are NOT changed — books
+  # keep their budget-pace daily shares. The pipeline stays compact
+  # and the queue supplies more books when these finish.
   MAX_REFINEMENT_PASSES = 3
 
   def refine_placements!
@@ -358,39 +358,61 @@ class ReadingListScheduler
 
         apply_placement!(goal, new_placement)
         add_placement_to_profiles(new_placement)
-        changed = true if new_placement[:tier] != old_tier || new_placement[:start] != old_start
+        changed = true if new_placement[:start] != old_start
         entry[:placement] = new_placement
-        entry[:tier] = new_placement[:tier]
       end
       break unless changed
     end
   end
 
-  # Search same tier at all Mondays. Refinement only shifts start dates;
-  # tier changes are NOT allowed because they cascade: extending one book
-  # shifts load, which triggers other books to move, creating gaps.
-  # The greedy phase already picks structurally correct tiers via headroom.
-  def find_refined_placement(book_minutes, original_tier)
-    candidate_tiers = [original_tier]
+  # Minimax scoring: [max_overshoot, max_undershoot] on the full
+  # timeline. Overshoot beyond tolerance is always worst. Among
+  # no-overshoot placements, the one with the shallowest valley wins.
+  def leveling_score(start_date, end_date, daily_share)
+    max_overshoot = 0.0
+    max_undershoot = 0.0
 
+    score_start = snap_to_monday(Date.current)
+    score_end = [@timeline_end, end_date].compact.max
+
+    (score_start..score_end).each do |date|
+      next unless reading_day?(date)
+      budget = budget_for_date(date)
+      next if budget <= 0
+
+      in_span = date >= start_date && date <= end_date
+      projected = @load_profile[date] + (in_span ? share_for_date(daily_share, date) : 0)
+
+      over = projected - budget - CEILING_TOLERANCE
+      max_overshoot = over if over > 0 && over > max_overshoot
+
+      under = budget - projected
+      max_undershoot = under if under > 0 && under > max_undershoot
+    end
+
+    [max_overshoot, max_undershoot]
+  end
+
+  # Search ALL Mondays at the given tier. Same-tier constraint keeps
+  # books at their budget-pace daily share — the pipeline stays wide
+  # enough to hit the annual target without diluting individual books.
+  def find_refined_placement(book_minutes, tier)
     best = nil
-    best_score = [Float::INFINITY, Float::INFINITY, Float::INFINITY]
+    best_score = [Float::INFINITY, Float::INFINITY]
 
     each_monday do |monday|
-      candidate_tiers.each do |tier|
-        end_date = calendar_end(monday, tier)
-        daily_share = compute_weekday_share(book_minutes, monday, end_date)
-        next if daily_share <= 0
-        next unless fits_concurrency?(monday, end_date)
+      end_date = calendar_end(monday, tier)
+      daily_share = compute_weekday_share(book_minutes, monday, end_date)
+      next if daily_share <= 0
+      next unless fits_concurrency?(monday, end_date)
 
-        score = greedy_score(monday, end_date, daily_share)
-        if (score <=> best_score) < 0
-          best_score = score
-          best = { start: monday, end: end_date, share: daily_share, tier: tier }
-        end
+      score = leveling_score(monday, end_date, daily_share)
+      if (score <=> best_score) < 0
+        best_score = score
+        best = { start: monday, end: end_date, share: daily_share, tier: tier }
       end
 
-      break if best_score == [0.0, 0, 0.0]
+      break if best_score == [0.0, 0.0]
       break if best && best_score[0] == 0.0 && monday > best[:start] + 8 * 7
     end
 

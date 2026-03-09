@@ -336,25 +336,30 @@ psychological consistency.
 dates based on concurrency limits. Once three books occupy a slot,
 subsequent books start at the next available Monday.
 
-### Phase 3.5: Start-date refinement
+### Phase 3.5: Start-date refinement (minimax leveling)
 
 The greedy phase picks structurally correct tiers but can't optimize
 start dates because the full load profile doesn't exist yet. Refinement
 re-evaluates each book's start date with full timeline visibility.
 
-**Scoring**: Same headroom scoring as greedy —
-`[max_overshoot, gap_days, avg_headroom]`. Since shorter tiers have
-lower headroom (higher share = more budget fill), refinement naturally
-preserves the greedy phase's tier choices.
+**Scoring**: Minimax leveling score `[max_overshoot, max_undershoot]`
+across the **full timeline**. This is the heijunka criterion: first
+avoid spikes (overshoot beyond `budget + CEILING_TOLERANCE`), then
+raise the floor (minimize the deepest valley). The greedy phase uses
+headroom scoring to pick good tiers; refinement uses minimax scoring
+to optimize start dates with global visibility.
 
 **Tier constraint**: Refinement only searches the **same tier** — no
 extensions, no shortenings. Allowing tier changes during refinement
-causes cascading displacements: extending one book shifts load, which
-triggers other books to move, creating new gaps. Start-date shifts are
-safe; tier changes are not.
+causes cascading displacements: extending one book dilutes its daily
+share, spreading load thin across the timeline instead of filling to
+budget. Books must maintain their budget-pace daily shares — the
+pipeline stays wide (enough concurrent overlap) to hit the annual
+target. When books finish at their natural pace, the queue supplies
+more.
 
 Up to 3 passes. Each pass re-places every book (remove from profile →
-search same tier at all Mondays → pick best headroom score →
+search same tier at all Mondays → pick best leveling score →
 re-add). Passes stop when no placement changes.
 
 ### Phase 4: Verify throughput
@@ -611,8 +616,10 @@ are second worst; headroom tiebreaks. Lower headroom = closer to
 budget = better. Multi-Monday search means books stagger naturally
 across start dates based on concurrency limits.
 
-**Refinement**: Same scoring, same tier only (no extensions). Shifts
-start dates to fill gaps without cascading tier changes.
+**Refinement**: Minimax scoring `[max_overshoot, max_undershoot]` on
+the full timeline, same tier only (no extensions). Shifts start dates
+to fill gaps — raising the floor of the deepest valley — without
+cascading tier changes or diluting daily shares.
 
 ## Weekend Handling
 
@@ -765,13 +772,13 @@ The concurrency hard cap does not exist in the schema. Needs a
 
 ### ~~Gap 3: Phase 3 objective function~~ — RESOLVED
 
-**Decision: Headroom-based scoring.** Both greedy and refinement score
-`[max_overshoot, gap_days, avg_headroom]` — each placement targets
-filling the budget as completely as possible on its span days. Shorter
-tiers have lower headroom (higher share per day = more budget fill),
-so the algorithm naturally front-loads the timeline. Overshoot beyond
-`budget + 15 min` tolerance always loses. Refinement holds tiers fixed
-(same tier only, no extensions) and shifts start dates to fill gaps.
+**Decision: Two-phase scoring.** Greedy Phase 3 uses headroom scoring
+`[max_overshoot, gap_days, avg_headroom]` — picks the shortest tier
+that fills the budget. Refinement Phase 3.5 uses minimax leveling
+`[max_overshoot, max_undershoot]` on the full timeline — shifts start
+dates to minimize the deepest valley. Overshoot beyond `budget + 15
+min` tolerance always loses. Refinement holds tiers fixed (same tier
+only, no extensions) to preserve budget-pace daily shares.
 
 ### ~~Gap 4: Phase 4 feedback loop~~ — RESOLVED
 
