@@ -6,6 +6,7 @@ class ReadingListScheduler
     twelve_weeks: 12, twenty_six_weeks: 26, fifty_two_weeks: 52
   }.freeze
   MAX_ADJUSTMENT_ITERATIONS = 5
+  BEAM_WIDTH = 25
   PLACEMENT_HORIZON_WEEKS = 104
   CEILING_TOLERANCE = 15  # minutes above budget before penalizing overshoot
 
@@ -56,29 +57,14 @@ class ReadingListScheduler
     return if @target_budget <= 0
     compute_weekend_budgets
 
-    # Phase 3: Level-load tier assignment
+    # Phase 3: Beam search tier assignment
     @load_profile = Hash.new(0.0)
     @concurrent_count = Hash.new(0)
     @timeline_end = nil
 
     locked_goals.each { |goal| add_goal_to_profiles(goal) }
 
-    @placements = []
-    gather_schedulable_goals.each do |goal|
-      book_minutes = estimate_remaining_minutes(goal.book)
-      placement = find_leveled_placement(book_minutes)
-      next unless placement
-
-      apply_placement!(goal, placement)
-      add_placement_to_profiles(placement)
-      @placements << { goal: goal, placement: placement, tier: placement[:tier], book_minutes: book_minutes }
-    end
-
-    # Phase 3.5: Refine placements with full timeline visibility
-    # The greedy Phase 3 places early books before the timeline exists,
-    # so they get suboptimal short tiers. Re-place each book now that
-    # the full load profile is established. Converges in 2-3 passes.
-    refine_placements!
+    @placements = beam_search_placements(gather_schedulable_goals)
 
     # Phase 4: Verify throughput
     verify_throughput!
@@ -167,80 +153,162 @@ class ReadingListScheduler
     date.on_weekend? ? @weekend_budget : @weekday_budget
   end
 
-  # ─── Phase 3 ────────────────────────────────────────────────────
+  # ─── Phase 3: Beam Search ──────────────────────────────────────
 
-  # Find the Monday+tier combo that produces the most level daily load.
-  # Uses asymmetric scoring: overshoot beyond ceiling is always worse than
-  # any valley. Among no-overshoot placements, the shallowest valley wins
-  # (closest to budget = most level). Searches across Mondays to naturally
-  # stagger starts instead of front-loading everything.
-  def find_leveled_placement(book_minutes)
-    best = nil
-    best_score = [Float::INFINITY, Float::INFINITY, Float::INFINITY]
+  def beam_search_placements(goals)
+    # Sort largest first — most constrained books get placed first
+    goals_with_minutes = goals.map { |g| [g, estimate_remaining_minutes(g.book)] }
+                              .sort_by { |_, mins| -mins }
+
+    # Initial beam: one state with only locked-goal load
+    initial_state = {
+      load_profile: @load_profile.dup,
+      concurrent_count: @concurrent_count.dup,
+      timeline_end: @timeline_end,
+      placements: []
+    }
+    beam = [initial_state]
+
+    goals_with_minutes.each do |goal, book_minutes|
+      next_beam = []
+
+      beam.each do |state|
+        candidates = enumerate_candidates(state, book_minutes)
+
+        if candidates.empty?
+          # No valid placement — use default
+          placement = default_placement(book_minutes)
+          next_beam << apply_candidate(state, goal, placement, book_minutes)
+        else
+          candidates.each do |candidate|
+            next_beam << apply_candidate(state, goal, candidate[:placement], book_minutes)
+          end
+        end
+      end
+
+      # Prune to BEAM_WIDTH best states
+      beam = next_beam.sort_by { |s| s[:score] }.first(BEAM_WIDTH)
+    end
+
+    # Winner: apply to real profiles and goals
+    best = beam.first
+    return [] unless best
+
+    @load_profile = best[:load_profile]
+    @concurrent_count = best[:concurrent_count]
+    @timeline_end = best[:timeline_end]
+
+    best[:placements].each do |entry|
+      apply_placement!(entry[:goal], entry[:placement])
+    end
+
+    best[:placements]
+  end
+
+  def enumerate_candidates(state, book_minutes)
+    candidates = []
+    best_start = nil
 
     each_monday do |monday|
       TIERS.each do |tier|
         end_date = calendar_end(monday, tier)
         daily_share = compute_weekday_share(book_minutes, monday, end_date)
         next if daily_share <= 0
-        next unless fits_concurrency?(monday, end_date)
+        next unless fits_concurrency_in_state?(state, monday, end_date)
 
-        score = greedy_score(monday, end_date, daily_share)
-        if (score <=> best_score) < 0
-          best_score = score
-          best = { start: monday, end: end_date, share: daily_share, tier: tier }
-        end
+        placement = { start: monday, end: end_date, share: daily_share, tier: tier }
+        score = score_placement(state, placement)
+        candidates << { placement: placement, score: score }
+        best_start ||= monday
       end
 
-      # Perfect fit — no overshoot, no gaps, no valley
-      break if best_score == [0.0, 0, 0.0]
-      # Good placement found and we've checked well past its span
-      break if best && best_score[0] == 0.0 && monday > best[:start] + 8 * 7
+      # Stop searching well past the best candidate's start
+      break if best_start && monday > best_start + 8 * 7
     end
 
-    best || default_placement(book_minutes)
+    candidates
   end
 
-  # Greedy Phase 3: Pick the tier that fills the budget on span days.
-  # Avg headroom = average remaining capacity (budget - projected) on
-  # span reading days. Lower headroom = closer to budget = better.
-  # This naturally favors shorter tiers (higher share per day) and
-  # front-loads the timeline: fill to 100% for as long as possible.
-  # Score: [max_overshoot, gap_days, avg_headroom]
-  def greedy_score(start_date, end_date, daily_share)
-    max_overshoot = 0.0
-    gap_days = 0
-    total_headroom = 0.0
-    span_reading_days = 0
+  def apply_candidate(state, goal, placement, book_minutes)
+    new_load = state[:load_profile].dup
+    new_conc = state[:concurrent_count].dup
 
+    (placement[:start]..placement[:end]).each do |date|
+      next unless reading_day?(date)
+      new_load[date] += share_for_date(placement[:share], date)
+      new_conc[date] += 1
+    end
+
+    new_end = [state[:timeline_end], placement[:end]].compact.max
+    new_placements = state[:placements] + [{ goal: goal, placement: placement, tier: placement[:tier], book_minutes: book_minutes }]
+
+    score = compute_state_score(new_load, new_end)
+
+    {
+      load_profile: new_load,
+      concurrent_count: new_conc,
+      timeline_end: new_end,
+      placements: new_placements,
+      score: score
+    }
+  end
+
+  def score_placement(state, placement)
     score_start = snap_to_monday(Date.current)
-    score_end = [@timeline_end, end_date].compact.max
+    score_end = [state[:timeline_end], placement[:end]].compact.max
+
+    max_overshoot = 0.0
+    max_undershoot = 0.0
 
     (score_start..score_end).each do |date|
       next unless reading_day?(date)
       budget = budget_for_date(date)
       next if budget <= 0
 
-      in_span = date >= start_date && date <= end_date
-      projected = @load_profile[date] + (in_span ? share_for_date(daily_share, date) : 0)
+      in_span = date >= placement[:start] && date <= placement[:end]
+      projected = state[:load_profile][date] + (in_span ? share_for_date(placement[:share], date) : 0)
 
-      if projected <= 0
-        gap_days += 1
-        next
-      end
+      over = projected - budget - CEILING_TOLERANCE
+      max_overshoot = over if over > 0 && over > max_overshoot
 
-      if in_span
-        over = projected - budget - CEILING_TOLERANCE
-        max_overshoot = over if over > 0 && over > max_overshoot
-
-        span_reading_days += 1
-        room = budget - projected
-        total_headroom += room if room > 0
-      end
+      under = budget - projected
+      max_undershoot = under if under > 0 && under > max_undershoot
     end
 
-    avg_headroom = span_reading_days > 0 ? total_headroom / span_reading_days : Float::INFINITY
-    [max_overshoot, gap_days, avg_headroom]
+    [max_overshoot, max_undershoot]
+  end
+
+  def compute_state_score(load_profile, timeline_end)
+    score_start = snap_to_monday(Date.current)
+    score_end = timeline_end || score_start
+
+    max_overshoot = 0.0
+    max_undershoot = 0.0
+
+    (score_start..score_end).each do |date|
+      next unless reading_day?(date)
+      budget = budget_for_date(date)
+      next if budget <= 0
+
+      projected = load_profile[date]
+      over = projected - budget - CEILING_TOLERANCE
+      max_overshoot = over if over > 0 && over > max_overshoot
+
+      under = budget - projected
+      max_undershoot = under if under > 0 && under > max_undershoot
+    end
+
+    [max_overshoot, max_undershoot]
+  end
+
+  def fits_concurrency_in_state?(state, start_date, end_date)
+    limit = effective_concurrency_limit
+    return true unless limit
+    (start_date..end_date).each do |date|
+      next unless reading_day?(date)
+      return false if state[:concurrent_count][date] >= limit
+    end
+    true
   end
 
   def compute_weekday_share(book_minutes, start_date, end_date)
@@ -259,16 +327,6 @@ class ReadingListScheduler
   def share_for_date(share, date)
     return share unless @user.capped? && date.on_weekend? && @weekday_budget > 0
     share * (@weekend_budget / @weekday_budget)
-  end
-
-  def fits_concurrency?(start_date, end_date)
-    limit = effective_concurrency_limit
-    return true unless limit
-    (start_date..end_date).each do |date|
-      next unless reading_day?(date)
-      return false if @concurrent_count[date] >= limit
-    end
-    true
   end
 
   def each_monday
@@ -296,10 +354,6 @@ class ReadingListScheduler
     add_range_to_profiles(start, goal.target_completion_date, daily_share)
   end
 
-  def add_placement_to_profiles(placement)
-    add_range_to_profiles(placement[:start], placement[:end], placement[:share])
-  end
-
   def add_range_to_profiles(start_date, end_date, daily_share)
     (start_date..end_date).each do |date|
       next unless reading_day?(date)
@@ -323,100 +377,6 @@ class ReadingListScheduler
     end_date = calendar_end(start, tier)
     share = compute_weekday_share(book_minutes, start, end_date)
     { start: start, end: end_date, share: share, tier: tier }
-  end
-
-  # ─── Phase 3.5: Heijunka Refinement ────────────────────────────
-
-  # Start-date refinement with full-timeline minimax scoring.
-  # Greedy Phase 3 places books one-at-a-time and can't see the full
-  # picture. Refinement removes each book and tries ALL Mondays at
-  # the SAME tier, picking the start date that minimizes the deepest
-  # valley across the full timeline. Tiers are NOT changed — books
-  # keep their budget-pace daily shares. The pipeline stays compact
-  # and the queue supplies more books when these finish.
-  MAX_REFINEMENT_PASSES = 3
-
-  def refine_placements!
-    MAX_REFINEMENT_PASSES.times do
-      changed = false
-      @placements.each do |entry|
-        next if entry[:goal].has_reading_sessions?
-
-        goal = entry[:goal]
-        old_start = goal.started_on
-        old_end = goal.target_completion_date
-        old_tier = entry[:tier]
-        old_share = entry[:placement][:share]
-
-        remove_range_from_profiles(old_start, old_end, old_share)
-
-        new_placement = find_refined_placement(entry[:book_minutes], old_tier)
-        unless new_placement
-          add_range_to_profiles(old_start, old_end, old_share)
-          next
-        end
-
-        apply_placement!(goal, new_placement)
-        add_placement_to_profiles(new_placement)
-        changed = true if new_placement[:start] != old_start
-        entry[:placement] = new_placement
-      end
-      break unless changed
-    end
-  end
-
-  # Minimax scoring: [max_overshoot, max_undershoot] on the full
-  # timeline. Overshoot beyond tolerance is always worst. Among
-  # no-overshoot placements, the one with the shallowest valley wins.
-  def leveling_score(start_date, end_date, daily_share)
-    max_overshoot = 0.0
-    max_undershoot = 0.0
-
-    score_start = snap_to_monday(Date.current)
-    score_end = [@timeline_end, end_date].compact.max
-
-    (score_start..score_end).each do |date|
-      next unless reading_day?(date)
-      budget = budget_for_date(date)
-      next if budget <= 0
-
-      in_span = date >= start_date && date <= end_date
-      projected = @load_profile[date] + (in_span ? share_for_date(daily_share, date) : 0)
-
-      over = projected - budget - CEILING_TOLERANCE
-      max_overshoot = over if over > 0 && over > max_overshoot
-
-      under = budget - projected
-      max_undershoot = under if under > 0 && under > max_undershoot
-    end
-
-    [max_overshoot, max_undershoot]
-  end
-
-  # Search ALL Mondays at the given tier. Same-tier constraint keeps
-  # books at their budget-pace daily share — the pipeline stays wide
-  # enough to hit the annual target without diluting individual books.
-  def find_refined_placement(book_minutes, tier)
-    best = nil
-    best_score = [Float::INFINITY, Float::INFINITY]
-
-    each_monday do |monday|
-      end_date = calendar_end(monday, tier)
-      daily_share = compute_weekday_share(book_minutes, monday, end_date)
-      next if daily_share <= 0
-      next unless fits_concurrency?(monday, end_date)
-
-      score = leveling_score(monday, end_date, daily_share)
-      if (score <=> best_score) < 0
-        best_score = score
-        best = { start: monday, end: end_date, share: daily_share, tier: tier }
-      end
-
-      break if best_score == [0.0, 0.0]
-      break if best && best_score[0] == 0.0 && monday > best[:start] + 8 * 7
-    end
-
-    best
   end
 
   # ─── Phase 4 ────────────────────────────────────────────────────
@@ -485,8 +445,7 @@ class ReadingListScheduler
       end
 
       # Don't shorten if it would exceed the ceiling (preserve leveling)
-      score = greedy_score(goal.started_on, new_end, new_share)
-      if score[0] > 0
+      if would_overshoot?(goal.started_on, new_end, new_share)
         add_range_to_profiles(goal.started_on, goal.target_completion_date, entry[:placement][:share])
         next
       end
@@ -528,6 +487,17 @@ class ReadingListScheduler
       return true
     end
 
+    false
+  end
+
+  def would_overshoot?(start_date, end_date, daily_share)
+    (start_date..end_date).each do |date|
+      next unless reading_day?(date)
+      budget = budget_for_date(date)
+      next if budget <= 0
+      projected = @load_profile[date] + share_for_date(daily_share, date)
+      return true if projected > budget + CEILING_TOLERANCE
+    end
     false
   end
 

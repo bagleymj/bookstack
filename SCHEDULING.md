@@ -286,81 +286,58 @@ and book mix require. If the user wants a lower daily commitment, they
 adjust their pace target or choose shorter books. The controls are the
 inputs (pace, book selection), not the output (budget).
 
-### Phase 3: Level-load tier assignment (headroom greedy)
+### Phase 3: Beam search tier assignment
 
-For each book in the queue, find the Monday+tier combo that fills the
-daily budget as completely as possible on the book's span days. The
-algorithm uses **headroom scoring**: lower remaining headroom on span
-days means closer to budget, which is better.
+Instead of placing books one at a time (greedy), the scheduler uses
+**beam search** to explore multiple scheduling combinations
+simultaneously. This solves the fundamental greedy limitation: early
+placements are made without knowledge of what later books need.
 
-**Greedy scoring** `[max_overshoot, gap_days, avg_headroom]`:
+**Algorithm**:
 
-- **Overshoot** = how far daily load exceeds `budget + CEILING_TOLERANCE`
-  (15 min). Any overshoot is worse than any valley — a placement that
-  spikes the load always loses to one that underfills it.
-- **Gap days** = reading days in the scheduled timeline with ZERO projected
-  load. Empty days are the worst heijunka violation.
-- **Avg headroom** = average of `max(budget - projected, 0)` across the
-  book's span reading days. This measures how much unused budget capacity
-  remains. Lower is better: a headroom of 0 means the budget is fully
-  used (or exceeded within tolerance).
+1. Sort schedulable books **largest first** (most reading minutes =
+   most constrained = placed first)
+2. Initialize beam with a single state containing only locked-goal load
+3. For each book, generate all valid `(tier, monday)` candidates for
+   each state in the beam. Score each candidate using minimax
+   `[max_overshoot, max_undershoot]` across the full timeline. Create
+   new states by applying each candidate, then prune to the top 25
+   (BEAM_WIDTH) states
+4. After all books are placed, pick the best state (lowest score) and
+   apply all its placements
 
-This naturally favors shorter tiers (higher daily share = less headroom)
-and front-loads the timeline: books pack tight against the budget ceiling
-for as long as possible, with natural taper only at the end when books
-run out.
+**Scoring**: Minimax `[max_overshoot, max_undershoot]` on the full
+timeline. Overshoot beyond `budget + CEILING_TOLERANCE` (15 min) is
+always worst. Among no-overshoot placements, the shallowest valley
+wins (closest to budget = most level). This is the heijunka criterion:
+first avoid spikes, then raise the floor.
 
 ```
-for each book in queue order:
-  best_score = [∞, ∞, ∞]
-  for each Monday in horizon:
-    for each tier (shortest first):
-      candidate_share = book_minutes / reading_days_in_tier
-      overshoot = max projected load exceeding budget + tolerance
-      gaps = count of zero-load reading days in timeline
-      headroom = avg of max(budget - projected, 0) on span days
-      score = [overshoot, gaps, headroom]
-      if score < best_score: track this placement
+beam = [{ load_profile: locked_loads, placements: [] }]
 
-    break if perfect score [0, 0, 0]
-    break if good placement found and searched well past its span
+for each book (largest first):
+  next_beam = []
+  for each state in beam:
+    for each Monday in horizon:
+      for each tier:
+        candidate_share = book_minutes / reading_days_in_tier
+        score = [max_overshoot, max_undershoot] on full timeline
+        next_beam << apply(state, candidate)
 
-  place book in best Monday+tier combo
-  update daily load profile
+      break if searched 8+ weeks past best candidate's start
+
+  beam = next_beam.sort_by(score).first(25)
+
+apply beam.first.placements
 ```
 
-**Monday snapping**: All tiers snap to Monday boundaries for
-psychological consistency.
+**Search pruning**: For each state, Mondays are only searched up to 8
+weeks past the first viable candidate's start. This keeps the search
+space manageable (~128 candidates per state per book instead of ~4,160).
 
-**Multi-Monday search**: Books naturally stagger across different start
-dates based on concurrency limits. Once three books occupy a slot,
-subsequent books start at the next available Monday.
-
-### Phase 3.5: Start-date refinement (minimax leveling)
-
-The greedy phase picks structurally correct tiers but can't optimize
-start dates because the full load profile doesn't exist yet. Refinement
-re-evaluates each book's start date with full timeline visibility.
-
-**Scoring**: Minimax leveling score `[max_overshoot, max_undershoot]`
-across the **full timeline**. This is the heijunka criterion: first
-avoid spikes (overshoot beyond `budget + CEILING_TOLERANCE`), then
-raise the floor (minimize the deepest valley). The greedy phase uses
-headroom scoring to pick good tiers; refinement uses minimax scoring
-to optimize start dates with global visibility.
-
-**Tier constraint**: Refinement only searches the **same tier** — no
-extensions, no shortenings. Allowing tier changes during refinement
-causes cascading displacements: extending one book dilutes its daily
-share, spreading load thin across the timeline instead of filling to
-budget. Books must maintain their budget-pace daily shares — the
-pipeline stays wide (enough concurrent overlap) to hit the annual
-target. When books finish at their natural pace, the queue supplies
-more.
-
-Up to 3 passes. Each pass re-places every book (remove from profile →
-search same tier at all Mondays → pick best leveling score →
-re-add). Passes stop when no placement changes.
+**No separate refinement pass needed**: Beam search explores tier+start
+combinations across all books simultaneously, finding globally better
+schedules than greedy + post-hoc refinement could achieve.
 
 ### Phase 4: Verify throughput
 
@@ -607,19 +584,11 @@ Tiers are preserved for psychological reasons (see CLAUDE.md). They provide:
 
 ### Tier selection criterion (restated)
 
-**Scoring**: "Monday+tier combo with lowest
-`[max_overshoot, gap_days, avg_headroom]`"
-
-Avg headroom picks the tier that fills the budget most completely on
-span days. Overshoot is always worst; gap days (empty reading days)
-are second worst; headroom tiebreaks. Lower headroom = closer to
-budget = better. Multi-Monday search means books stagger naturally
-across start dates based on concurrency limits.
-
-**Refinement**: Minimax scoring `[max_overshoot, max_undershoot]` on
-the full timeline, same tier only (no extensions). Shifts start dates
-to fill gaps — raising the floor of the deepest valley — without
-cascading tier changes or diluting daily shares.
+**Scoring**: Beam search uses minimax `[max_overshoot, max_undershoot]`
+on the full timeline. Overshoot beyond `budget + CEILING_TOLERANCE` is
+always worst. Among no-overshoot options, the shallowest valley wins.
+The beam width of 25 explores enough combinations to find tier+start
+pairings that level the load globally across all books.
 
 ## Weekend Handling
 
@@ -772,13 +741,13 @@ The concurrency hard cap does not exist in the schema. Needs a
 
 ### ~~Gap 3: Phase 3 objective function~~ — RESOLVED
 
-**Decision: Two-phase scoring.** Greedy Phase 3 uses headroom scoring
-`[max_overshoot, gap_days, avg_headroom]` — picks the shortest tier
-that fills the budget. Refinement Phase 3.5 uses minimax leveling
-`[max_overshoot, max_undershoot]` on the full timeline — shifts start
-dates to minimize the deepest valley. Overshoot beyond `budget + 15
-min` tolerance always loses. Refinement holds tiers fixed (same tier
-only, no extensions) to preserve budget-pace daily shares.
+**Decision: Beam search with minimax scoring.** Phase 3 uses beam
+search (width 25) to explore tier+start combinations across all books
+simultaneously. Scoring: minimax `[max_overshoot, max_undershoot]` on
+the full timeline. Overshoot beyond `budget + 15 min` tolerance always
+loses. Among no-overshoot options, the shallowest valley wins. No
+separate refinement pass needed — beam search finds the globally best
+combination.
 
 ### ~~Gap 4: Phase 4 feedback loop~~ — RESOLVED
 
