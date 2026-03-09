@@ -87,6 +87,16 @@ pace_target → required throughput → daily budget → tier assignments
                                                   (not the other way around)
 ```
 
+**Pace types are throughput-based only.** Valid pace types:
+- `books_per_year` (e.g. 50)
+- `books_per_month` (e.g. 4)
+- `books_per_week` (e.g. 1)
+
+The `minutes_per_day` pace type is **deprecated** — it inverts the
+causality (budget → pace instead of pace → budget). Existing users with
+`minutes_per_day` should be migrated or prompted to set a throughput
+target. The system must not allow new pace targets in minutes_per_day.
+
 ### Invariant 2: Daily load is leveled
 
 The sum of daily shares across all concurrent books should be approximately
@@ -161,6 +171,43 @@ and plans everything else around them.
 The system may **adjust** a committed book (promote it to a longer tier,
 adjust its daily share) but will never abandon it or swap it out without
 explicit user action.
+
+### Concurrency limit
+
+The user sets a **hard cap** on how many books can be active (on the
+pipeline) at once. The scheduler never exceeds this cap.
+
+- The cap is user-controlled and can be set to any value, including
+  "no limit" (effectively unlimited concurrency).
+- **Fewer concurrent books is generally better.** The system should prefer
+  placing books sequentially rather than stacking many in parallel. High
+  concurrency dilutes focus and creates absurd schedules ("read 1 page
+  from each of 20 books").
+- **Surface conflicts, don't silently fail.** If the pace target requires
+  more concurrency than the cap allows, tell the user: "Your pace of 50
+  books/year requires at least 3 concurrent books, but your limit is 2.
+  Either increase the limit or reduce your pace target."
+- The cap applies to scheduled pipeline books only. Ad-hoc reading
+  sessions against unscheduled books do not count toward the cap.
+
+### Empty work cell (mid-week completion)
+
+When all books in the current week's work cell finish before Sunday, the
+system **suggests ad-hoc reading** rather than formally scheduling a new
+book mid-week (which would violate the weekly commitment rule).
+
+The suggestion surfaces in the UI: "You're ahead of schedule! Consider
+starting [next book in queue] early." If the user reads it, those pages
+are recorded as ad-hoc sessions — they count toward the book's progress
+and reduce its tier when it officially enters the pipeline on Monday.
+
+**The system does not:**
+- Auto-schedule the next book into the current week
+- Show an empty/blank state with nothing to do
+- Force the user to wait until Monday with no guidance
+
+This keeps the weekly commitment rule intact while giving the user
+something productive to do with their momentum.
 
 ### Automatic reflow (daily quotas, weekly pipeline)
 
@@ -634,3 +681,85 @@ These metrics should be available in the UI (pipeline view, dashboard):
 10. **Honor ad-hoc reading.** Pages read against any book count toward
     that book's progress and affect future scheduling. But ad-hoc sessions
     never disrupt the current week's committed work cell.
+
+11. **Respect concurrency limits.** Never schedule more concurrent books
+    than the user's hard cap. If the pace target is unachievable within
+    the concurrency limit, surface the conflict.
+
+12. **Suggest, don't force, when ahead.** When the work cell empties
+    mid-week, suggest ad-hoc reading of the next queued book. Never
+    auto-schedule or show a blank state.
+
+## Implementation Gaps
+
+Known gaps that must be resolved before coding begins:
+
+### Gap 1: `max_daily_reading_minutes` column
+
+The max budget ceiling (`user.max_daily_reading_minutes`) is referenced
+throughout this design but **does not exist** as a database column. The
+current schema has `daily_reading_minutes` (the user's self-set budget)
+but not a hard ceiling for the scheduler.
+
+**Decision needed:** Add a `max_daily_reading_minutes` column to `users`,
+or repurpose `daily_reading_minutes` as the ceiling once pace becomes the
+primary input (since the old budget-first field becomes the ceiling in
+the new model).
+
+### Gap 2: `concurrency_limit` column
+
+The concurrency hard cap is referenced in this design but does not exist
+in the schema. Needs a `concurrency_limit` integer column on `users`
+(nullable = no limit).
+
+### Gap 3: Phase 3 variance minimization — objective function
+
+The tier selection criterion says "minimize variance in daily load" but
+doesn't specify the exact objective function. Options:
+
+- **Minimize standard deviation** of daily loads across the book's span
+- **Minimize max deviation** from the target daily budget (minimax)
+- **Minimize sum of squared deviations** from the mean daily load
+
+Minimax (minimize the worst day) is probably the right choice for
+heijunka, since it directly prevents spikes. But this needs to be tested
+against real book data to confirm it produces sensible placements.
+
+### Gap 4: Phase 4 feedback loop — iteration procedure
+
+Phase 4 says "if projected completions don't match pace, adjust." But
+the adjustment procedure isn't defined:
+
+- How many iterations are allowed?
+- In what order are adjustments attempted (shorten tiers first? lengthen
+  tiers? adjust budget?)?
+- What's the termination condition (exact match? within tolerance band?)?
+- What happens if no valid schedule exists within the max budget ceiling?
+
+This needs a concrete algorithm, not just a description of the goal.
+
+### Gap 5: Daily reflow execution mechanism
+
+The design says daily reflow happens automatically, but doesn't specify
+**how**:
+
+- **Lazy (on request):** Recompute quotas when the user opens the app or
+  requests today's reading. Simple, but stale data between visits.
+- **Background job:** A scheduled job (e.g. Sidekiq cron) runs at
+  midnight to regenerate quotas. Always fresh, but adds infrastructure.
+- **Hybrid:** Lazy computation with a timestamp check — if quotas are
+  stale (last generated before today), regenerate on access.
+
+The hybrid approach is likely best for a single-user app, but this needs
+to be decided before implementation.
+
+### Gap 6: `minutes_per_day` deprecation plan
+
+Users may currently have `pace_type: "minutes_per_day"`. The migration
+path needs to be defined:
+
+- Show a one-time prompt: "Set a book target instead of daily minutes"?
+- Auto-convert based on historical data (e.g. if they read 60 min/day
+  and average 7 days per book, suggest 52 books/year)?
+- Keep the old value as the max budget ceiling during conversion?
+- Block scheduler execution until a throughput pace is set?
