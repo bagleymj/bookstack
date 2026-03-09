@@ -101,11 +101,12 @@ target. The system must not allow new pace targets in minutes_per_day.
 
 The sum of daily shares across all concurrent books should be approximately
 equal on every reading day — and should track the derived budget. Peaks
-and valleys both violate heijunka. The scheduler uses **two-phase
-scoring**: greedy placement targets each book's fair share of the budget
-(budget / concurrency), then refinement minimizes squared deviation
-from budget across the full timeline. Overshoot beyond a 10-minute
-tolerance is always the worst violation.
+and valleys both violate heijunka. The scheduler uses **headroom-based
+scoring**: each placement is scored by how much budget capacity remains
+on its span days (lower headroom = closer to budget = better). This
+front-loads the timeline — books fill to 100% of budget for as long as
+possible, with natural taper only when books run out. Overshoot beyond
+a 15-minute tolerance is always the worst violation.
 
 ### Invariant 3: Throughput is verified
 
@@ -285,35 +286,31 @@ and book mix require. If the user wants a lower daily commitment, they
 adjust their pace target or choose shorter books. The controls are the
 inputs (pace, book selection), not the output (budget).
 
-### Phase 3: Level-load tier assignment (fair-share greedy)
+### Phase 3: Level-load tier assignment (headroom greedy)
 
-For each book in the queue, find the Monday+tier combo that produces the
-most level daily load across the timeline. The algorithm uses two-phase
-scoring: a **fair-share** heuristic during greedy placement, then
-**squared-deviation minimization** during refinement.
+For each book in the queue, find the Monday+tier combo that fills the
+daily budget as completely as possible on the book's span days. The
+algorithm uses **headroom scoring**: lower remaining headroom on span
+days means closer to budget, which is better.
 
-**Greedy scoring** `[max_overshoot, gap_days, share_deviation]`:
+**Greedy scoring** `[max_overshoot, gap_days, avg_headroom]`:
 
 - **Overshoot** = how far daily load exceeds `budget + CEILING_TOLERANCE`
-  (10 min). Any overshoot is worse than any valley — a placement that
+  (15 min). Any overshoot is worse than any valley — a placement that
   spikes the load always loses to one that underfills it.
 - **Gap days** = reading days in the scheduled timeline with ZERO projected
   load. Empty days are the worst heijunka violation.
-- **Share deviation** = `|daily_share - target_share|`, where
-  `target_share = weekday_budget / min(concurrency_limit, queue_depth)`.
-  This picks the tier where each book contributes its "fair share" of
-  the daily budget, leaving room for concurrent books to overlap. With
-  concurrency 3, each book targets ~budget/3 per day.
+- **Avg headroom** = average of `max(budget - projected, 0)` across the
+  book's span reading days. This measures how much unused budget capacity
+  remains. Lower is better: a headroom of 0 means the budget is fully
+  used (or exceeded within tolerance).
 
-This avoids the failure mode where greedy scoring picks the shortest
-non-overshooting tier (maximizing load on existing days), which creates
-short sequential placements instead of long overlapping ones. By
-targeting the fair share, books naturally get tiers proportional to
-their size and the concurrency limit.
+This naturally favors shorter tiers (higher daily share = less headroom)
+and front-loads the timeline: books pack tight against the budget ceiling
+for as long as possible, with natural taper only at the end when books
+run out.
 
 ```
-target_share = weekday_budget / min(concurrency_limit, book_count)
-
 for each book in queue order:
   best_score = [∞, ∞, ∞]
   for each Monday in horizon:
@@ -321,8 +318,8 @@ for each book in queue order:
       candidate_share = book_minutes / reading_days_in_tier
       overshoot = max projected load exceeding budget + tolerance
       gaps = count of zero-load reading days in timeline
-      deviation = |candidate_share - target_share|
-      score = [overshoot, gaps, deviation]
+      headroom = avg of max(budget - projected, 0) on span days
+      score = [overshoot, gaps, headroom]
       if score < best_score: track this placement
 
     break if perfect score [0, 0, 0]
@@ -339,34 +336,25 @@ psychological consistency.
 dates based on concurrency limits. Once three books occupy a slot,
 subsequent books start at the next available Monday.
 
-### Phase 3.5: Constrained refinement
+### Phase 3.5: Start-date refinement
 
 The greedy phase picks structurally correct tiers but can't optimize
 start dates because the full load profile doesn't exist yet. Refinement
-shifts start dates and optionally extends tiers by one step to fill
-gaps. It **never shortens tiers** — that would undo the fair-share
-tier selection and concentrate load on valleys, creating new valleys
-elsewhere.
+re-evaluates each book's start date with full timeline visibility.
 
-**Refinement scoring** `[max_overshoot, gap_days, sum_squared_undershoot]`:
+**Scoring**: Same headroom scoring as greedy —
+`[max_overshoot, gap_days, avg_headroom]`. Since shorter tiers have
+lower headroom (higher share = more budget fill), refinement naturally
+preserves the greedy phase's tier choices.
 
-- Same overshoot and gap metrics as greedy
-- **Squared undershoot** = sum of `(budget - projected)²` across all
-  days with projected load > 0 in the timeline. Squared deviation
-  penalizes deep valleys disproportionately, driving placements toward
-  filling the deepest gaps. Scoring ALL loaded days (not just
-  existing-load days) ensures that within-span days with only this
-  book's contribution are counted as real valleys during refinement
-  (since all books are placed, no future books will fill them).
-
-**Tier constraint**: Refinement only searches the same tier or one step
-longer. This prevents squared scoring from collapsing placements into
-short tiers (which would concentrate load on valleys at the expense of
-coverage). The greedy phase's fair-share tier selection is preserved;
-refinement fine-tunes start dates and allows gap-filling extensions.
+**Tier constraint**: Refinement only searches the **same tier** — no
+extensions, no shortenings. Allowing tier changes during refinement
+causes cascading displacements: extending one book shifts load, which
+triggers other books to move, creating new gaps. Start-date shifts are
+safe; tier changes are not.
 
 Up to 3 passes. Each pass re-places every book (remove from profile →
-search same/longer tier at all Mondays → pick best squared score →
+search same tier at all Mondays → pick best headroom score →
 re-add). Passes stop when no placement changes.
 
 ### Phase 4: Verify throughput
@@ -614,20 +602,17 @@ Tiers are preserved for psychological reasons (see CLAUDE.md). They provide:
 
 ### Tier selection criterion (restated)
 
-**Greedy criterion**: "Monday+tier combo with lowest
-`[max_overshoot, gap_days, share_deviation]`"
+**Scoring**: "Monday+tier combo with lowest
+`[max_overshoot, gap_days, avg_headroom]`"
 
-The fair-share deviation picks the tier where daily_share ≈ budget /
-concurrency. Overshoot is always worst; gap days (empty reading days)
-are second worst; share deviation tiebreaks. Multi-Monday search means
-books stagger naturally across start dates based on concurrency limits.
+Avg headroom picks the tier that fills the budget most completely on
+span days. Overshoot is always worst; gap days (empty reading days)
+are second worst; headroom tiebreaks. Lower headroom = closer to
+budget = better. Multi-Monday search means books stagger naturally
+across start dates based on concurrency limits.
 
-**Refinement criterion**: "Same tier or one longer, at the Monday with
-lowest `[max_overshoot, gap_days, sum_squared_undershoot]`"
-
-Squared undershoot fills deep valleys preferentially. Tiers never
-shorten during refinement — only start dates shift or tiers extend
-by one step to fill gaps.
+**Refinement**: Same scoring, same tier only (no extensions). Shifts
+start dates to fill gaps without cascading tier changes.
 
 ## Weekend Handling
 
@@ -780,13 +765,13 @@ The concurrency hard cap does not exist in the schema. Needs a
 
 ### ~~Gap 3: Phase 3 objective function~~ — RESOLVED
 
-**Decision: Two-phase heijunka scoring.** Greedy phase scores
-`[max_overshoot, gap_days, share_deviation]` — each book targets its
-fair share of the budget (budget/concurrency). Refinement scores
-`[max_overshoot, gap_days, sum_squared_undershoot]` on the full timeline,
-constrained to same tier or one step longer. Overshoot beyond
-`budget + 10 min` tolerance always loses. Multi-Monday search staggers
-book starts across the timeline.
+**Decision: Headroom-based scoring.** Both greedy and refinement score
+`[max_overshoot, gap_days, avg_headroom]` — each placement targets
+filling the budget as completely as possible on its span days. Shorter
+tiers have lower headroom (higher share per day = more budget fill),
+so the algorithm naturally front-loads the timeline. Overshoot beyond
+`budget + 15 min` tolerance always loses. Refinement holds tiers fixed
+(same tier only, no extensions) and shifts start dates to fill gaps.
 
 ### ~~Gap 4: Phase 4 feedback loop~~ — RESOLVED
 
