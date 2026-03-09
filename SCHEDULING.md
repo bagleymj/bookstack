@@ -97,14 +97,15 @@ causality (budget → pace instead of pace → budget). Existing users with
 `minutes_per_day` should be migrated or prompted to set a throughput
 target. The system must not allow new pace targets in minutes_per_day.
 
-### Invariant 2: Daily load is leveled (asymmetrically)
+### Invariant 2: Daily load is leveled
 
 The sum of daily shares across all concurrent books should be approximately
 equal on every reading day — and should track the derived budget. Peaks
-and valleys both violate heijunka. The scheduler uses **asymmetric
-scoring**: overshoot beyond a 10-minute tolerance is always worse than
-undershoot. Among no-overshoot placements, the shallowest valley wins.
-This fills load UP to budget without exceeding it.
+and valleys both violate heijunka. The scheduler uses **two-phase
+scoring**: greedy placement targets each book's fair share of the budget
+(budget / concurrency), then refinement minimizes squared deviation
+from budget across the full timeline. Overshoot beyond a 10-minute
+tolerance is always the worst violation.
 
 ### Invariant 3: Throughput is verified
 
@@ -284,56 +285,47 @@ and book mix require. If the user wants a lower daily commitment, they
 adjust their pace target or choose shorter books. The controls are the
 inputs (pace, book selection), not the output (budget).
 
-### Phase 3: Level-load tier assignment (asymmetric heijunka scoring)
+### Phase 3: Level-load tier assignment (fair-share greedy)
 
 For each book in the queue, find the Monday+tier combo that produces the
-most level daily load across the timeline. The algorithm searches across
-multiple Mondays (not just the first available) to naturally stagger book
-starts and fill gaps.
+most level daily load across the timeline. The algorithm uses two-phase
+scoring: a **fair-share** heuristic during greedy placement, then
+**squared-deviation minimization** during refinement.
 
-**Asymmetric scoring**: Each candidate placement is scored as
-`[max_overshoot, max_undershoot]`, compared lexicographically:
+**Greedy scoring** `[max_overshoot, gap_days, share_deviation]`:
 
 - **Overshoot** = how far daily load exceeds `budget + CEILING_TOLERANCE`
   (10 min). Any overshoot is worse than any valley — a placement that
   spikes the load always loses to one that underfills it.
-- **Undershoot** = how far daily load falls below budget, measured
-  **globally** across the entire scheduled timeline — but only on days
-  that already have load from OTHER books. Days where this candidate
-  book would be the sole source of load are excluded from undershoot
-  scoring — future books will fill those days, so penalizing them
-  forces short tiers and prevents the overlapping that heijunka demands.
-- Load within the tolerance band (`budget` to `budget + 10 min`) scores
-  as perfect — no overshoot, no undershoot.
-- Days with no scheduled load and outside the candidate's span are
-  ignored (they're unscheduled future, not valleys).
+- **Gap days** = reading days in the scheduled timeline with ZERO projected
+  load. Empty days are the worst heijunka violation.
+- **Share deviation** = `|daily_share - target_share|`, where
+  `target_share = weekday_budget / min(concurrency_limit, queue_depth)`.
+  This picks the tier where each book contributes its "fair share" of
+  the daily budget, leaving room for concurrent books to overlap. With
+  concurrency 3, each book targets ~budget/3 per day.
 
-This is true heijunka: the algorithm fills UP to the budget (minimizing
-valleys) without exceeding it (preventing spikes). **Fill-only undershoot
-scoring** is the key mechanism that drives overlapping tiers. By only
-measuring undershoot on days with existing load, the algorithm is free
-to choose longer tiers (lower daily share) knowing that future books
-will layer on top. A short tier that maxes out one week but leaves the
-rest of the timeline empty is NOT preferred over a longer tier that
-overlaps with existing load to fill valleys.
+This avoids the failure mode where greedy scoring picks the shortest
+non-overshooting tier (maximizing load on existing days), which creates
+short sequential placements instead of long overlapping ones. By
+targeting the fair share, books naturally get tiers proportional to
+their size and the concurrency limit.
 
 ```
+target_share = weekday_budget / min(concurrency_limit, book_count)
+
 for each book in queue order:
-  best_score = [∞, ∞]
+  best_score = [∞, ∞, ∞]
   for each Monday in horizon:
     for each tier (shortest first):
       candidate_share = book_minutes / reading_days_in_tier
-      # Score overshoot within the book's span only
-      for each day in span:
-        overshoot = max(0, projected - budget - tolerance)
-      # Score undershoot GLOBALLY, but only on days with existing load
-      for each day in [today..max(timeline_end, book_end)]:
-        if day has existing load from other books:
-          undershoot = max(0, budget - projected)
-      score = [max_overshoot, max_undershoot]
+      overshoot = max projected load exceeding budget + tolerance
+      gaps = count of zero-load reading days in timeline
+      deviation = |candidate_share - target_share|
+      score = [overshoot, gaps, deviation]
       if score < best_score: track this placement
 
-    break if perfect score [0, 0]
+    break if perfect score [0, 0, 0]
     break if good placement found and searched well past its span
 
   place book in best Monday+tier combo
@@ -344,31 +336,38 @@ for each book in queue order:
 psychological consistency.
 
 **Multi-Monday search**: Books naturally stagger across different start
-dates. Book B may start on Monday 2 to fill the gap after Book A
-finishes, rather than stacking on Monday 1 and overshooting.
+dates based on concurrency limits. Once three books occupy a slot,
+subsequent books start at the next available Monday.
 
-**Tier layering**: Because undershoot is measured globally, the algorithm
-prefers longer tiers that overlap with existing books to fill valleys.
-Book C might get a 2-week tier overlapping Books A and B rather than a
-1-week tier that just adds another sequential block.
+### Phase 3.5: Constrained refinement
 
-### Phase 3.5: Refinement pass
+The greedy phase picks structurally correct tiers but can't optimize
+start dates because the full load profile doesn't exist yet. Refinement
+shifts start dates and optionally extends tiers by one step to fill
+gaps. It **never shortens tiers** — that would undo the fair-share
+tier selection and concentrate load on valleys, creating new valleys
+elsewhere.
 
-The greedy Phase 3 places books one at a time in queue order. Early
-books are placed before the timeline exists, so they get suboptimal
-short tiers — there's nothing to overlay, and a high share (short tier)
-looks like less undershoot. This leaves persistent valleys.
+**Refinement scoring** `[max_overshoot, gap_days, sum_squared_undershoot]`:
 
-After all books are placed, the scheduler runs up to 3 refinement
-passes. Each pass re-places every book (remove from profile → find best
-placement with full visibility → re-add). With the full load profile
-visible, early books now see the valley they created and choose longer,
-overlapping tiers that fill it.
+- Same overshoot and gap metrics as greedy
+- **Squared undershoot** = sum of `(budget - projected)²` across all
+  days with projected load > 0 in the timeline. Squared deviation
+  penalizes deep valleys disproportionately, driving placements toward
+  filling the deepest gaps. Scoring ALL loaded days (not just
+  existing-load days) ensures that within-span days with only this
+  book's contribution are counted as real valleys during refinement
+  (since all books are placed, no future books will fill them).
 
-Refinement converges because each pass monotonically reduces the global
-max valley (a book only moves if `find_leveled_placement` finds a
-strictly better score with the current profile). Passes stop when no
-placement changes.
+**Tier constraint**: Refinement only searches the same tier or one step
+longer. This prevents squared scoring from collapsing placements into
+short tiers (which would concentrate load on valleys at the expense of
+coverage). The greedy phase's fair-share tier selection is preserved;
+refinement fine-tunes start dates and allows gap-filling extensions.
+
+Up to 3 passes. Each pass re-places every book (remove from profile →
+search same/longer tier at all Mondays → pick best squared score →
+re-add). Passes stop when no placement changes.
 
 ### Phase 4: Verify throughput
 
@@ -615,14 +614,20 @@ Tiers are preserved for psychological reasons (see CLAUDE.md). They provide:
 
 ### Tier selection criterion (restated)
 
-**Criterion**: "Monday+tier combo with lowest asymmetric score
-`[max_overshoot, max_undershoot]`"
+**Greedy criterion**: "Monday+tier combo with lowest
+`[max_overshoot, gap_days, share_deviation]`"
 
-Overshoot beyond `budget + 10 min` is penalized first (lexicographic
-comparison), so the algorithm never creates spikes. Among spike-free
-options, it minimizes valleys — filling load up to budget. Multi-Monday
-search means books stagger naturally across start dates rather than all
-piling into the first Monday.
+The fair-share deviation picks the tier where daily_share ≈ budget /
+concurrency. Overshoot is always worst; gap days (empty reading days)
+are second worst; share deviation tiebreaks. Multi-Monday search means
+books stagger naturally across start dates based on concurrency limits.
+
+**Refinement criterion**: "Same tier or one longer, at the Monday with
+lowest `[max_overshoot, gap_days, sum_squared_undershoot]`"
+
+Squared undershoot fills deep valleys preferentially. Tiers never
+shorten during refinement — only start dates shift or tiers extend
+by one step to fill gaps.
 
 ## Weekend Handling
 
@@ -775,12 +780,13 @@ The concurrency hard cap does not exist in the schema. Needs a
 
 ### ~~Gap 3: Phase 3 objective function~~ — RESOLVED
 
-**Decision: Asymmetric heijunka scoring.** Score each placement as
-`[max_overshoot, max_undershoot]` with lexicographic comparison. Overshoot
-beyond `budget + 10 min` tolerance always loses. Among no-overshoot
-placements, minimize the deepest valley. Multi-Monday search staggers
-book starts across the timeline. This fills load UP to budget (true
-heijunka) without creating spikes.
+**Decision: Two-phase heijunka scoring.** Greedy phase scores
+`[max_overshoot, gap_days, share_deviation]` — each book targets its
+fair share of the budget (budget/concurrency). Refinement scores
+`[max_overshoot, gap_days, sum_squared_undershoot]` on the full timeline,
+constrained to same tier or one step longer. Overshoot beyond
+`budget + 10 min` tolerance always loses. Multi-Monday search staggers
+book starts across the timeline.
 
 ### ~~Gap 4: Phase 4 feedback loop~~ — RESOLVED
 

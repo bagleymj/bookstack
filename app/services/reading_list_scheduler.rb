@@ -60,6 +60,7 @@ class ReadingListScheduler
     @load_profile = Hash.new(0.0)
     @concurrent_count = Hash.new(0)
     @timeline_end = nil
+    @refining = false
 
     locked_goals.each { |goal| add_goal_to_profiles(goal) }
 
@@ -176,7 +177,7 @@ class ReadingListScheduler
   # stagger starts instead of front-loading everything.
   def find_leveled_placement(book_minutes)
     best = nil
-    best_score = [Float::INFINITY, Float::INFINITY]
+    best_score = [Float::INFINITY, Float::INFINITY, Float::INFINITY]
 
     each_monday do |monday|
       TIERS.each do |tier|
@@ -192,8 +193,8 @@ class ReadingListScheduler
         end
       end
 
-      # Perfect fit — no overshoot, no valley
-      break if best_score[0] == 0.0 && best_score[1] == 0.0
+      # Perfect fit — no overshoot, no gaps, no valley
+      break if best_score == [0.0, 0, 0.0]
       # Good placement found and we've checked well past its span
       break if best && best_score[0] == 0.0 && monday > best[:start] + 8 * 7
     end
@@ -201,21 +202,57 @@ class ReadingListScheduler
     best || default_placement(book_minutes)
   end
 
-  # Score a candidate placement as [max_overshoot, max_undershoot].
-  #
-  # Overshoot: measured within the book's span only. The book can only
-  # cause spikes where it adds load.
-  #
-  # Undershoot: measured only on days with EXISTING load from other books.
-  # Days where this book is the sole source of load (no existing load)
-  # are NOT penalized — future books will fill those days. This is the
-  # key heijunka mechanism: it frees the algorithm to choose LONGER tiers
-  # that overlap with existing load to fill valleys. Without this, short
-  # tiers always win because their higher share produces less undershoot,
-  # but they prevent the overlapping that heijunka requires.
+  # Dual-mode scoring: greedy picks tiers by fair-share targeting,
+  # refinement minimizes squared deviation across the full timeline.
   def placement_score(start_date, end_date, daily_share)
+    @refining ? refinement_score(start_date, end_date, daily_share)
+              : greedy_score(start_date, end_date, daily_share)
+  end
+
+  # Greedy Phase 3: Pick tiers where each book contributes its fair
+  # share of the daily budget (budget / concurrency_limit). This avoids
+  # short tiers that spike one period and leave the rest empty.
+  # Score: [max_overshoot, gap_days, share_deviation]
+  def greedy_score(start_date, end_date, daily_share)
     max_overshoot = 0.0
-    max_undershoot = 0.0
+    gap_days = 0
+
+    score_start = snap_to_monday(Date.current)
+    score_end = [@timeline_end, end_date].compact.max
+
+    (score_start..score_end).each do |date|
+      next unless reading_day?(date)
+      budget = budget_for_date(date)
+      next if budget <= 0
+
+      in_span = date >= start_date && date <= end_date
+      projected = @load_profile[date] + (in_span ? share_for_date(daily_share, date) : 0)
+
+      if projected <= 0
+        gap_days += 1
+        next
+      end
+
+      if in_span
+        over = projected - budget - CEILING_TOLERANCE
+        max_overshoot = over if over > 0 && over > max_overshoot
+      end
+    end
+
+    share_deviation = (daily_share - target_daily_share).abs
+    [max_overshoot, gap_days, share_deviation]
+  end
+
+  # Refinement Phase 3.5: Minimize squared deviation from budget across
+  # the entire timeline. With all books placed, empty days are real
+  # valleys (no future books to fill them). Squared scoring penalizes
+  # deep valleys disproportionately, driving books toward placements
+  # that level the load.
+  # Score: [max_overshoot, gap_days, sum_squared_undershoot]
+  def refinement_score(start_date, end_date, daily_share)
+    max_overshoot = 0.0
+    sum_sq_undershoot = 0.0
+    gap_days = 0
 
     score_start = snap_to_monday(Date.current)
     score_end = [@timeline_end, end_date].compact.max
@@ -229,25 +266,33 @@ class ReadingListScheduler
       existing = @load_profile[date]
       projected = existing + (in_span ? share_for_date(daily_share, date) : 0)
 
-      # Skip days with no existing load and outside this book's span
-      next if !in_span && existing <= 0
+      if projected <= 0
+        gap_days += 1
+        next
+      end
 
-      # Overshoot: only within span (book can only spike where it adds load)
       if in_span
         over = projected - budget - CEILING_TOLERANCE
         max_overshoot = over if over > 0 && over > max_overshoot
       end
 
-      # Undershoot: only on days with existing load from OTHER books.
-      # Days where this book is the sole source of load will be filled
-      # by future books — penalizing them forces short tiers and prevents
-      # the overlapping that heijunka demands.
-      if existing > 0
-        under = budget - projected
-        max_undershoot = under if under > 0 && under > max_undershoot
-      end
+      under = budget - projected
+      sum_sq_undershoot += under * under if under > 0
     end
-    [max_overshoot, max_undershoot]
+
+    [max_overshoot, gap_days, sum_sq_undershoot]
+  end
+
+  # Target daily share per book: budget split evenly across concurrent slots.
+  # Uses the lesser of concurrency limit and actual book count so a single
+  # queued book targets the full budget (short tier), not budget/3.
+  def target_daily_share
+    @target_daily_share ||= begin
+      limit = effective_concurrency_limit || 3
+      n_books = gather_schedulable_goals.size + locked_goals.size
+      concurrent = [[n_books, limit].min, 1].max
+      @weekday_budget / concurrent.to_f
+    end
   end
 
   def compute_weekday_share(book_minutes, start_date, end_date)
@@ -334,14 +379,17 @@ class ReadingListScheduler
 
   # ─── Phase 3.5: Refinement ──────────────────────────────────────
 
-  # Re-place each book with full timeline visibility. The greedy Phase 3
-  # places early books before the load profile exists, giving them
-  # suboptimal short tiers. Now that all books are placed, re-placing
-  # each one lets it see the full profile and choose a tier that fills
-  # existing valleys through overlapping.
+  # Re-place each book with full timeline visibility. Greedy Phase 3
+  # picks structurally correct tiers (share ≈ budget/concurrency) but
+  # can't optimize start dates because the full load profile doesn't
+  # exist yet. Refinement shifts start dates and optionally extends
+  # tiers by one step to fill gaps. It NEVER shortens tiers — that
+  # would undo the greedy phase's fair-share tier selection and
+  # concentrate load on valleys, creating new valleys elsewhere.
   MAX_REFINEMENT_PASSES = 3
 
   def refine_placements!
+    @refining = true
     MAX_REFINEMENT_PASSES.times do
       changed = false
       @placements.each do |entry|
@@ -353,10 +401,9 @@ class ReadingListScheduler
         old_tier = entry[:tier]
         old_share = entry[:placement][:share]
 
-        # Remove this book from the profile so it doesn't influence its own re-placement
         remove_range_from_profiles(old_start, old_end, old_share)
 
-        new_placement = find_leveled_placement(entry[:book_minutes])
+        new_placement = find_refined_placement(entry[:book_minutes], old_tier)
         unless new_placement
           add_range_to_profiles(old_start, old_end, old_share)
           next
@@ -370,6 +417,39 @@ class ReadingListScheduler
       end
       break unless changed
     end
+    @refining = false
+  end
+
+  # Search same tier or one step longer at all Mondays. Uses
+  # refinement_score (squared undershoot on full timeline) to pick
+  # the start date that most levels the load.
+  def find_refined_placement(book_minutes, original_tier)
+    tier_idx = TIERS.index(original_tier) || 0
+    candidate_tiers = [original_tier]
+    candidate_tiers << TIERS[tier_idx + 1] if tier_idx < TIERS.length - 1
+
+    best = nil
+    best_score = [Float::INFINITY, Float::INFINITY, Float::INFINITY]
+
+    each_monday do |monday|
+      candidate_tiers.each do |tier|
+        end_date = calendar_end(monday, tier)
+        daily_share = compute_weekday_share(book_minutes, monday, end_date)
+        next if daily_share <= 0
+        next unless fits_concurrency?(monday, end_date)
+
+        score = refinement_score(monday, end_date, daily_share)
+        if (score <=> best_score) < 0
+          best_score = score
+          best = { start: monday, end: end_date, share: daily_share, tier: tier }
+        end
+      end
+
+      break if best_score == [0.0, 0, 0.0]
+      break if best && best_score[0] == 0.0 && monday > best[:start] + 8 * 7
+    end
+
+    best
   end
 
   # ─── Phase 4 ────────────────────────────────────────────────────
@@ -387,6 +467,10 @@ class ReadingListScheduler
       else
         break unless try_lengthen_shortest_tier!
       end
+
+      # Stop if the adjustment didn't change projected completions
+      # (e.g., all books already finish within the pace window)
+      break if count_projected_completions == projected
     end
   end
 
@@ -409,12 +493,18 @@ class ReadingListScheduler
       .reject { |p| p[:goal].has_reading_sessions? }
       .sort_by { |p| -TIER_WEEKS[p[:tier]] }
 
+    pace_window_end = @pace_start + 365
+
     adjustable.each do |entry|
       tier_idx = TIERS.index(entry[:tier])
       next if tier_idx.nil? || tier_idx == 0
 
-      shorter_tier = TIERS[tier_idx - 1]
+      # Skip if the book already finishes within the pace window —
+      # shortening won't increase projected completions
       goal = entry[:goal]
+      next if goal.target_completion_date <= pace_window_end
+
+      shorter_tier = TIERS[tier_idx - 1]
       new_end = calendar_end(goal.started_on, shorter_tier)
       new_share = compute_weekday_share(entry[:book_minutes], goal.started_on, new_end)
       next if new_share <= 0
