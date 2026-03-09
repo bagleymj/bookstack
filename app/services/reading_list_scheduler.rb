@@ -156,9 +156,8 @@ class ReadingListScheduler
   # ─── Phase 3: Beam Search ──────────────────────────────────────
 
   def beam_search_placements(goals)
-    # Sort largest first — most constrained books get placed first
+    # Process books in queue order — respect the user's reading list
     goals_with_minutes = goals.map { |g| [g, estimate_remaining_minutes(g.book)] }
-                              .sort_by { |_, mins| -mins }
 
     # Initial beam: one state with only locked-goal load
     initial_state = {
@@ -176,18 +175,17 @@ class ReadingListScheduler
         candidates = enumerate_candidates(state, book_minutes)
 
         if candidates.empty?
-          # No valid placement — use default
           placement = default_placement(book_minutes)
           next_beam << apply_candidate(state, goal, placement, book_minutes)
         else
-          candidates.each do |candidate|
-            next_beam << apply_candidate(state, goal, candidate[:placement], book_minutes)
+          candidates.each do |placement|
+            next_beam << apply_candidate(state, goal, placement, book_minutes)
           end
         end
       end
 
-      # Prune to BEAM_WIDTH best states
-      beam = next_beam.sort_by { |s| s[:score] }.first(BEAM_WIDTH)
+      # Stratified pruning: keep tier diversity in the beam
+      beam = stratified_prune(next_beam)
     end
 
     # Winner: apply to real profiles and goals
@@ -205,6 +203,31 @@ class ReadingListScheduler
     best[:placements]
   end
 
+  # Ensure beam keeps at least one representative per tier to avoid
+  # premature convergence on short tiers. Without this, early books
+  # all lock into 1-week tiers (lowest immediate deviation) and the
+  # beam loses the ability to discover that longer tiers would have
+  # produced a flatter overall schedule.
+  def stratified_prune(states)
+    return states if states.size <= BEAM_WIDTH
+
+    tier_groups = states.group_by { |s| s[:placements].last[:tier] }
+
+    # Best state per tier (guaranteed diversity)
+    per_tier = tier_groups.map { |_, group| group.min_by { |s| s[:score] } }
+    selected = Set.new(per_tier.map(&:object_id))
+
+    beam = per_tier.dup
+
+    # Fill remaining slots with best overall
+    states.sort_by { |s| s[:score] }.each do |state|
+      break if beam.size >= BEAM_WIDTH
+      beam << state unless selected.include?(state.object_id)
+    end
+
+    beam.sort_by { |s| s[:score] }
+  end
+
   def enumerate_candidates(state, book_minutes)
     candidates = []
     best_start = nil
@@ -216,9 +239,7 @@ class ReadingListScheduler
         next if daily_share <= 0
         next unless fits_concurrency_in_state?(state, monday, end_date)
 
-        placement = { start: monday, end: end_date, share: daily_share, tier: tier }
-        score = score_placement(state, placement)
-        candidates << { placement: placement, score: score }
+        candidates << { start: monday, end: end_date, share: daily_share, tier: tier }
         best_start ||= monday
       end
 
@@ -253,37 +274,18 @@ class ReadingListScheduler
     }
   end
 
-  def score_placement(state, placement)
-    score_start = snap_to_monday(Date.current)
-    score_end = [state[:timeline_end], placement[:end]].compact.max
-
-    max_overshoot = 0.0
-    max_undershoot = 0.0
-
-    (score_start..score_end).each do |date|
-      next unless reading_day?(date)
-      budget = budget_for_date(date)
-      next if budget <= 0
-
-      in_span = date >= placement[:start] && date <= placement[:end]
-      projected = state[:load_profile][date] + (in_span ? share_for_date(placement[:share], date) : 0)
-
-      over = projected - budget - CEILING_TOLERANCE
-      max_overshoot = over if over > 0 && over > max_overshoot
-
-      under = budget - projected
-      max_undershoot = under if under > 0 && under > max_undershoot
-    end
-
-    [max_overshoot, max_undershoot]
-  end
-
+  # Score: [max_overshoot_beyond_ceiling, max_abs_deviation_from_budget, mean_sq_deviation]
+  # 1. Hard constraint: never exceed budget + ceiling tolerance
+  # 2. Minimax: minimize the worst absolute deviation from budget (either direction)
+  # 3. Tiebreaker: minimize overall variance from budget
   def compute_state_score(load_profile, timeline_end)
     score_start = snap_to_monday(Date.current)
     score_end = timeline_end || score_start
 
     max_overshoot = 0.0
-    max_undershoot = 0.0
+    max_abs_dev = 0.0
+    sum_sq_dev = 0.0
+    count = 0
 
     (score_start..score_end).each do |date|
       next unless reading_day?(date)
@@ -291,14 +293,19 @@ class ReadingListScheduler
       next if budget <= 0
 
       projected = load_profile[date]
+      count += 1
+
       over = projected - budget - CEILING_TOLERANCE
       max_overshoot = over if over > 0 && over > max_overshoot
 
-      under = budget - projected
-      max_undershoot = under if under > 0 && under > max_undershoot
+      dev = (projected - budget).abs
+      max_abs_dev = dev if dev > max_abs_dev
+
+      sum_sq_dev += (projected - budget) ** 2
     end
 
-    [max_overshoot, max_undershoot]
+    mean_sq_dev = count > 0 ? sum_sq_dev / count : 0.0
+    [max_overshoot, max_abs_dev, mean_sq_dev]
   end
 
   def fits_concurrency_in_state?(state, start_date, end_date)

@@ -295,41 +295,57 @@ placements are made without knowledge of what later books need.
 
 **Algorithm**:
 
-1. Sort schedulable books **largest first** (most reading minutes =
-   most constrained = placed first)
+1. Process books in **queue position order** — the user's reading list
+   determines which book is considered first. Earlier books get
+   priority in the beam search. Minor start-date reordering is allowed
+   when it significantly improves leveling.
 2. Initialize beam with a single state containing only locked-goal load
 3. For each book, generate all valid `(tier, monday)` candidates for
-   each state in the beam. Score each candidate using minimax
-   `[max_overshoot, max_undershoot]` across the full timeline. Create
-   new states by applying each candidate, then prune to the top 25
-   (BEAM_WIDTH) states
+   each state in the beam. Score each candidate, create new states,
+   then apply **stratified pruning** to keep the top 25 (BEAM_WIDTH)
 4. After all books are placed, pick the best state (lowest score) and
    apply all its placements
 
-**Scoring**: Minimax `[max_overshoot, max_undershoot]` on the full
-timeline. Overshoot beyond `budget + CEILING_TOLERANCE` (15 min) is
-always worst. Among no-overshoot placements, the shallowest valley
-wins (closest to budget = most level). This is the heijunka criterion:
-first avoid spikes, then raise the floor.
+**Scoring**: Three-component lexicographic score
+`[max_overshoot, max_abs_deviation, mean_sq_deviation]`:
+
+- **max_overshoot**: How far daily load exceeds `budget +
+  CEILING_TOLERANCE` (15 min). Any overshoot is always the worst
+  violation — a placement that spikes the load always loses.
+- **max_abs_deviation**: Maximum `|projected - budget|` across all
+  days. Penalizes being above budget (even within tolerance) AND below
+  budget equally. This is the core heijunka criterion: minimize the
+  worst daily deviation from the target.
+- **mean_sq_deviation**: Average of `(projected - budget)²` across all
+  days. Tiebreaker that minimizes overall variance when multiple
+  states have equal worst-day deviation.
 
 ```
 beam = [{ load_profile: locked_loads, placements: [] }]
 
-for each book (largest first):
+for each book (in queue order):
   next_beam = []
   for each state in beam:
     for each Monday in horizon:
       for each tier:
         candidate_share = book_minutes / reading_days_in_tier
-        score = [max_overshoot, max_undershoot] on full timeline
+        score = [max_overshoot, max_abs_dev, mean_sq_dev]
         next_beam << apply(state, candidate)
 
       break if searched 8+ weeks past best candidate's start
 
-  beam = next_beam.sort_by(score).first(25)
+  beam = stratified_prune(next_beam, width=25)
 
 apply beam.first.placements
 ```
+
+**Stratified beam pruning**: After expanding all candidates, states are
+grouped by the tier assigned to the current book. The beam keeps at
+least one representative per tier, then fills remaining slots with the
+best-scoring states overall. This prevents premature convergence on
+short tiers — without it, early books all lock into 1-week tiers
+(lowest immediate deviation) and the beam loses the ability to
+discover that longer tiers would have produced a flatter schedule.
 
 **Search pruning**: For each state, Mondays are only searched up to 8
 weeks past the first viable candidate's start. This keeps the search
@@ -584,11 +600,13 @@ Tiers are preserved for psychological reasons (see CLAUDE.md). They provide:
 
 ### Tier selection criterion (restated)
 
-**Scoring**: Beam search uses minimax `[max_overshoot, max_undershoot]`
-on the full timeline. Overshoot beyond `budget + CEILING_TOLERANCE` is
-always worst. Among no-overshoot options, the shallowest valley wins.
-The beam width of 25 explores enough combinations to find tier+start
-pairings that level the load globally across all books.
+**Scoring**: Beam search uses `[max_overshoot, max_abs_deviation,
+mean_sq_deviation]` on the full timeline. Overshoot beyond `budget +
+CEILING_TOLERANCE` is always worst. Among no-overshoot options, the
+lowest max absolute deviation from budget wins (penalizes both over
+and under equally). Ties broken by lowest overall variance.
+Stratified pruning ensures every tier remains viable throughout the
+search.
 
 ## Weekend Handling
 
@@ -741,13 +759,14 @@ The concurrency hard cap does not exist in the schema. Needs a
 
 ### ~~Gap 3: Phase 3 objective function~~ — RESOLVED
 
-**Decision: Beam search with minimax scoring.** Phase 3 uses beam
-search (width 25) to explore tier+start combinations across all books
-simultaneously. Scoring: minimax `[max_overshoot, max_undershoot]` on
-the full timeline. Overshoot beyond `budget + 15 min` tolerance always
-loses. Among no-overshoot options, the shallowest valley wins. No
-separate refinement pass needed — beam search finds the globally best
-combination.
+**Decision: Beam search with three-component scoring.** Phase 3 uses
+beam search (width 25) with stratified pruning to explore tier+start
+combinations across all books in queue order. Scoring:
+`[max_overshoot, max_abs_deviation, mean_sq_deviation]`. Overshoot
+beyond `budget + 15 min` tolerance always loses. Among no-overshoot
+options, the lowest max absolute deviation from budget wins (penalizes
+both over and under equally). Ties broken by overall variance. No
+separate refinement pass needed.
 
 ### ~~Gap 4: Phase 4 feedback loop~~ — RESOLVED
 
