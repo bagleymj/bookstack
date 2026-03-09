@@ -34,7 +34,7 @@ class ReadingListScheduler
     {
       pace_status: pace_status_label(target),
       deficit: @deficit.round(1),
-      derived_budget: budget.round,
+      derived_budget: effective_daily_budget(budget).round,
       projected_completions: projected,
       pace_target: target,
       queue_depth: queued_count,
@@ -461,6 +461,17 @@ class ReadingListScheduler
   end
 
   # ─── Metrics Helpers ────────────────────────────────────────────
+
+  # Show the budget the user actually experiences on a reading day,
+  # not the raw average that includes zero-budget weekends.
+  def effective_daily_budget(avg_budget)
+    return avg_budget unless avg_budget&.positive?
+    case @user.weekend_mode
+    when "skip"  then avg_budget * 7.0 / 5.0
+    when "capped" then (avg_budget * 7.0 - @user.weekend_reading_minutes.to_f * 2) / 5.0
+    else avg_budget
+    end
+  end
 
   def default_metrics
     { pace_status: nil, deficit: 0, derived_budget: 0,

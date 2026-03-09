@@ -319,19 +319,49 @@ RSpec.describe DailyReflow do
 
     before { heijunka_user.update_column(:quotas_generated_on, nil) }
 
-    it "calls ReadingListScheduler#schedule! during reflow" do
+    it "calls ReadingListScheduler#schedule! when queued books exist" do
+      # Create a queued book so the scheduler fires
+      queued_book = create(:book, user: heijunka_user, last_page: 200, current_page: 1)
+      create(:reading_goal, user: heijunka_user, book: queued_book,
+             status: :queued, auto_scheduled: true, position: 1)
+
       scheduler = instance_double(ReadingListScheduler)
       allow(ReadingListScheduler).to receive(:new).with(heijunka_user).and_return(scheduler)
       allow(scheduler).to receive(:schedule!)
       allow(scheduler).to receive(:metrics).and_return({ derived_budget: 40 })
 
+      heijunka_user.reload
       DailyReflow.new(heijunka_user).reflow!
 
       expect(scheduler).to have_received(:schedule!)
     end
 
-    it "only redistributes locked goals (those with sessions)" do
-      # Create two active goals — one locked (has sessions), one not
+    it "does not call schedule! when no queued books exist" do
+      # Only active goals, no queued ones
+      active_book = create(:book, user: heijunka_user, last_page: 200, current_page: 1)
+      g = create(:reading_goal, user: heijunka_user, book: active_book,
+                 status: :active, started_on: 1.week.ago.to_date,
+                 target_completion_date: 1.week.from_now.to_date,
+                 auto_scheduled: true, position: 1)
+      g.daily_quotas.destroy_all
+      (Date.current..1.week.from_now.to_date).each do |date|
+        g.daily_quotas.create!(date: date, target_pages: 20, actual_pages: 0, status: :pending)
+      end
+
+      # Stub metrics (for tier promotion) but schedule! should NOT be called
+      scheduler = instance_double(ReadingListScheduler)
+      allow(ReadingListScheduler).to receive(:new).with(heijunka_user).and_return(scheduler)
+      allow(scheduler).to receive(:schedule!)
+      allow(scheduler).to receive(:metrics).and_return({ derived_budget: 40 })
+
+      heijunka_user.reload
+      DailyReflow.new(heijunka_user).reflow!
+
+      expect(scheduler).not_to have_received(:schedule!)
+    end
+
+    it "redistributes all active goals regardless of session status" do
+      # Create two active goals — one with sessions, one without
       locked_book = create(:book, user: heijunka_user, last_page: 200, current_page: 50)
       unlocked_book = create(:book, user: heijunka_user, last_page: 200, current_page: 1)
 
@@ -358,20 +388,24 @@ RSpec.describe DailyReflow do
              started_at: 1.day.ago, ended_at: 1.day.ago + 30.minutes,
              duration_seconds: 1800)
 
-      # Stub the scheduler to avoid full scheduling side effects
+      # Stub the scheduler (no queued books, so schedule! won't fire)
       scheduler = instance_double(ReadingListScheduler)
       allow(ReadingListScheduler).to receive(:new).with(heijunka_user).and_return(scheduler)
-      allow(scheduler).to receive(:schedule!)
       allow(scheduler).to receive(:metrics).and_return({ derived_budget: 40 })
 
       heijunka_user.reload
       DailyReflow.new(heijunka_user).reflow!
 
-      # Locked goal should have redistributed quotas (sum = remaining pages)
+      # Both goals should have redistributed quotas (sum = remaining pages)
       locked_quotas = DailyQuota.where(reading_goal_id: locked_goal.id)
                                 .where("date >= ?", Date.current)
                                 .where.not(status: :missed)
       expect(locked_quotas.sum(:target_pages)).to eq(locked_book.remaining_pages)
+
+      unlocked_quotas = DailyQuota.where(reading_goal_id: unlocked_goal.id)
+                                  .where("date >= ?", Date.current)
+                                  .where.not(status: :missed)
+      expect(unlocked_quotas.sum(:target_pages)).to eq(unlocked_book.remaining_pages)
     end
 
     it "does not call schedule! when not in heijunka mode" do

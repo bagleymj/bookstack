@@ -21,19 +21,21 @@ class DailyReflow
     goals.each { |goal| mark_missed_quotas(goal) }
     promoted_ids = promote_spiking_goals!(goals)
 
-    # In heijunka mode, run the scheduler daily to fill open slots and re-level
-    # the pipeline. The scheduler handles auto-scheduled goals with positions
-    # that don't have sessions. Redistribute everything else: locked goals
-    # (active with sessions) and manual goals (not auto-scheduled / no position).
-    if heijunka_mode?
+    # In heijunka mode, call the scheduler only when there are queued books
+    # waiting to enter the pipeline. Active books stay on their current
+    # placements — the reflow handles their quota redistribution. This prevents
+    # the scheduler from re-placing already-running books (which would shift
+    # their start dates and thrash quotas daily).
+    #
+    # Immediate triggers (add/reorder/profile change) still call schedule!
+    # with full re-leveling when the user takes a deliberate action.
+    if heijunka_mode? && queued_books_waiting?
       ReadingListScheduler.new(@user).schedule!
-      goals.each do |goal|
-        next if promoted_ids.include?(goal.id)
-        next if goal.auto_scheduled? && goal.position.present? && !goal.has_reading_sessions?
-        redistribute_remaining(goal)
-      end
-    else
-      goals.each { |goal| redistribute_remaining(goal) unless promoted_ids.include?(goal.id) }
+    end
+
+    goals.each do |goal|
+      next if promoted_ids.include?(goal.id)
+      redistribute_remaining(goal)
     end
 
     @user.update_column(:quotas_generated_on, Date.current)
@@ -152,6 +154,10 @@ class DailyReflow
 
   def derived_daily_budget
     ReadingListScheduler.new(@user).metrics[:derived_budget]
+  end
+
+  def queued_books_waiting?
+    @user.reading_goals.where(status: :queued, auto_scheduled: true).exists?
   end
 
   def heijunka_mode?

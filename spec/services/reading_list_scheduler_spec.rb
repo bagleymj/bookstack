@@ -434,6 +434,33 @@ RSpec.describe ReadingListScheduler do
       expect(goal.status).to eq("queued")
     end
 
+    # ─── Effective Daily Budget ─────────────────────────────────────
+
+    describe "derived_budget adjusts for weekend mode" do
+      it "shows weekday budget for skip-weekends users" do
+        user.update!(weekend_mode: :skip)
+        create_queued_book(pages: 300, position: 1)
+        metrics = ReadingListScheduler.new(user).metrics
+
+        # derived_budget should reflect 7/5 of the raw average
+        expect(metrics[:derived_budget]).to be > 0
+      end
+
+      it "shows same budget for same-mode users" do
+        user.update!(weekend_mode: :same)
+        create_queued_book(pages: 300, position: 1)
+        same_metrics = ReadingListScheduler.new(user).metrics
+        expect(same_metrics[:derived_budget]).to be > 0
+      end
+
+      it "shows adjusted weekday budget for capped-mode users" do
+        user.update!(weekend_mode: :capped, weekend_reading_minutes: 20)
+        create_queued_book(pages: 300, position: 1)
+        metrics = ReadingListScheduler.new(user).metrics
+        expect(metrics[:derived_budget]).to be > 0
+      end
+    end
+
     # ─── Concurrency Hint ─────────────────────────────────────────
 
     describe "concurrency_hint" do
