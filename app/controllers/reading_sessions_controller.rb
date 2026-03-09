@@ -65,6 +65,9 @@ class ReadingSessionsController < ApplicationController
 
         # Analyze difficulty
         DifficultyAnalyzer.new(@book).analyze!
+
+        # Reschedule if this session is against a queued book on the reading list
+        reschedule_if_queued!(@book)
       end
 
       redirect_to @reading_session, notice: "Great session! You read #{@reading_session.pages_read} pages in #{format_duration(@reading_session.duration_seconds)}."
@@ -130,6 +133,12 @@ class ReadingSessionsController < ApplicationController
     current_user.reading_goals.active.where(book: @reading_session.book).each do |goal|
       quota = goal.today_quota
       quota&.record_pages!(pages_read)
+    end
+  end
+
+  def reschedule_if_queued!(book)
+    if book.reading_goals.where(status: :queued, auto_scheduled: true).exists?
+      ReadingListScheduler.new(current_user).schedule!
     end
   end
 end

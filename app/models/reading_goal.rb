@@ -211,12 +211,10 @@ class ReadingGoal < ApplicationRecord
 
   def mark_completed!
     update!(status: :completed)
-    ReadingListScheduler.new(user).schedule! if auto_scheduled?
   end
 
   def mark_abandoned!
     update!(status: :abandoned)
-    ReadingListScheduler.new(user).schedule! if auto_scheduled?
   end
 
   def reschedule!(new_start, new_end)

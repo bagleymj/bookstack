@@ -20,7 +20,18 @@ class DailyReflow
 
     goals.each { |goal| mark_missed_quotas(goal) }
     promoted_ids = promote_spiking_goals!(goals)
-    goals.each { |goal| redistribute_remaining(goal) unless promoted_ids.include?(goal.id) }
+
+    # In heijunka mode, run the scheduler daily to fill open slots and re-level
+    # the pipeline. The scheduler handles all schedulable goals (queued + active
+    # without sessions). Only locked goals (active with sessions) need the
+    # reflow's page redistribution.
+    if heijunka_mode?
+      ReadingListScheduler.new(@user).schedule!
+      locked = goals.select(&:has_reading_sessions?)
+      locked.each { |goal| redistribute_remaining(goal) unless promoted_ids.include?(goal.id) }
+    else
+      goals.each { |goal| redistribute_remaining(goal) unless promoted_ids.include?(goal.id) }
+    end
 
     @user.update_column(:quotas_generated_on, Date.current)
   end

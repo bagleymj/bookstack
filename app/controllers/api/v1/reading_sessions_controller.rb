@@ -33,6 +33,7 @@ module Api
         if session.save
           book.start_reading! if book.unread?
           update_daily_quotas(session) if session.completed?
+          reschedule_if_queued!(book)
           render json: { reading_session: ReadingSessionSerializer.new(session).as_json }, status: :created
         else
           render_errors session.errors.full_messages
@@ -130,6 +131,12 @@ module Api
           quota = goal.today_quota
           next unless quota
           quota.record_pages!(session.calculated_pages_read)
+        end
+      end
+
+      def reschedule_if_queued!(book)
+        if book.reading_goals.where(status: :queued, auto_scheduled: true).exists?
+          ReadingListScheduler.new(current_user).schedule!
         end
       end
     end

@@ -38,7 +38,9 @@ class ReadingListScheduler
       projected_completions: projected,
       pace_target: target,
       queue_depth: queued_count,
-      queue_warning: queue_warning(queued_count, target, projected)
+      queue_warning: queue_warning(queued_count, target, projected),
+      concurrency_hint: concurrency_hint(budget, target),
+      ahead_suggestion: ahead_suggestion
     }
   end
 
@@ -462,7 +464,8 @@ class ReadingListScheduler
 
   def default_metrics
     { pace_status: nil, deficit: 0, derived_budget: 0,
-      projected_completions: 0, pace_target: 0, queue_depth: 0, queue_warning: nil }
+      projected_completions: 0, pace_target: 0, queue_depth: 0, queue_warning: nil,
+      concurrency_hint: nil, ahead_suggestion: nil }
   end
 
   def pace_status_label(target)
@@ -479,5 +482,39 @@ class ReadingListScheduler
     shortfall = target - projected
     return nil if shortfall <= 0
     "Add #{shortfall}+ books to maintain your pace"
+  end
+
+  def concurrency_hint(daily_budget, target)
+    return nil unless daily_budget&.positive? && target > 0
+    limit = effective_concurrency_limit
+    return nil unless limit
+
+    window = build_budget_window([target, 1].max)
+    return nil if window.empty?
+
+    avg_book_minutes = window.sum { |book| full_book_minutes(book) }.to_f / window.size
+    takt_days = 365.0 / target
+    avg_book_days = avg_book_minutes / daily_budget
+    min_concurrent = (avg_book_days / takt_days).ceil
+
+    return nil if limit >= min_concurrent
+
+    "Your schedule could flow more smoothly with #{min_concurrent} concurrent books"
+  end
+
+  def ahead_suggestion
+    active_goals = @user.reading_goals.active.includes(:book)
+    all_done = active_goals.empty? || active_goals.all? { |g| g.book.remaining_pages <= 0 }
+    return nil unless all_done
+
+    next_queued = @user.reading_goals
+                       .where(status: :queued, auto_scheduled: true)
+                       .where.not(position: nil)
+                       .order(:position)
+                       .includes(:book)
+                       .first
+    return nil unless next_queued
+
+    "You're ahead of schedule! Consider starting: #{next_queued.book.title}"
   end
 end
