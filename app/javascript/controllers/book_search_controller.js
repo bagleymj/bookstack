@@ -1,8 +1,14 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["input", "results", "loading", "form"]
-  static values = { url: String, editionsUrl: String, amazonTag: String }
+  static targets = ["input", "results", "loading", "form", "editToggle", "editSearch"]
+  static values = {
+    url: String,
+    editionsUrl: String,
+    amazonTag: String,
+    mode: { type: String, default: "new" },
+    workKey: String
+  }
 
   connect() {
     this.debounceTimer = null
@@ -21,17 +27,53 @@ export default class extends Controller {
 
     // Keyboard navigation
     this.boundKeydown = this.handleKeydown.bind(this)
-    this.inputTarget.addEventListener("keydown", this.boundKeydown)
+    if (this.hasInputTarget) {
+      this.inputTarget.addEventListener("keydown", this.boundKeydown)
+    }
 
     this.selectedIndex = -1
   }
 
   disconnect() {
     document.removeEventListener("click", this.boundClickOutside)
-    this.inputTarget.removeEventListener("keydown", this.boundKeydown)
+    if (this.hasInputTarget) {
+      this.inputTarget.removeEventListener("keydown", this.boundKeydown)
+    }
     if (this.debounceTimer) clearTimeout(this.debounceTimer)
     if (this.abortController) this.abortController.abort()
   }
+
+  // --- Edit mode toggle ---
+
+  showEditSearch() {
+    if (this.hasEditToggleTarget) this.editToggleTarget.classList.add("hidden")
+    if (this.hasEditSearchTarget) this.editSearchTarget.classList.remove("hidden")
+    // Re-bind keyboard handler now that input is visible
+    if (this.hasInputTarget) {
+      this.inputTarget.removeEventListener("keydown", this.boundKeydown)
+      this.inputTarget.addEventListener("keydown", this.boundKeydown)
+    }
+  }
+
+  hideEditSearch() {
+    if (this.hasEditSearchTarget) this.editSearchTarget.classList.add("hidden")
+    if (this.hasEditToggleTarget) this.editToggleTarget.classList.remove("hidden")
+    this.hideResults()
+    if (this.hasInputTarget) this.inputTarget.value = ""
+  }
+
+  showCurrentEditions() {
+    if (!this.workKeyValue) return
+    // Create a minimal work object to fetch editions directly
+    const work = {
+      key: this.workKeyValue,
+      title: document.getElementById("book_title")?.value || "Current book",
+      author: document.getElementById("book_author")?.value || ""
+    }
+    this.showEditionsForWork(work)
+  }
+
+  // --- Click outside / keyboard ---
 
   handleClickOutside(event) {
     if (!this.element.contains(event.target)) {
@@ -62,6 +104,8 @@ export default class extends Controller {
       case "Escape":
         if (this.viewMode === "editions") {
           this.showWorksView()
+        } else if (this.modeValue === "edit") {
+          this.hideEditSearch()
         } else {
           this.hideResults()
           this.inputTarget.blur()
@@ -488,32 +532,48 @@ export default class extends Controller {
   selectEdition(edition) {
     const work = this.selectedWork
 
-    // Use work-level author, edition-level title (or fall back to work title)
-    this.setFormField("book_title", edition.title || work?.title)
-    this.setFormField("book_author", work?.author)
-    this.setFormField("book_isbn", edition.isbn)
-    this.setFormField("book_cover_image_url", edition.cover_url || work?.cover_url)
-
-    if (edition.pages) {
-      this.setFormField("book_last_page", String(edition.pages))
+    if (this.modeValue === "edit") {
+      // In edit mode, only update edition-specific fields (not title/author)
+      this.setFormField("book_isbn", edition.isbn)
+      this.setFormField("book_cover_image_url", edition.cover_url || work?.cover_url)
+      if (edition.pages) {
+        this.setFormField("book_last_page", String(edition.pages))
+      }
+    } else {
+      // In new mode, populate all fields
+      this.setFormField("book_title", edition.title || work?.title)
+      this.setFormField("book_author", work?.author)
+      this.setFormField("book_isbn", edition.isbn)
+      this.setFormField("book_cover_image_url", edition.cover_url || work?.cover_url)
+      if (edition.pages) {
+        this.setFormField("book_last_page", String(edition.pages))
+      }
     }
 
+    // Always update the work key
+    this.setFormField("book_open_library_work_key", work?.key)
+
     // Clear search and hide results
-    this.inputTarget.value = ""
+    if (this.hasInputTarget) this.inputTarget.value = ""
     this.viewMode = "works"
     this.selectedWork = null
     this.hideResults()
 
-    // Focus the first empty required field
-    const lastPageField = document.getElementById("book_last_page")
-    const titleField = document.getElementById("book_title")
-    if (!lastPageField?.value) {
-      lastPageField?.focus()
+    if (this.modeValue === "edit") {
+      // In edit mode, collapse the search back to the button
+      this.hideEditSearch()
+      this.showConfirmation("Edition updated")
     } else {
-      titleField?.focus()
+      // Focus the first empty required field
+      const lastPageField = document.getElementById("book_last_page")
+      const titleField = document.getElementById("book_title")
+      if (!lastPageField?.value) {
+        lastPageField?.focus()
+      } else {
+        titleField?.focus()
+      }
+      this.showConfirmation(edition.title || work?.title)
     }
-
-    this.showConfirmation(edition.title || work?.title)
   }
 
   // --- Shared helpers ---
@@ -556,7 +616,7 @@ export default class extends Controller {
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
         </svg>
-        <span>Added: ${this.escapeHtml(title)}</span>
+        <span>${this.escapeHtml(title)}</span>
       </div>
     `
     document.body.appendChild(toast)

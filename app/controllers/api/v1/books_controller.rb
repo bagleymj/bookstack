@@ -68,7 +68,8 @@ module Api
       def book_params
         params.require(:book).permit(
           :title, :author, :first_page, :last_page,
-          :words_per_page, :difficulty, :cover_image_url, :isbn
+          :words_per_page, :difficulty, :cover_image_url, :isbn,
+          :open_library_work_key
         )
       end
 
