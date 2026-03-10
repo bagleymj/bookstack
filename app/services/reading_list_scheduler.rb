@@ -57,14 +57,14 @@ class ReadingListScheduler
     return if @daily_target <= 0
     compute_weekend_targets
 
-    # Phase 3: Monday-by-Monday bin filling
+    # Phase 3: Slot-by-slot bin filling (first slot may be mid-week)
     @load_profile = Hash.new(0.0)
     @concurrent_count = Hash.new(0)
     @timeline_end = nil
 
     locked_goals.each { |goal| add_goal_to_profiles(goal) }
 
-    @placements = monday_fill_placements(gather_schedulable_goals)
+    @placements = fill_placements(gather_schedulable_goals)
 
     # Phase 4: Verify throughput
     verify_throughput!
@@ -149,23 +149,26 @@ class ReadingListScheduler
     date.on_weekend? ? @weekend_target : @weekday_target
   end
 
-  # ─── Phase 3: Monday-by-Monday Bin Filling ─────────────────────
+  # ─── Phase 3: Slot-by-Slot Bin Filling ─────────────────────────
+  #
+  # The first slot starts today (mid-week ramp-in); subsequent slots
+  # start on Mondays. Tier end dates always land on Sundays.
 
-  def monday_fill_placements(goals)
+  def fill_placements(goals)
     return [] if goals.empty?
 
     share_index = build_share_index(goals)
     unscheduled = goals.map(&:id).to_set
     placements = []
 
-    each_monday do |monday|
+    each_placement_start do |slot_start|
       break if unscheduled.empty?
 
-      # Skip if spillover from prior multi-week placements already fills this Monday
-      next if monday_at_or_above_target?(monday)
+      # Skip if spillover from prior multi-week placements already fills this slot
+      next if slot_at_or_above_target?(slot_start)
 
-      # Find the best combination of books to start this Monday
-      combo = best_combination_for(share_index, goals, unscheduled, monday)
+      # Find the best combination of books to start at this slot
+      combo = best_combination_for(share_index, goals, unscheduled, slot_start)
       next if combo.empty?
 
       combo.each do |entry|
@@ -195,31 +198,31 @@ class ReadingListScheduler
     index
   end
 
-  def compute_share_for(book_minutes, monday, tier)
-    end_date = calendar_end(monday, tier)
-    share = compute_weekday_share(book_minutes, monday, end_date)
+  def compute_share_for(book_minutes, slot_start, tier)
+    end_date = calendar_end(slot_start, tier)
+    share = compute_weekday_share(book_minutes, slot_start, end_date)
     return nil if share <= 0
-    { start: monday, end: end_date, share: share, tier: tier }
+    { start: slot_start, end: end_date, share: share, tier: tier }
   end
 
-  def monday_at_or_above_target?(monday)
-    target = target_for_date(monday)
+  def slot_at_or_above_target?(slot_start)
+    target = target_for_date(slot_start)
     return true if target <= 0
-    @load_profile[monday] >= target
+    @load_profile[slot_start] >= target
   end
 
   # Find the combination of (anchor + 0..N companions) × tiers that
   # overshoots the daily target by the least. The anchor is the next
   # unscheduled book in queue order. If no combination reaches the
   # target, pick the one that gets closest.
-  def best_combination_for(share_index, goals, unscheduled, monday)
-    target = target_for_date(monday)
-    current_load = @load_profile[monday]
-    open_slots = available_concurrency_slots(monday)
+  def best_combination_for(share_index, goals, unscheduled, slot_start)
+    target = target_for_date(slot_start)
+    current_load = @load_profile[slot_start]
+    open_slots = available_concurrency_slots(slot_start)
     return [] if open_slots <= 0
 
     # Build candidate placements: each unscheduled book × each tier
-    candidates = build_candidates(share_index, goals, unscheduled, monday)
+    candidates = build_candidates(share_index, goals, unscheduled, slot_start)
     return [] if candidates.empty?
 
     # The anchor is the first unscheduled book in queue order
@@ -238,7 +241,7 @@ class ReadingListScheduler
     # Try each tier for the anchor
     anchor_options.each do |anchor|
       # Anchor alone
-      evaluate_combination([anchor], current_load, target, monday, best_score) do |score|
+      evaluate_combination([anchor], current_load, target, best_score) do |score|
         best_score = score
         best_combo = [anchor]
       end
@@ -247,9 +250,9 @@ class ReadingListScheduler
 
       # Anchor + 1 companion
       companion_options.each do |c1|
-        next if dates_overlap_exceeds_slots?(anchor, c1, monday, open_slots)
+        next if dates_overlap_exceeds_slots?(anchor, c1, open_slots)
 
-        evaluate_combination([anchor, c1], current_load, target, monday, best_score) do |score|
+        evaluate_combination([anchor, c1], current_load, target, best_score) do |score|
           best_score = score
           best_combo = [anchor, c1]
         end
@@ -260,9 +263,9 @@ class ReadingListScheduler
         companion_options.each do |c2|
           next if c2[:goal_id] <= c1[:goal_id]  # avoid duplicate pairs
           next if c2[:goal_id] == c1[:goal_id]   # same book can't appear twice
-          next if dates_overlap_exceeds_slots?(anchor, c1, c2, monday, open_slots)
+          next if dates_overlap_exceeds_slots?(anchor, c1, c2, open_slots)
 
-          evaluate_combination([anchor, c1, c2], current_load, target, monday, best_score) do |score|
+          evaluate_combination([anchor, c1, c2], current_load, target, best_score) do |score|
             best_score = score
             best_combo = [anchor, c1, c2]
           end
@@ -279,25 +282,25 @@ class ReadingListScheduler
     end
   end
 
-  def build_candidates(share_index, goals, unscheduled, monday)
+  def build_candidates(share_index, goals, unscheduled, slot_start)
     candidates = []
     goals.each do |goal|
       next unless unscheduled.include?(goal.id)
       entry = share_index[goal.id]
 
       TIERS.each do |tier|
-        placement = compute_share_for(entry[:book_minutes], monday, tier)
+        placement = compute_share_for(entry[:book_minutes], slot_start, tier)
         next unless placement
         next unless fits_concurrency?(placement[:start], placement[:end])
 
-        monday_share = share_for_date(placement[:share], monday)
-        next if monday_share < MIN_DAILY_SHARE
+        slot_share = share_for_date(placement[:share], slot_start)
+        next if slot_share < MIN_DAILY_SHARE
 
         candidates << {
           goal_id: goal.id,
           placement: placement,
           book_minutes: entry[:book_minutes],
-          monday_share: monday_share
+          slot_share: slot_share
         }
       end
     end
@@ -314,8 +317,8 @@ class ReadingListScheduler
   # Adding max_tier (weeks) to gap.abs (minutes) penalizes long tiers that
   # create extended low-load tails, while naturally preferring close-to-target
   # combos when the gap is large (short tiers for big books overshoot hugely).
-  def evaluate_combination(combo, current_load, target, monday, current_best)
-    total_share = combo.sum { |c| c[:monday_share] }
+  def evaluate_combination(combo, current_load, target, current_best)
+    total_share = combo.sum { |c| c[:slot_share] }
     projected = current_load + total_share
     gap = projected - target
 
@@ -330,20 +333,17 @@ class ReadingListScheduler
     end
   end
 
-  def available_concurrency_slots(monday)
+  def available_concurrency_slots(slot_start)
     limit = effective_concurrency_limit
     return TIERS.size unless limit  # effectively unlimited
-    [limit - @concurrent_count[monday], 0].max
+    [limit - @concurrent_count[slot_start], 0].max
   end
 
   # Check that placing these candidates together doesn't exceed concurrency
-  # on any reading day they share. Quick check: the worst case is on monday
-  # itself (all start the same day), plus we check individual placements.
-  def dates_overlap_exceeds_slots?(*candidates, monday, open_slots)
+  # on any reading day they share. Quick check: the worst case is on the
+  # slot start (all start the same day), plus we check individual placements.
+  def dates_overlap_exceeds_slots?(*candidates, open_slots)
     return false if open_slots >= candidates.size
-
-    # Count how many candidates overlap on monday (they all start monday,
-    # so all overlap there). The open_slots already accounts for existing load.
     candidates.size > open_slots
   end
 
@@ -372,11 +372,17 @@ class ReadingListScheduler
     share
   end
 
-  def each_monday
-    monday = snap_to_monday(Date.current)
+  # Yields today first (mid-week ramp-in), then subsequent Mondays.
+  # When today IS Monday, yields today and then Monday+7, Monday+14, etc.
+  def each_placement_start
+    start = Date.current
+    unless start.monday?
+      yield start
+      start = start.beginning_of_week(:monday) + 7
+    end
     PLACEMENT_HORIZON_WEEKS.times do
-      yield monday
-      monday += 7
+      yield start
+      start += 7
     end
   end
 
@@ -415,7 +421,7 @@ class ReadingListScheduler
   end
 
   def default_placement(book_minutes)
-    start = snap_to_monday(Date.current)
+    start = Date.current
     tier = TIERS.last
     end_date = calendar_end(start, tier)
     share = compute_weekday_share(book_minutes, start, end_date)
@@ -586,13 +592,11 @@ class ReadingListScheduler
 
   # ─── Calendar Helpers ──────────────────────────────────────────
 
-  def snap_to_monday(date)
-    return date if date.monday?
-    date + ((1 - date.wday) % 7)
-  end
-
+  # End date is always computed from the week's Monday, so tier
+  # boundaries always land on Sundays regardless of start day.
   def calendar_end(start_date, tier)
-    start_date + (TIER_WEEKS[tier] * 7) - 1
+    ref_monday = start_date.beginning_of_week(:monday)
+    ref_monday + (TIER_WEEKS[tier] * 7) - 1
   end
 
   def count_reading_days(start_date, end_date)

@@ -36,7 +36,6 @@ RSpec.describe ReadingListScheduler do
       expect(goal.status).to eq("active")
       expect(goal.started_on).to be_present
       expect(goal.target_completion_date).to be_present
-      expect(goal.started_on).to be_monday
     end
 
     it "generates daily quotas for placed books" do
@@ -57,21 +56,10 @@ RSpec.describe ReadingListScheduler do
       goals = user.reading_goals.active.order(:position)
       expect(goals.map { |g| g.book.title }).to eq(%w[First Second Third])
 
-      # All books should be placed with valid Monday-aligned dates
       goals.each do |goal|
         expect(goal.started_on).to be_present
         expect(goal.target_completion_date).to be_present
-        expect(goal.started_on).to be_monday
         expect(goal.started_on).to be < goal.target_completion_date
-      end
-    end
-
-    it "snaps all start dates to Mondays" do
-      5.times { |i| create_queued_book(pages: 200 + i * 50, position: i + 1, title: "Book #{i}") }
-      schedule!
-
-      user.reading_goals.active.each do |goal|
-        expect(goal.started_on).to be_monday, "#{goal.book.title} started on #{goal.started_on} (#{goal.started_on.strftime('%A')})"
       end
     end
 
@@ -81,6 +69,74 @@ RSpec.describe ReadingListScheduler do
 
       user.reading_goals.active.each do |goal|
         expect(goal.target_completion_date).to be_sunday
+      end
+    end
+
+    context "when run on a Monday" do
+      it "starts all books on Mondays" do
+        monday = Date.current.beginning_of_week(:monday)
+        monday += 7 unless Date.current.monday?  # next Monday if today isn't one
+
+        travel_to monday do
+          5.times { |i| create_queued_book(pages: 200 + i * 50, position: i + 1, title: "Book #{i}") }
+          schedule!
+
+          user.reading_goals.active.each do |goal|
+            expect(goal.started_on).to be_monday,
+              "#{goal.book.title} started on #{goal.started_on} (#{goal.started_on.strftime('%A')})"
+          end
+        end
+      end
+    end
+
+    context "when run mid-week (Wednesday)" do
+      let(:wednesday) { Date.current.beginning_of_week(:monday) + 2 }
+
+      it "starts the first batch today, subsequent batches on Mondays" do
+        travel_to wednesday do
+          8.times { |i| create_queued_book(pages: 300, position: i + 1, title: "Book #{i}") }
+          schedule!
+
+          goals = user.reading_goals.active.order(:started_on, :position)
+          first_batch_start = goals.first.started_on
+          expect(first_batch_start).to eq(wednesday)
+          expect(first_batch_start).to be_wednesday
+
+          # Any books starting after the first batch should start on a Monday
+          later_goals = goals.select { |g| g.started_on > first_batch_start }
+          later_goals.each do |goal|
+            expect(goal.started_on).to be_monday,
+              "#{goal.book.title} started on #{goal.started_on} (#{goal.started_on.strftime('%A')})"
+          end
+        end
+      end
+
+      it "ends all tiers on Sundays even with mid-week start" do
+        travel_to wednesday do
+          3.times { |i| create_queued_book(pages: 300, position: i + 1) }
+          schedule!
+
+          user.reading_goals.active.each do |goal|
+            expect(goal.target_completion_date).to be_sunday,
+              "Goal ending #{goal.target_completion_date} (#{goal.target_completion_date.strftime('%A')}) is not Sunday"
+          end
+        end
+      end
+
+      it "computes share over actual remaining days (not full week)" do
+        travel_to wednesday do
+          create_queued_book(pages: 300, position: 1)
+          schedule!
+
+          goal = user.reading_goals.active.first
+          # Wednesday to Sunday of the tier end — fewer days than a full
+          # Monday-start tier, so more pages per day
+          reading_days = (goal.started_on..goal.target_completion_date).count
+          full_week_days = (goal.started_on.beginning_of_week(:monday)..goal.target_completion_date).count
+
+          expect(reading_days).to be < full_week_days
+          expect(goal.daily_quotas.count).to eq(reading_days)
+        end
       end
     end
   end
@@ -158,27 +214,38 @@ RSpec.describe ReadingListScheduler do
   # ─── Tier Selection (Phase 3) ──────────────────────────────────
 
   describe "tier selection" do
-    it "places a short book in a short tier" do
-      create_queued_book(pages: 100, position: 1)
-      schedule!
+    # Pin to Monday so tier day counts are deterministic
+    let(:monday) do
+      d = Date.current.beginning_of_week(:monday)
+      d += 7 unless Date.current.monday?
+      d
+    end
 
-      goal = user.reading_goals.active.first
-      calendar_days = (goal.target_completion_date - goal.started_on).to_i + 1
-      expect(calendar_days).to be <= 14 # 1 or 2 week tier
+    it "places a short book in a short tier" do
+      travel_to monday do
+        create_queued_book(pages: 100, position: 1)
+        schedule!
+
+        goal = user.reading_goals.active.first
+        calendar_days = (goal.target_completion_date - goal.started_on).to_i + 1
+        expect(calendar_days).to be <= 14 # 1 or 2 week tier
+      end
     end
 
     it "places a long book in a longer tier than a short book" do
-      # Mix of short and long books — the long one should get a longer tier
-      5.times { |i| create_queued_book(pages: 200, position: i + 1, title: "Short #{i}") }
-      create_queued_book(pages: 1500, position: 6, title: "Long One")
-      schedule!
+      travel_to monday do
+        # Mix of short and long books — the long one should get a longer tier
+        5.times { |i| create_queued_book(pages: 200, position: i + 1, title: "Short #{i}") }
+        create_queued_book(pages: 1500, position: 6, title: "Long One")
+        schedule!
 
-      short_goal = user.reading_goals.active.joins(:book).find_by(books: { title: "Short 0" })
-      long_goal = user.reading_goals.active.joins(:book).find_by(books: { title: "Long One" })
+        short_goal = user.reading_goals.active.joins(:book).find_by(books: { title: "Short 0" })
+        long_goal = user.reading_goals.active.joins(:book).find_by(books: { title: "Long One" })
 
-      short_days = (short_goal.target_completion_date - short_goal.started_on).to_i + 1
-      long_days = (long_goal.target_completion_date - long_goal.started_on).to_i + 1
-      expect(long_days).to be > short_days
+        short_days = (short_goal.target_completion_date - short_goal.started_on).to_i + 1
+        long_days = (long_goal.target_completion_date - long_goal.started_on).to_i + 1
+        expect(long_days).to be > short_days
+      end
     end
 
     it "keeps daily load level across concurrent books" do
