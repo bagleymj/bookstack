@@ -286,13 +286,14 @@ and book mix require. If the user wants a lower daily commitment, they
 adjust their pace target or choose shorter books. The controls are the
 inputs (pace, book selection), not the output (target).
 
-### Phase 3: Monday-by-Monday bin filling
+### Phase 3: Combinatorial Monday bin filling
 
-Instead of placing books and then scoring the result, the scheduler
-**fills time slots**. It walks Mondays in order and fills each one to
-just above the daily target before advancing. This naturally produces
-level schedules because the fill-forward approach guarantees every
-Monday carries at least target-level load.
+Instead of placing books one at a time, the scheduler **evaluates all
+valid (book, tier) combinations per Monday** and picks the best one.
+It walks Mondays in order, filling each to just above the daily target
+before advancing. This naturally produces level schedules because the
+fill-forward approach guarantees every Monday carries at least
+target-level load.
 
 **Algorithm**:
 
@@ -303,47 +304,61 @@ Monday carries at least target-level load.
 3. For each Monday:
    - **Skip** if spillover from prior multi-week placements already
      puts this Monday at or above target.
-   - **Fill loop**: Take the next unscheduled book (queue order). Try
-     tiers shortest to longest — use the first tier whose daily share
-     fits under remaining headroom (keeps Monday below target). If
-     placement keeps Monday under target, continue filling.
-   - **Backfill**: When no book fits under target, find the (book, tier)
-     across all remaining books that overshoots target by the least
-     amount. Place it — Monday is filled — advance to the next Monday.
+   - **Combo search**: The first unscheduled book (queue order) is the
+     **anchor**. Generate all candidates: (book, tier) pairs for every
+     unscheduled book × every tier that fits concurrency constraints.
+     Evaluate all combinations of anchor + 0 to N companions (N =
+     available concurrency slots − 1). Pick the combination with the
+     best score and place all books in that combination.
 4. Any books still unscheduled after the horizon get a fallback
    52-week placement.
+
+**Scoring**: Each combination is scored as a tuple
+`[bucket, gap.abs + max_tier, combo_size]`:
+- **Bucket 0** ("close"): projected load is at/above target, or just
+  under (within `CEILING_TOLERANCE` of 15 minutes).
+- **Bucket 1** ("far under"): more than 15 minutes below target.
+- Within each bucket, **blend distance-from-target with compactness**.
+  Adding `max_tier` (in weeks) to `gap.abs` (in minutes) penalizes
+  long tiers that produce extended low-load tails. When two combos are
+  similarly close to target, the one with shorter tiers wins.
+- **Fewer concurrent books** as final tiebreaker (less WIP).
 
 ```
 for each monday (earliest first):
   skip if load already >= target (from spillover)
   break if no unscheduled books remain
 
-  loop:
-    try next unscheduled book in shortest-fitting tier
-    if fits under target → place it, continue filling
-    if at/above target → Monday done, advance
-    if nothing fits → backfill with min-overshoot → advance
+  anchor = first unscheduled book (queue order)
+  candidates = all (book, tier) pairs for unscheduled books
+  best = nil
+
+  for each anchor_tier:
+    evaluate [anchor/tier] alone
+    for each companion1:
+      evaluate [anchor/tier, companion1/tier]
+      for each companion2 (if slots allow):
+        evaluate [anchor/tier, companion1/tier, companion2/tier]
+
+  place best combination → advance
 ```
 
 **Key properties**:
 
-- **Every Monday filled above target**: The algorithm guarantees
-  `load >= target` before advancing. No Monday is left under-filled.
-- **Queue order preserved**: Books are placed in the user's reading
-  list order (position), not sorted by size.
-- **Shortest-fitting tier preferred**: For each book, try tiers from
-  shortest to longest; use the first one whose daily share fits under
-  remaining headroom. This naturally selects longer tiers when headroom
-  is tight (a short tier's high share would overshoot).
-- **Backfill = minimal overshoot**: When no book fits under target,
-  pick the (book, tier) that overshoots by the least — this is the
-  "just above target" behavior.
+- **Combinatorial, not greedy**: All valid combinations are evaluated
+  per Monday, so the algorithm finds the globally best mix of books
+  and tiers for that week — no lock-in from earlier greedy choices.
+- **Queue order preserved**: The anchor is always the first unscheduled
+  book. Companions may come from anywhere in the remaining queue.
+- **Compact schedules preferred**: The blended `gap.abs + max_tier`
+  score naturally avoids long-tail tiers (e.g. 52-week tier) when
+  shorter tiers produce a similarly close-to-target result.
 - **Self-leveling**: Multi-week tiers placed on early Mondays spill
   load into later Mondays, reducing headroom. Later Mondays may
   already be above target from spillover alone — they're simply skipped.
-- **No refinement pass needed**: Because the algorithm fills forward
-  with full knowledge of current load, it doesn't need post-hoc
-  correction. The fill-forward approach is inherently self-leveling.
+- **No refinement pass needed**: Because the algorithm evaluates all
+  combinations with full knowledge of current load, it doesn't need
+  post-hoc correction.
 
 ### Phase 4: Verify throughput
 
@@ -590,13 +605,14 @@ Tiers are preserved for psychological reasons (see CLAUDE.md). They provide:
 
 ### Tier selection criterion (restated)
 
-**Monday bin filling**: For each book, the scheduler tries tiers from
-shortest to longest and uses the first tier whose daily share fits
-under remaining headroom on the current Monday. When no tier fits
-under target, the (book, tier) combination that overshoots target by
-the least is chosen. This naturally selects longer tiers for larger
-books (their short-tier shares are too high) and shorter tiers for
-small books (they fit under headroom easily).
+**Combinatorial Monday bin filling**: For each Monday, the scheduler
+evaluates all valid (book, tier) combinations and scores them using
+`gap.abs + max_tier`. This blended score naturally selects longer tiers
+for larger books (their short-tier shares overshoot hugely, dominating
+the score) and shorter tiers for small books (their gap is small, so
+the tier component differentiates). The combo search considers the
+anchor book with 0-N companions, finding the combination that fills
+the Monday closest to target with the most compact schedule.
 
 ## Weekend Handling
 
@@ -749,13 +765,12 @@ The concurrency hard cap does not exist in the schema. Needs a
 
 ### ~~Gap 3: Phase 3 objective function~~ — RESOLVED
 
-**Decision: Monday-by-Monday bin filling.** Phase 3 walks Mondays in
-order, filling each to just above the daily target before advancing.
-For each Monday, books are tried in queue order with the shortest-
-fitting tier; when no book fits under target, the (book, tier) with
-minimal overshoot is placed. Multi-week tiers spill load into future
-Mondays, making the approach self-leveling with no separate refinement
-pass needed.
+**Decision: Combinatorial Monday bin filling.** Phase 3 walks Mondays
+in order, evaluating all valid (anchor + companion, tier) combinations
+per Monday and picking the best one. The blended score `gap.abs +
+max_tier` favors combos close to target with compact schedules. Multi-
+week tiers spill load into future Mondays, making the approach self-
+leveling with no separate refinement pass needed.
 
 ### ~~Gap 4: Phase 4 feedback loop~~ — RESOLVED
 
