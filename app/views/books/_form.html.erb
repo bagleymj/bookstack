@@ -34,7 +34,7 @@
   </div>
 <% else %>
   <!-- Edition switcher for existing books -->
-  <div data-controller="book-search" data-book-search-url-value="<%= api_v1_book_search_index_path %>" data-book-search-editions-url-value="<%= editions_api_v1_book_search_index_path %>" data-book-search-amazon-tag-value="<%= amazon_affiliate_tag %>" data-book-search-mode-value="edit" data-book-search-work-key-value="<%= book.open_library_work_key %>" class="mb-6">
+  <div data-controller="book-search" data-book-search-url-value="<%= api_v1_book_search_index_path %>" data-book-search-editions-url-value="<%= editions_api_v1_book_search_index_path %>" data-book-search-amazon-tag-value="<%= amazon_affiliate_tag %>" data-book-search-mode-value="edit" class="mb-6">
     <!-- Change Edition button -->
     <div data-book-search-target="editToggle">
       <button type="button" data-action="book-search#showEditSearch" class="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-500 transition-colors">
@@ -47,24 +47,22 @@
 
     <!-- Edition search panel (hidden until "Change edition" is clicked) -->
     <div data-book-search-target="editSearch" class="hidden">
-      <% unless book.open_library_work_key.present? %>
-        <!-- Full search bar — only shown when no work key (can't jump to editions directly) -->
+      <!-- Search bar for finding different editions -->
+      <div class="relative">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Search for a different edition</label>
         <div class="relative">
-          <label class="block text-sm font-medium text-gray-700 mb-1">Search for a different edition</label>
-          <div class="relative">
-            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-              <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-              </svg>
-            </div>
-            <input type="text"
-                   data-book-search-target="input"
-                   data-action="input->book-search#search"
-                   class="block w-full rounded-lg border-gray-300 pl-10 pr-4 py-3 text-base shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                   placeholder="Search by title, author, or ISBN...">
+          <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+            <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
           </div>
+          <input type="text"
+                 data-book-search-target="input"
+                 data-action="input->book-search#search"
+                 class="block w-full rounded-lg border-gray-300 pl-10 pr-4 py-3 text-base shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                 placeholder="Search by title, author, or ISBN...">
         </div>
-      <% end %>
+      </div>
 
       <!-- Editions dropdown (populated by JS) -->
       <div class="relative">
@@ -103,8 +101,6 @@
     </div>
   <% end %>
 
-  <%= form.hidden_field :open_library_work_key %>
-
   <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
     <div class="sm:col-span-2">
       <%= form.label :title, class: "block text-sm font-medium text-gray-700" %>
@@ -116,16 +112,63 @@
       <%= form.text_field :author, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm", placeholder: "Enter author name" %>
     </div>
 
-    <div>
-      <%= form.label :first_page, "First page", class: "block text-sm font-medium text-gray-700" %>
-      <%= form.number_field :first_page, min: 1, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm", placeholder: "1" %>
-      <p class="mt-1 text-xs text-gray-500">Where to start reading (skip intros, prefaces, etc.)</p>
-    </div>
+    <!-- Page Range Slider -->
+    <div class="sm:col-span-2"
+         data-controller="page-range-slider"
+         data-page-range-slider-min-value="1"
+         data-page-range-slider-max-value="<%= book.last_page || 0 %>"
+         data-page-range-slider-current-min-value="<%= book.first_page || 1 %>"
+         data-page-range-slider-current-max-value="<%= book.last_page || 0 %>"
+         data-page-range-slider-recommended-min-value="0"
+         data-page-range-slider-recommended-max-value="0">
+      <label class="block text-sm font-medium text-gray-700 mb-2">Reading range</label>
 
-    <div>
-      <%= form.label :last_page, "Last page", class: "block text-sm font-medium text-gray-700" %>
-      <%= form.number_field :last_page, min: 1, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm", placeholder: "Total pages" %>
-      <p class="mt-1 text-xs text-gray-500">Where to stop (skip indexes, appendices, etc.)</p>
+      <!-- Number inputs -->
+      <div class="flex items-center gap-3 mb-3">
+        <div class="flex-1">
+          <label for="book_first_page" class="block text-xs text-gray-500 mb-1">First page</label>
+          <%= form.number_field :first_page, min: 1,
+              data: { page_range_slider_target: "minInput", action: "input->page-range-slider#inputMin" },
+              class: "block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm",
+              placeholder: "1" %>
+        </div>
+        <div class="flex items-center pt-5">
+          <span class="text-gray-400">-</span>
+        </div>
+        <div class="flex-1">
+          <label for="book_last_page" class="block text-xs text-gray-500 mb-1">Last page</label>
+          <%= form.number_field :last_page, min: 1,
+              data: { page_range_slider_target: "maxInput", action: "input->page-range-slider#inputMax" },
+              class: "block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm",
+              placeholder: "Total pages" %>
+        </div>
+      </div>
+
+      <!-- Slider track -->
+      <div data-page-range-slider-target="track" class="relative h-6 select-none cursor-pointer">
+        <!-- Background track -->
+        <div class="absolute top-1/2 -translate-y-1/2 left-0 right-0 h-1.5 bg-gray-200 rounded-full"></div>
+
+        <!-- Recommended range indicator -->
+        <div data-page-range-slider-target="recommendedIndicator"
+             class="hidden absolute top-1/2 -translate-y-1/2 h-1.5 bg-green-200 rounded-full opacity-60"></div>
+
+        <!-- Active range highlight -->
+        <div data-page-range-slider-target="rangeHighlight"
+             class="absolute top-1/2 -translate-y-1/2 h-1.5 bg-indigo-500 rounded-full"></div>
+
+        <!-- Min handle -->
+        <div data-page-range-slider-target="minHandle"
+             data-action="mousedown->page-range-slider#startDragMin touchstart->page-range-slider#startDragMin"
+             class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full shadow cursor-grab active:cursor-grabbing hover:scale-110 transition-transform"></div>
+
+        <!-- Max handle -->
+        <div data-page-range-slider-target="maxHandle"
+             data-action="mousedown->page-range-slider#startDragMax touchstart->page-range-slider#startDragMax"
+             class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 bg-white border-2 border-indigo-500 rounded-full shadow cursor-grab active:cursor-grabbing hover:scale-110 transition-transform"></div>
+      </div>
+
+      <p class="mt-1 text-xs text-gray-500">Drag handles to set your reading range (skip intros, appendices, etc.)</p>
     </div>
 
     <div>

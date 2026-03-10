@@ -6,8 +6,7 @@ export default class extends Controller {
     url: String,
     editionsUrl: String,
     amazonTag: String,
-    mode: { type: String, default: "new" },
-    workKey: String
+    mode: { type: String, default: "new" }
   }
 
   connect() {
@@ -20,6 +19,7 @@ export default class extends Controller {
     this.allEditions = []          // unfiltered editions for current work
     this.editionFilter = ""        // text filter for editions
     this.editionFormatFilter = null // format chip filter (null = all)
+    this.searchType = "all"        // search type: "all", "title", "author", "isbn"
 
     // Close results on click outside
     this.boundClickOutside = this.handleClickOutside.bind(this)
@@ -48,13 +48,21 @@ export default class extends Controller {
   showEditSearch() {
     if (this.hasEditToggleTarget) this.editToggleTarget.classList.add("hidden")
 
-    // If we have a work key, skip straight to editions — no search box needed
-    if (this.workKeyValue) {
-      this.showCurrentEditions()
+    // Construct a work key from current title+author and jump to editions
+    const title = document.getElementById("book_title")?.value || ""
+    const author = document.getElementById("book_author")?.value || ""
+    if (title) {
+      if (this.hasEditSearchTarget) this.editSearchTarget.classList.remove("hidden")
+      const work = {
+        key: `${title}|||${author}`,
+        title: title,
+        author: author
+      }
+      this.showEditionsForWork(work)
       return
     }
 
-    // No work key — fall back to the full search bar
+    // No title — show the full search bar
     if (this.hasEditSearchTarget) this.editSearchTarget.classList.remove("hidden")
     if (this.hasInputTarget) {
       this.inputTarget.removeEventListener("keydown", this.boundKeydown)
@@ -68,19 +76,6 @@ export default class extends Controller {
     if (this.hasEditToggleTarget) this.editToggleTarget.classList.remove("hidden")
     this.hideResults()
     if (this.hasInputTarget) this.inputTarget.value = ""
-  }
-
-  showCurrentEditions() {
-    if (!this.workKeyValue) return
-    // Show the container (for the results dropdown) but keep the search input hidden
-    if (this.hasEditSearchTarget) this.editSearchTarget.classList.remove("hidden")
-    // Create a minimal work object to fetch editions directly
-    const work = {
-      key: this.workKeyValue,
-      title: document.getElementById("book_title")?.value || "Current book",
-      author: document.getElementById("book_author")?.value || ""
-    }
-    this.showEditionsForWork(work)
   }
 
   // --- Click outside / keyboard ---
@@ -161,7 +156,8 @@ export default class extends Controller {
     this.showLoading("Searching...")
 
     try {
-      const response = await fetch(`${this.urlValue}?q=${encodeURIComponent(query)}`, {
+      const searchTypeParam = this.searchType !== "all" ? `&search_type=${this.searchType}` : ""
+      const response = await fetch(`${this.urlValue}?q=${encodeURIComponent(query)}${searchTypeParam}`, {
         headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" },
         credentials: "same-origin",
         signal: this.abortController.signal
@@ -179,18 +175,56 @@ export default class extends Controller {
     }
   }
 
+  renderSearchTypeTabs() {
+    const types = [
+      { key: "all", label: "All" },
+      { key: "title", label: "Title" },
+      { key: "author", label: "Author" },
+      { key: "isbn", label: "ISBN" }
+    ]
+    return `
+      <div class="flex gap-1 px-3 py-2 border-b border-gray-100">
+        ${types.map(t => {
+          const active = this.searchType === t.key
+          const classes = active
+            ? "bg-indigo-100 text-indigo-700"
+            : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+          return `<button type="button" data-search-type="${t.key}" class="px-2.5 py-1 text-xs font-medium rounded-full transition-colors ${classes}">${t.label}</button>`
+        }).join("")}
+      </div>
+    `
+  }
+
+  bindSearchTypeTabs() {
+    this.resultsTarget.querySelectorAll("[data-search-type]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        this.searchType = btn.dataset.searchType
+        const query = this.inputTarget.value.trim()
+        if (query.length >= 2) {
+          this.performSearch(query)
+        }
+      })
+    })
+  }
+
   renderWorksResults(works) {
     this.selectedIndex = -1
     this.viewMode = "works"
 
+    const tabsHtml = this.renderSearchTypeTabs()
+
     if (works.length === 0) {
       this.resultsTarget.innerHTML = `
+        ${tabsHtml}
         <div class="p-4 text-center text-gray-500">
           <p>No books found</p>
           <p class="text-sm mt-1">Try a different search term</p>
         </div>
       `
       this.resultsTarget.classList.remove("hidden")
+      this.bindSearchTypeTabs()
       return
     }
 
@@ -224,8 +258,9 @@ export default class extends Controller {
       </button>
     `).join("")
 
-    this.resultsTarget.innerHTML = worksHtml
+    this.resultsTarget.innerHTML = tabsHtml + worksHtml
     this.resultsTarget.classList.remove("hidden")
+    this.bindSearchTypeTabs()
 
     // Bind click handlers for works
     this.resultsTarget.querySelectorAll("[data-book-result]").forEach(btn => {
@@ -528,8 +563,8 @@ export default class extends Controller {
   }
 
   showWorksView() {
-    // In edit mode with a work key, there's no works list to go back to — just close
-    if (this.modeValue === "edit" && this.workKeyValue) {
+    // In edit mode, there's no works list to go back to — just close
+    if (this.modeValue === "edit") {
       this.hideEditSearch()
       return
     }
@@ -566,8 +601,8 @@ export default class extends Controller {
       }
     }
 
-    // Always update the work key
-    this.setFormField("book_open_library_work_key", work?.key)
+    // Update the page range slider if present
+    this.updatePageRangeSlider(edition)
 
     // Clear search and hide results
     if (this.hasInputTarget) this.inputTarget.value = ""
@@ -589,6 +624,23 @@ export default class extends Controller {
         titleField?.focus()
       }
       this.showConfirmation(edition.title || work?.title)
+    }
+  }
+
+  updatePageRangeSlider(edition) {
+    const sliderEl = document.querySelector("[data-controller='page-range-slider']")
+    if (!sliderEl) return
+
+    const slider = this.application.getControllerForElementAndIdentifier(sliderEl, "page-range-slider")
+    if (!slider) return
+
+    if (edition.pages) {
+      slider.maxValue = edition.pages
+      slider.currentMinValue = edition.recommended_first_page || 1
+      slider.currentMaxValue = edition.recommended_last_page || edition.pages
+      slider.recommendedMinValue = edition.recommended_first_page || 0
+      slider.recommendedMaxValue = edition.recommended_last_page || 0
+      slider.syncToInput("both")
     }
   }
 
