@@ -560,12 +560,6 @@ RSpec.describe ReadingListScheduler do
         expect(same_metrics[:derived_target]).to be > 0
       end
 
-      it "shows adjusted weekday target for capped-mode users" do
-        user.update!(weekend_mode: :capped, weekend_reading_minutes: 20)
-        create_queued_book(pages: 300, position: 1)
-        metrics = ReadingListScheduler.new(user).metrics
-        expect(metrics[:derived_target]).to be > 0
-      end
     end
 
     # ─── Concurrency Hint ─────────────────────────────────────────

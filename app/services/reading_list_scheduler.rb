@@ -137,15 +137,11 @@ class ReadingListScheduler
 
   def compute_weekend_targets
     weekly_total = @daily_target * 7
-    case @user.weekend_mode
-    when "skip"
+    if @user.skip?
       @weekday_target = weekly_total / 5.0
       @weekend_target = 0.0
-    when "same"
+    else
       @weekday_target = @weekend_target = weekly_total / 7.0
-    when "capped"
-      @weekend_target = @user.weekend_reading_minutes.to_f
-      @weekday_target = [(weekly_total - @weekend_target * 2) / 5.0, 0.0].max
     end
   end
 
@@ -368,21 +364,12 @@ class ReadingListScheduler
   end
 
   def compute_weekday_share(book_minutes, start_date, end_date)
-    if @user.capped? && @weekday_target > 0
-      ratio = @weekend_target / @weekday_target
-      weekday_count = (start_date..end_date).count { |d| !d.on_weekend? }
-      weekend_count = (start_date..end_date).count { |d| d.on_weekend? }
-      effective_days = weekday_count + weekend_count * ratio
-      effective_days > 0 ? book_minutes.to_f / effective_days : 0
-    else
-      reading_days = count_reading_days(start_date, end_date)
-      reading_days > 0 ? book_minutes.to_f / reading_days : 0
-    end
+    reading_days = count_reading_days(start_date, end_date)
+    reading_days > 0 ? book_minutes.to_f / reading_days : 0
   end
 
-  def share_for_date(share, date)
-    return share unless @user.capped? && date.on_weekend? && @weekday_target > 0
-    share * (@weekend_target / @weekday_target)
+  def share_for_date(share, _date)
+    share
   end
 
   def each_monday
@@ -654,11 +641,7 @@ class ReadingListScheduler
   # not the raw average that includes zero-target weekends.
   def effective_daily_target(avg_target)
     return avg_target unless avg_target&.positive?
-    case @user.weekend_mode
-    when "skip"  then avg_target * 7.0 / 5.0
-    when "capped" then (avg_target * 7.0 - @user.weekend_reading_minutes.to_f * 2) / 5.0
-    else avg_target
-    end
+    @user.skip? ? avg_target * 7.0 / 5.0 : avg_target
   end
 
   def default_metrics
