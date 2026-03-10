@@ -119,7 +119,7 @@
             <dd class="mt-1 text-2xl font-bold text-green-900"><%= @reading_session.pages_read || 0 %></dd>
           </div>
           <div class="rounded-lg bg-amber-50 p-4 text-center">
-            <dt class="text-sm text-amber-600">Reading Speed</dt>
+            <dt class="text-sm text-amber-600">Est. Reading Speed</dt>
             <dd class="mt-1 text-2xl font-bold text-amber-900">
               <%= @reading_session.words_per_minute ? "#{@reading_session.words_per_minute.round} WPM" : "-" %>
             </dd>

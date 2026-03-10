@@ -230,7 +230,7 @@
 
       <!-- Stat Cards Grid -->
       <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
-        <%= render_stat_card(key: "reading_speed", label: "Reading Speed", value: "#{@stats.average_wpm.round} WPM") %>
+        <%= render_stat_card(key: "reading_speed", label: "Est. Reading Speed", value: "#{@stats.average_wpm.round} WPM") %>
         <%= render_stat_card(key: "total_sessions", label: "Total Sessions", value: @stats.total_sessions) %>
         <%= render_stat_card(key: "pages_read", label: "Pages Read", value: number_with_delimiter(@stats.total_pages_read)) %>
         <%= render_stat_card(key: "time_reading", label: "Time Reading", value: @stats.total_reading_time_formatted) %>

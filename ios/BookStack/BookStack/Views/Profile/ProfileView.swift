@@ -32,13 +32,13 @@ struct ProfileView: View {
                         if isEditing {
                             TextField("Words per Page", text: $wordsPerPage)
                                 .keyboardType(.numberPad)
-                            TextField("Reading Speed (WPM)", text: $readingSpeedWpm)
+                            TextField("Est. Reading Speed (WPM)", text: $readingSpeedWpm)
                                 .keyboardType(.numberPad)
                             TextField("Max Concurrent Books", text: $maxConcurrentBooks)
                                 .keyboardType(.numberPad)
                         } else {
                             LabeledContent("Words/Page", value: "\(profile.defaultWordsPerPage)")
-                            LabeledContent("Reading Speed", value: "\(profile.defaultReadingSpeedWpm) WPM")
+                            LabeledContent("Est. Reading Speed", value: "\(profile.defaultReadingSpeedWpm) WPM")
                             LabeledContent("Effective Speed", value: "\(Int(profile.effectiveReadingSpeed)) WPM")
                             LabeledContent("Max Concurrent", value: "\(profile.maxConcurrentBooks)")
                         }

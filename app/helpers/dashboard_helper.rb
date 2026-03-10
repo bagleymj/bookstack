@@ -1,7 +1,7 @@
 module DashboardHelper
   def stat_card_definitions
     [
-      { key: "reading_speed",        label: "Reading Speed",                            default: true },
+      { key: "reading_speed",        label: "Est. Reading Speed",                            default: true },
       { key: "total_sessions",       label: "Total Sessions",                           default: true },
       { key: "pages_read",           label: "Pages Read",                               default: true },
       { key: "time_reading",         label: "Time Reading",                             default: true },
