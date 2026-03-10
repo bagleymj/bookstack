@@ -8,6 +8,7 @@ class ReadingListScheduler
   MAX_ADJUSTMENT_ITERATIONS = 5
   PLACEMENT_HORIZON_WEEKS = 104
   CEILING_TOLERANCE = 15  # minutes above target before penalizing overshoot
+  MIN_DAILY_SHARE = 5     # minutes — don't flatten a book below this per day
 
   attr_reader :daily_target, :deficit
 
@@ -294,6 +295,8 @@ class ReadingListScheduler
         next unless fits_concurrency?(placement[:start], placement[:end])
 
         monday_share = share_for_date(placement[:share], monday)
+        next if monday_share < MIN_DAILY_SHARE
+
         candidates << {
           goal_id: goal.id,
           placement: placement,
