@@ -22,7 +22,7 @@ RSpec.describe "API V1 Pipeline", type: :request do
 
       heijunka = body["heijunka"]
       expect(heijunka["pace_target"]).to eq(50)
-      expect(heijunka["derived_budget"]).to be_a(Integer)
+      expect(heijunka["derived_target"]).to be_a(Integer)
       expect(heijunka).to have_key("pace_status")
       expect(heijunka).to have_key("deficit")
       expect(heijunka).to have_key("projected_completions")
@@ -36,7 +36,7 @@ RSpec.describe "API V1 Pipeline", type: :request do
 
       body = JSON.parse(response.body)
       expect(body["heijunka"]["pace_status"]).to be_nil
-      expect(body["heijunka"]["derived_budget"]).to eq(0)
+      expect(body["heijunka"]["derived_target"]).to eq(0)
     end
 
     it "returns queue warning when books are insufficient" do

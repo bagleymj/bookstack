@@ -158,9 +158,9 @@
             <% else %>
               <p class="mt-1 text-sm font-medium text-green-600">On pace</p>
             <% end %>
-            <% if @heijunka[:derived_budget] > 0 %>
+            <% if @heijunka[:derived_target] > 0 %>
               <p class="mt-1 text-xs text-gray-500">
-                <%= @heijunka[:derived_budget] %> min/day &middot;
+                <%= @heijunka[:derived_target] %> min/day &middot;
                 <%= @heijunka[:projected_completions] %> of <%= @heijunka[:pace_target] %> projected
               </p>
             <% end %>

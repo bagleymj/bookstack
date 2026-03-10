@@ -7,9 +7,9 @@ class ReadingListScheduler
   }.freeze
   MAX_ADJUSTMENT_ITERATIONS = 5
   PLACEMENT_HORIZON_WEEKS = 104
-  CEILING_TOLERANCE = 15  # minutes above budget before penalizing overshoot
+  CEILING_TOLERANCE = 15  # minutes above target before penalizing overshoot
 
-  attr_reader :target_budget, :deficit
+  attr_reader :daily_target, :deficit
 
   def initialize(user)
     @user = user
@@ -19,7 +19,7 @@ class ReadingListScheduler
     return default_metrics unless throughput_pace?
 
     measure_actuals!
-    budget = compute_target_budget
+    daily_target = compute_daily_target
     target = annual_pace.round
 
     pace_window_end = @pace_start + 365
@@ -35,12 +35,12 @@ class ReadingListScheduler
     {
       pace_status: pace_status_label(target),
       deficit: @deficit.round(1),
-      derived_budget: effective_daily_budget(budget).round,
+      derived_target: effective_daily_target(daily_target).round,
       projected_completions: projected,
       pace_target: target,
       queue_depth: queued_count,
       queue_warning: queue_warning(queued_count, target, projected),
-      concurrency_hint: concurrency_hint(budget, target),
+      concurrency_hint: concurrency_hint(daily_target, target),
       ahead_suggestion: ahead_suggestion
     }
   end
@@ -51,10 +51,10 @@ class ReadingListScheduler
     # Phase 1: Measure actuals
     measure_actuals!
 
-    # Phase 2: Compute derived daily budget
-    @target_budget = compute_target_budget
-    return if @target_budget <= 0
-    compute_weekend_budgets
+    # Phase 2: Compute derived daily target
+    @daily_target = compute_daily_target
+    return if @daily_target <= 0
+    compute_weekend_targets
 
     # Phase 3: Monday-by-Monday bin filling
     @load_profile = Hash.new(0.0)
@@ -93,18 +93,18 @@ class ReadingListScheduler
 
   # ─── Phase 2 ────────────────────────────────────────────────────
 
-  def compute_target_budget
+  def compute_daily_target
     books_remaining = [annual_pace - @actual_completed, 0].max
     return 0 if books_remaining <= 0
 
-    window = build_budget_window([annual_pace.round, 1].max)
+    window = build_pace_window([annual_pace.round, 1].max)
     return 0 if window.empty?
 
     avg_minutes = window.sum { |book| full_book_minutes(book) }.to_f / window.size
     (books_remaining * avg_minutes) / @days_remaining
   end
 
-  def build_budget_window(window_size)
+  def build_pace_window(window_size)
     list_books = @user.reading_goals
                       .where(auto_scheduled: true)
                       .where.not(position: nil)
@@ -134,22 +134,22 @@ class ReadingListScheduler
     (book.total_words.to_f / wpm).ceil
   end
 
-  def compute_weekend_budgets
-    weekly_total = @target_budget * 7
+  def compute_weekend_targets
+    weekly_total = @daily_target * 7
     case @user.weekend_mode
     when "skip"
-      @weekday_budget = weekly_total / 5.0
-      @weekend_budget = 0.0
+      @weekday_target = weekly_total / 5.0
+      @weekend_target = 0.0
     when "same"
-      @weekday_budget = @weekend_budget = weekly_total / 7.0
+      @weekday_target = @weekend_target = weekly_total / 7.0
     when "capped"
-      @weekend_budget = @user.weekend_reading_minutes.to_f
-      @weekday_budget = [(weekly_total - @weekend_budget * 2) / 5.0, 0.0].max
+      @weekend_target = @user.weekend_reading_minutes.to_f
+      @weekday_target = [(weekly_total - @weekend_target * 2) / 5.0, 0.0].max
     end
   end
 
-  def budget_for_date(date)
-    date.on_weekend? ? @weekend_budget : @weekday_budget
+  def target_for_date(date)
+    date.on_weekend? ? @weekend_target : @weekday_target
   end
 
   # ─── Phase 3: Monday-by-Monday Bin Filling ─────────────────────
@@ -165,24 +165,24 @@ class ReadingListScheduler
       break if unscheduled.empty?
 
       # Skip if spillover from prior multi-week placements already fills this Monday
-      next if monday_at_or_above_budget?(monday)
+      next if monday_at_or_above_target?(monday)
 
-      # Fill this Monday until load >= budget
+      # Fill this Monday until load >= target
       loop do
         break if unscheduled.empty?
 
         # Try to place a book that fits under remaining headroom (shortest tier first)
-        placed_under = try_fit_under_budget(share_index, goals, unscheduled, monday, placements)
+        placed_under = try_fit_under_target(share_index, goals, unscheduled, monday, placements)
 
         if placed_under
-          # Check if this Monday is now at/above budget
-          break if monday_at_or_above_budget?(monday)
-          next  # Still under budget — keep filling
+          # Check if this Monday is now at/above target
+          break if monday_at_or_above_target?(monday)
+          next  # Still under target — keep filling
         end
 
-        # No book fits under budget — backfill with min-overshoot to push over
+        # No book fits under target — backfill with min-overshoot to push over
         try_best_backfill(share_index, goals, unscheduled, monday, placements)
-        break  # Backfill guarantees we're over budget (or no valid placements exist)
+        break  # Backfill guarantees we're over target (or no valid placements exist)
       end
     end
 
@@ -214,27 +214,27 @@ class ReadingListScheduler
     { start: monday, end: end_date, share: share, tier: tier }
   end
 
-  def monday_at_or_above_budget?(monday)
-    budget = budget_for_date(monday)
-    return true if budget <= 0
-    @load_profile[monday] >= budget
+  def monday_at_or_above_target?(monday)
+    target = target_for_date(monday)
+    return true if target <= 0
+    @load_profile[monday] >= target
   end
 
-  def try_fit_under_budget(share_index, goals, unscheduled, monday, placements)
+  def try_fit_under_target(share_index, goals, unscheduled, monday, placements)
     goals.each do |goal|
       next unless unscheduled.include?(goal.id)
       entry = share_index[goal.id]
 
       # Try tiers shortest to longest — use first where share fits under
-      # remaining headroom on this Monday (won't push load above budget)
+      # remaining headroom on this Monday (won't push load above target)
       TIERS.each do |tier|
         placement = compute_share_for(entry[:book_minutes], monday, tier)
         next unless placement
         next unless fits_concurrency?(placement[:start], placement[:end])
 
         projected = @load_profile[monday] + share_for_date(placement[:share], monday)
-        budget = budget_for_date(monday)
-        if projected <= budget + CEILING_TOLERANCE
+        target = target_for_date(monday)
+        if projected <= target + CEILING_TOLERANCE
           record_placement!(placements, goal, placement, entry[:book_minutes])
           unscheduled.delete(goal.id)
           return true
@@ -248,20 +248,20 @@ class ReadingListScheduler
   def try_best_backfill(share_index, goals, unscheduled, monday, placements)
     best = nil
     best_overshoot = Float::INFINITY
-    budget = budget_for_date(monday)
+    target = target_for_date(monday)
 
     goals.each do |goal|
       next unless unscheduled.include?(goal.id)
       entry = share_index[goal.id]
 
-      # Try all tiers — find the (book, tier) that exceeds budget by the least
+      # Try all tiers — find the (book, tier) that exceeds target by the least
       TIERS.each do |tier|
         placement = compute_share_for(entry[:book_minutes], monday, tier)
         next unless placement
         next unless fits_concurrency?(placement[:start], placement[:end])
 
         projected = @load_profile[monday] + share_for_date(placement[:share], monday)
-        overshoot = projected - budget
+        overshoot = projected - target
 
         if overshoot < best_overshoot
           best_overshoot = overshoot
@@ -294,8 +294,8 @@ class ReadingListScheduler
   end
 
   def compute_weekday_share(book_minutes, start_date, end_date)
-    if @user.capped? && @weekday_budget > 0
-      ratio = @weekend_budget / @weekday_budget
+    if @user.capped? && @weekday_target > 0
+      ratio = @weekend_target / @weekday_target
       weekday_count = (start_date..end_date).count { |d| !d.on_weekend? }
       weekend_count = (start_date..end_date).count { |d| d.on_weekend? }
       effective_days = weekday_count + weekend_count * ratio
@@ -307,8 +307,8 @@ class ReadingListScheduler
   end
 
   def share_for_date(share, date)
-    return share unless @user.capped? && date.on_weekend? && @weekday_budget > 0
-    share * (@weekend_budget / @weekday_budget)
+    return share unless @user.capped? && date.on_weekend? && @weekday_target > 0
+    share * (@weekend_target / @weekday_target)
   end
 
   def each_monday
@@ -475,10 +475,10 @@ class ReadingListScheduler
   def would_overshoot?(start_date, end_date, daily_share)
     (start_date..end_date).each do |date|
       next unless reading_day?(date)
-      budget = budget_for_date(date)
-      next if budget <= 0
+      target = target_for_date(date)
+      next if target <= 0
       projected = @load_profile[date] + share_for_date(daily_share, date)
-      return true if projected > budget + CEILING_TOLERANCE
+      return true if projected > target + CEILING_TOLERANCE
     end
     false
   end
@@ -576,19 +576,19 @@ class ReadingListScheduler
 
   # ─── Metrics Helpers ────────────────────────────────────────────
 
-  # Show the budget the user actually experiences on a reading day,
-  # not the raw average that includes zero-budget weekends.
-  def effective_daily_budget(avg_budget)
-    return avg_budget unless avg_budget&.positive?
+  # Show the target the user actually experiences on a reading day,
+  # not the raw average that includes zero-target weekends.
+  def effective_daily_target(avg_target)
+    return avg_target unless avg_target&.positive?
     case @user.weekend_mode
-    when "skip"  then avg_budget * 7.0 / 5.0
-    when "capped" then (avg_budget * 7.0 - @user.weekend_reading_minutes.to_f * 2) / 5.0
-    else avg_budget
+    when "skip"  then avg_target * 7.0 / 5.0
+    when "capped" then (avg_target * 7.0 - @user.weekend_reading_minutes.to_f * 2) / 5.0
+    else avg_target
     end
   end
 
   def default_metrics
-    { pace_status: nil, deficit: 0, derived_budget: 0,
+    { pace_status: nil, deficit: 0, derived_target: 0,
       projected_completions: 0, pace_target: 0, queue_depth: 0, queue_warning: nil,
       concurrency_hint: nil, ahead_suggestion: nil }
   end
@@ -609,17 +609,17 @@ class ReadingListScheduler
     "Add #{shortfall}+ books to maintain your pace"
   end
 
-  def concurrency_hint(daily_budget, target)
-    return nil unless daily_budget&.positive? && target > 0
+  def concurrency_hint(daily_target, target)
+    return nil unless daily_target&.positive? && target > 0
     limit = effective_concurrency_limit
     return nil unless limit
 
-    window = build_budget_window([target, 1].max)
+    window = build_pace_window([target, 1].max)
     return nil if window.empty?
 
     avg_book_minutes = window.sum { |book| full_book_minutes(book) }.to_f / window.size
     takt_days = 365.0 / target
-    avg_book_days = avg_book_minutes / daily_budget
+    avg_book_days = avg_book_minutes / daily_target
     min_concurrent = (avg_book_days / takt_days).ceil
 
     return nil if limit >= min_concurrent

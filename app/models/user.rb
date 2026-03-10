@@ -42,7 +42,7 @@ class User < ApplicationRecord
     !skip?
   end
 
-  def weekend_budget
+  def weekend_target
     case weekend_mode
     when "skip"   then 0
     when "same"   then weekday_reading_minutes

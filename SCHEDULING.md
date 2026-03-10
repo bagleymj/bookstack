@@ -22,7 +22,7 @@ The pipeline is a conveyor belt. Books enter as "packages" of varying size
 (reading time). Each package is placed in a **tier** — a fixed-duration box
 (1 week, 2 weeks, etc.) that determines how long it rides the belt. Multiple
 packages ride the belt concurrently. The belt moves at a constant speed (the
-daily reading budget), and the scheduler's job is to keep the belt
+daily reading target), and the scheduler's job is to keep the belt
 uniformly loaded.
 
 ```
@@ -61,11 +61,11 @@ steady and matches the pace target.
 |------|-----------|
 | **Pace target** | The user's desired throughput: e.g. 50 books/year |
 | **Takt time** | Completion interval required to hit pace: `365 / pace` days (e.g. 7.3 days) |
-| **Daily budget** | Total reading minutes per day across all concurrent books |
+| **Daily target** | Total reading minutes per day across all concurrent books |
 | **Tier** | A fixed calendar duration for a book (1w, 2w, 3w, 4w, 6w, 12w, 26w, 52w) |
-| **Daily share** | A single book's contribution to the daily budget (book_minutes / reading_days) |
+| **Daily share** | A single book's contribution to the daily target (book_minutes / reading_days) |
 | **WIP** | Work in progress — number of books being read concurrently |
-| **Derived budget** | The daily reading minutes computed by the scheduler from pace + book mix (an output, not an input) |
+| **Derived target** | The daily reading minutes computed by the scheduler from pace + book mix (an output, not an input) |
 | **Deficit/surplus** | Gap between expected and actual completions at any point in time |
 | **Tier promotion** | Moving a book to a longer tier when it can't complete in its current tier without spiking |
 | **Work cell** | The current week's committed books — fixed from Monday to Sunday, no mid-week changes |
@@ -78,12 +78,12 @@ Every scheduler run **must** satisfy all five:
 ### Invariant 1: Pace is the constraint
 
 The pace target (e.g. 50 books/year) is the primary input. The daily
-reading budget is **derived** from the pace target and the book mix — it is
+reading target is **derived** from the pace target and the book mix — it is
 an output of the scheduler, not an input. The scheduler adjusts the daily
-budget up or down to hit the pace target, never the reverse.
+target up or down to hit the pace target, never the reverse.
 
 ```
-pace_target → required throughput → daily budget → tier assignments
+pace_target → required throughput → daily target → tier assignments
                                                   (not the other way around)
 ```
 
@@ -93,18 +93,18 @@ pace_target → required throughput → daily budget → tier assignments
 - `books_per_week` (e.g. 1)
 
 The `minutes_per_day` pace type is **deprecated** — it inverts the
-causality (budget → pace instead of pace → budget). Existing users with
+causality (target → pace instead of pace → target). Existing users with
 `minutes_per_day` should be migrated or prompted to set a throughput
 target. The system must not allow new pace targets in minutes_per_day.
 
 ### Invariant 2: Daily load is leveled
 
 The sum of daily shares across all concurrent books should be approximately
-equal on every reading day — and should track the derived budget. Peaks
+equal on every reading day — and should track the derived target. Peaks
 and valleys both violate heijunka. The scheduler uses **Monday-by-Monday
-bin filling**: each Monday is filled to just above budget before
+bin filling**: each Monday is filled to just above target before
 advancing to the next. This front-loads the timeline — books fill to
-100% of budget for as long as possible, with natural taper only when
+100% of target for as long as possible, with natural taper only when
 books run out. Overshoot beyond a 15-minute tolerance is always the
 worst violation.
 
@@ -126,7 +126,7 @@ to both macro recovery (weeks of missed reading) and micro recovery
 ### Invariant 5: The system reflects reality through yesterday
 
 Every scheduler run incorporates all actual reading data through the
-previous day. Quotas, tier assignments, and the daily budget always reflect
+previous day. Quotas, tier assignments, and the daily target always reflect
 what really happened — not what was planned. The user never needs to
 manually redistribute, catch up, or acknowledge discrepancies. The system
 adapts automatically and continuously.
@@ -157,7 +157,7 @@ which books are active before the next Monday. Within the week:
   week simply have less total reading (the belt runs lighter).
 - **Under-reading** redistributes within the week: remaining pages spread
   across remaining days for that book. If redistribution would create a
-  spike (daily load exceeds the derived budget), tier promotion kicks in
+  spike (daily load exceeds the derived target), tier promotion kicks in
   immediately — the book's end date extends by one week and quotas
   regenerate across the longer range.
 - **New books only enter on Mondays**, after the system has absorbed the
@@ -225,7 +225,7 @@ performs the full scheduling cycle:
 2. **Check tier promotions** — extend books that can't complete without
    spiking
 3. **Run the full scheduler** (`ReadingListScheduler.schedule!`) — measures
-   actuals, computes budget, places queued books, verifies throughput,
+   actuals, computes target, places queued books, verifies throughput,
    generates quotas for all schedulable goals
 4. **Redistribute pages** for locked goals only (active books with reading
    sessions, which the scheduler treats as fixed load)
@@ -263,9 +263,9 @@ The deficit tells us whether the user is ahead of or behind pace. A
 positive deficit means they're behind and need to read slightly more per
 day to catch up. A negative deficit (surplus) means they can ease off.
 
-### Phase 2: Compute the adjusted daily budget
+### Phase 2: Compute the adjusted daily target
 
-The daily budget is derived from the pace target and what remains:
+The daily target is derived from the pace target and what remains:
 
 ```
 books_remaining_for_pace = pace_target - actual_completed
@@ -277,22 +277,22 @@ baseline_daily           = total_remaining_minutes / days_remaining
 
 The deficit is inherently captured: if the user is behind,
 `books_remaining_for_pace` is larger (more books to read) while
-`days_remaining` is smaller (less time) → budget goes up naturally. If
-ahead, fewer books remain → budget eases off. This is **rate-based
+`days_remaining` is smaller (less time) → target goes up naturally. If
+ahead, fewer books remain → target eases off. This is **rate-based
 recovery** — correction proportional to error, spread over remaining time.
 
-There is no ceiling on the derived budget. The budget is what the pace
+There is no ceiling on the derived target. The target is what the pace
 and book mix require. If the user wants a lower daily commitment, they
 adjust their pace target or choose shorter books. The controls are the
-inputs (pace, book selection), not the output (budget).
+inputs (pace, book selection), not the output (target).
 
 ### Phase 3: Monday-by-Monday bin filling
 
 Instead of placing books and then scoring the result, the scheduler
 **fills time slots**. It walks Mondays in order and fills each one to
-just above the daily budget before advancing. This naturally produces
+just above the daily target before advancing. This naturally produces
 level schedules because the fill-forward approach guarantees every
-Monday carries at least budget-level load.
+Monday carries at least target-level load.
 
 **Algorithm**:
 
@@ -302,45 +302,45 @@ Monday carries at least budget-level load.
 2. Walk Mondays from earliest to latest across a 104-week horizon.
 3. For each Monday:
    - **Skip** if spillover from prior multi-week placements already
-     puts this Monday at or above budget.
+     puts this Monday at or above target.
    - **Fill loop**: Take the next unscheduled book (queue order). Try
      tiers shortest to longest — use the first tier whose daily share
-     fits under remaining headroom (keeps Monday below budget). If
-     placement keeps Monday under budget, continue filling.
-   - **Backfill**: When no book fits under budget, find the (book, tier)
-     across all remaining books that overshoots budget by the least
+     fits under remaining headroom (keeps Monday below target). If
+     placement keeps Monday under target, continue filling.
+   - **Backfill**: When no book fits under target, find the (book, tier)
+     across all remaining books that overshoots target by the least
      amount. Place it — Monday is filled — advance to the next Monday.
 4. Any books still unscheduled after the horizon get a fallback
    52-week placement.
 
 ```
 for each monday (earliest first):
-  skip if load already >= budget (from spillover)
+  skip if load already >= target (from spillover)
   break if no unscheduled books remain
 
   loop:
     try next unscheduled book in shortest-fitting tier
-    if fits under budget → place it, continue filling
-    if at/above budget → Monday done, advance
+    if fits under target → place it, continue filling
+    if at/above target → Monday done, advance
     if nothing fits → backfill with min-overshoot → advance
 ```
 
 **Key properties**:
 
-- **Every Monday filled above budget**: The algorithm guarantees
-  `load >= budget` before advancing. No Monday is left under-filled.
+- **Every Monday filled above target**: The algorithm guarantees
+  `load >= target` before advancing. No Monday is left under-filled.
 - **Queue order preserved**: Books are placed in the user's reading
   list order (position), not sorted by size.
 - **Shortest-fitting tier preferred**: For each book, try tiers from
   shortest to longest; use the first one whose daily share fits under
   remaining headroom. This naturally selects longer tiers when headroom
   is tight (a short tier's high share would overshoot).
-- **Backfill = minimal overshoot**: When no book fits under budget,
+- **Backfill = minimal overshoot**: When no book fits under target,
   pick the (book, tier) that overshoots by the least — this is the
   "just above target" behavior.
 - **Self-leveling**: Multi-week tiers placed on early Mondays spill
   load into later Mondays, reducing headroom. Later Mondays may
-  already be above budget from spillover alone — they're simply skipped.
+  already be above target from spillover alone — they're simply skipped.
 - **No refinement pass needed**: Because the algorithm fills forward
   with full knowledge of current load, it doesn't need post-hoc
   correction. The fill-forward approach is inherently self-leveling.
@@ -358,11 +358,11 @@ If `projected_completions < pace_target`:
 - The pipeline is under-loaded. Either:
   - The queue doesn't have enough books (surface to user: "Add N more books
     to maintain your pace")
-  - Some books could move to shorter tiers (increases daily budget)
+  - Some books could move to shorter tiers (increases daily target)
 
 If `projected_completions > pace_target + tolerance`:
 - The pipeline is over-loaded. Ease off — move some books to longer tiers
-  or reduce the daily budget.
+  or reduce the daily target.
 
 **This verification step is mandatory.** A schedule that doesn't hit the
 pace target is wrong, regardless of how neatly the tiers pack.
@@ -386,8 +386,8 @@ Each day, the system runs the complete scheduling pipeline:
 
 1. **Marks missed quotas**: Yesterday's unfinished quotas become "missed"
 2. **Promotes spiking goals**: Extends books that can't complete without
-   exceeding the daily budget (tier promotion)
-3. **Runs the scheduler**: Measures actuals → computes budget → places
+   exceeding the daily target (tier promotion)
+3. **Runs the scheduler**: Measures actuals → computes target → places
    queued books (starting on next Monday) → verifies throughput →
    generates quotas for all schedulable goals
 4. **Redistributes locked goals**: For active books with reading sessions
@@ -408,10 +408,10 @@ scheduler.
 
 When an active book falls behind within its tier, the system checks: can
 the remaining pages be completed in the remaining days without exceeding
-the leveled daily budget?
+the leveled daily target?
 
 If **yes**: redistribute remaining pages across remaining days. The daily
-share for this book increases slightly, absorbed by the leveled budget.
+share for this book increases slightly, absorbed by the leveled target.
 
 If **no**: the book has fallen too far behind to complete in its current
 tier without spiking. The system **promotes** the book to the next longer
@@ -430,7 +430,7 @@ Example:
 
 1. Promotion extends the end date by **one week at a time**. Multiple
    extensions may occur in a single reflow if the load remains above
-   budget (capped at 5 extensions per cycle for safety)
+   target (capped at 5 extensions per cycle for safety)
 2. Promotion preserves any pages already read — only remaining work is
    redistributed
 3. The end date always extends by full weeks (7 days)
@@ -476,9 +476,9 @@ Backfill conditions:
 - A single missed day does not trigger promotion. The redistribution
   within the tier absorbs it.
 - Being slightly behind (can still catch up within the tier at the
-  leveled budget) does not trigger promotion.
+  leveled target) does not trigger promotion.
 - Promotion only fires when the math proves the book **cannot** complete
-  in its tier without exceeding the daily budget.
+  in its tier without exceeding the daily target.
 
 ## The Cumulative Production Curve
 
@@ -504,7 +504,7 @@ pace?" at a glance, and the scheduler uses it as input on every run.
 
 The user falls behind — deficit grows. On the next scheduler run:
 - `books_remaining_for_pace` stays the same but `days_remaining` shrinks
-- The daily budget increases slightly to spread recovery over remaining days
+- The daily target increases slightly to spread recovery over remaining days
 - No spike: a week off in June might mean 3-4 extra minutes per day for
   the rest of the year
 - Individual books that fell too far behind get tier-promoted
@@ -513,7 +513,7 @@ The user falls behind — deficit grows. On the next scheduler run:
 
 The user gets ahead — surplus grows. On the next scheduler run:
 - Some books may have been completed early
-- `books_remaining_for_pace` decreases → budget eases
+- `books_remaining_for_pace` decreases → target eases
 - The pipeline relaxes: books may shift to slightly longer tiers
 - The user feels rewarded: tomorrow's reading assignment is lighter
 
@@ -521,8 +521,8 @@ The user gets ahead — surplus grows. On the next scheduler run:
 
 When several large books are added:
 - Average book minutes in the rolling window increases
-- The daily budget adjusts upward accordingly
-- The system surfaces the new budget so the user can see the impact:
+- The daily target adjusts upward accordingly
+- The system surfaces the new target so the user can see the impact:
   "Adding these books increases your daily reading to 75 min/day.
   Lower your pace or remove books to reduce it."
 
@@ -538,7 +538,7 @@ If there aren't enough books queued to sustain pace:
 This is the tier promotion case described above. The system doesn't panic.
 It promotes the book to a 2-week tier, redistributes its pages at a
 comfortable daily rate, and may backfill a short book into the freed
-capacity. The daily budget stays level. The pace target stays on track.
+capacity. The daily target stays level. The pace target stays on track.
 
 ### Spontaneous reading (ad-hoc sessions)
 
@@ -593,7 +593,7 @@ Tiers are preserved for psychological reasons (see CLAUDE.md). They provide:
 **Monday bin filling**: For each book, the scheduler tries tiers from
 shortest to longest and uses the first tier whose daily share fits
 under remaining headroom on the current Monday. When no tier fits
-under budget, the (book, tier) combination that overshoots budget by
+under target, the (book, tier) combination that overshoots target by
 the least is chosen. This naturally selects longer tiers for larger
 books (their short-tier shares are too high) and shorter tiers for
 small books (they fit under headroom easily).
@@ -602,11 +602,11 @@ small books (they fit under headroom easily).
 
 Three modes (unchanged from current):
 
-- **Skip**: No reading on weekends. Daily budget applies to weekdays only.
+- **Skip**: No reading on weekends. Daily target applies to weekdays only.
   Tiers still span calendar weeks but quotas only fall on weekdays.
 - **Same**: Equal reading every day. Budget divided by 7.
-- **Capped**: Weekends have a separate (usually lower) reading budget.
-  Weekday budget absorbs the remainder.
+- **Capped**: Weekends have a separate (usually lower) reading target.
+  Weekday target absorbs the remainder.
 
 ## What the Scheduler Does NOT Do
 
@@ -640,7 +640,7 @@ Three modes (unchanged from current):
 
 The daily reflow runs once per day on first app access (lazy evaluation).
 It executes the full algorithm: mark missed quotas → promote spiking goals
-→ run scheduler (measure actuals → compute budget → place books → verify
+→ run scheduler (measure actuals → compute target → place books → verify
 throughput → generate quotas) → redistribute locked goals.
 
 New books enter the pipeline on the next Monday boundary. The daily
@@ -669,7 +669,7 @@ see the pipeline update in response to their action:
 These metrics should be available in the UI (pipeline view, dashboard):
 
 1. **Pace status**: "On pace" / "2 books behind" / "1 book ahead"
-2. **Current daily budget**: "42 min/day" (derived, not set)
+2. **Current daily target**: "42 min/day" (derived, not set)
 3. **Projected completions**: "47 of 50 books by Dec 31" (if queue is short)
 4. **Queue depth warning**: "Add 3+ books to maintain pace through August"
 5. **Budget impact**: "Your pace requires 45 min/day with your current book mix"
@@ -682,13 +682,13 @@ These metrics should be available in the UI (pipeline view, dashboard):
 | `ProfileAwareQuotaCalculator` | Phase 5 — distributes pages within a placed tier (unchanged) |
 | `QuotaRedistributor` | Subsumed by continuous reflow — may be simplified or removed |
 | `User#reading_pace_*` | Source of pace target |
-| `User#derive_daily_minutes_from_pace` | Replaced by Phase 2 budget computation |
+| `User#derive_daily_minutes_from_pace` | Replaced by Phase 2 target computation |
 | `ReadingGoal` | Carries placement result (started_on, target_completion_date) |
 | Pipeline chart (D3) | Visualizes the leveled load + cumulative curve |
 
 ## Design Constraints for Future Changes
 
-1. **Never derive pace from budget.** Budget flows from pace, not the
+1. **Never derive pace from target.** Target flows from pace, not the
    reverse. If you find yourself computing pace from daily minutes, the
    causality is backwards.
 
@@ -705,15 +705,15 @@ These metrics should be available in the UI (pipeline view, dashboard):
    the pipeline. The system may promote its tier but never removes it.
 
 6. **Surface impacts, don't hide them.** Always show the derived daily
-   budget so the user understands the cost of their pace + book mix.
+   target so the user understands the cost of their pace + book mix.
 
 7. **No manual intervention required.** The system must adapt to reality
    automatically. If a feature requires the user to manually trigger
    redistribution or acknowledge discrepancies, it violates this constraint.
 
 8. **Promote, don't spike.** When a book can't complete in its tier at
-   the leveled daily budget, promote it to the next tier. Never increase
-   its daily share beyond what the budget allows.
+   the leveled daily target, promote it to the next tier. Never increase
+   its daily share beyond what the target allows.
 
 9. **Respect the weekly work cell.** Never change which books are active
    mid-week. Daily reflow adjusts quotas within the committed set and
@@ -738,9 +738,9 @@ Status of all identified gaps:
 
 ### ~~Gap 1: `max_daily_reading_minutes` column~~ — ELIMINATED
 
-No max ceiling needed. The budget is derived from pace + book mix. The
+No max ceiling needed. The target is derived from pace + book mix. The
 user controls it by adjusting pace or choosing different books. Adding
-a ceiling would re-introduce the budget-first thinking we're eliminating.
+a ceiling would re-introduce the target-first thinking we're eliminating.
 
 ### Gap 2: `concurrency_limit` column
 
@@ -750,9 +750,9 @@ The concurrency hard cap does not exist in the schema. Needs a
 ### ~~Gap 3: Phase 3 objective function~~ — RESOLVED
 
 **Decision: Monday-by-Monday bin filling.** Phase 3 walks Mondays in
-order, filling each to just above the daily budget before advancing.
+order, filling each to just above the daily target before advancing.
 For each Monday, books are tried in queue order with the shortest-
-fitting tier; when no book fits under budget, the (book, tier) with
+fitting tier; when no book fits under target, the (book, tier) with
 minimal overshoot is placed. Multi-week tiers spill load into future
 Mondays, making the approach self-leveling with no separate refinement
 pass needed.
@@ -792,6 +792,6 @@ they open the app, which is exactly when reflow fires.
 **Decision: Heijunka-first.** Remove `minutes_per_day` as a pace option.
 Only throughput-based pace types are supported: `books_per_year`,
 `books_per_month`, `books_per_week`. The old `daily_reading_minutes`
-field on users is no longer used by the scheduler (budget is derived).
+field on users is no longer used by the scheduler (target is derived).
 It can remain in the schema for now as a legacy field but the scheduler
 ignores it.

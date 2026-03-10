@@ -56,7 +56,7 @@ class ProfileAwareQuotaCalculator
 
   def daily_minutes(date)
     if date.on_weekend?
-      @user.weekend_budget
+      @user.weekend_target
     else
       @user.weekday_reading_minutes
     end

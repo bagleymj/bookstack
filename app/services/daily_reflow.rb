@@ -1,5 +1,5 @@
 class DailyReflow
-  SPIKE_TOLERANCE = 1.1  # Allow 10% over derived budget before promoting
+  SPIKE_TOLERANCE = 1.1  # Allow 10% over derived target before promoting
   MAX_EXTENSIONS = 5     # Safety cap on extensions per reflow cycle
 
   def initialize(user)
@@ -85,15 +85,15 @@ class DailyReflow
 
   # ─── Tier Promotion ─────────────────────────────────────────
 
-  # When the total daily reading load exceeds the derived budget, extend the
+  # When the total daily reading load exceeds the derived target, extend the
   # heaviest goal by one week. This prevents spikes caused by books taking
   # longer than estimated (e.g., slower actual_wpm than predicted).
   def promote_spiking_goals!(goals)
     promoted = Set.new
     return promoted unless heijunka_mode?
 
-    budget = derived_daily_budget
-    return promoted unless budget&.positive?
+    target = derived_daily_target
+    return promoted unless target&.positive?
 
     MAX_EXTENSIONS.times do
       goal_shares = goals.filter_map do |goal|
@@ -103,7 +103,7 @@ class DailyReflow
       break if goal_shares.empty?
 
       total_load = goal_shares.sum { |_, share| share }
-      break if total_load <= budget * SPIKE_TOLERANCE
+      break if total_load <= target * SPIKE_TOLERANCE
 
       heaviest_goal, _ = goal_shares.max_by { |_, share| share }
       break unless extend_by_one_week(heaviest_goal)
@@ -152,8 +152,8 @@ class DailyReflow
     true
   end
 
-  def derived_daily_budget
-    ReadingListScheduler.new(@user).metrics[:derived_budget]
+  def derived_daily_target
+    ReadingListScheduler.new(@user).metrics[:derived_target]
   end
 
   def queued_books_waiting?

@@ -120,18 +120,18 @@ RSpec.describe ReadingListScheduler do
     end
   end
 
-  # ─── Budget Derivation (Phase 2) ───────────────────────────────
+  # ─── Target Derivation (Phase 2) ───────────────────────────────
 
-  describe "budget derivation" do
-    it "derives a positive target budget from pace and book mix" do
+  describe "target derivation" do
+    it "derives a positive daily target from pace and book mix" do
       create_queued_book(pages: 300, position: 1)
       scheduler = ReadingListScheduler.new(user)
       scheduler.schedule!
 
-      expect(scheduler.target_budget).to be > 0
+      expect(scheduler.daily_target).to be > 0
     end
 
-    it "adjusts budget based on deficit (behind pace)" do
+    it "adjusts target based on deficit (behind pace)" do
       # Simulate being behind: pace says we should have completed some books by now
       user.update!(reading_pace_set_on: 6.months.ago.to_date)
       create_queued_book(pages: 300, position: 1)
@@ -139,11 +139,11 @@ RSpec.describe ReadingListScheduler do
       scheduler = ReadingListScheduler.new(user)
       scheduler.schedule!
 
-      # When behind, deficit is positive — budget should be higher than start-of-year
+      # When behind, deficit is positive — target should be higher than start-of-year
       expect(scheduler.deficit).to be > 0
     end
 
-    it "computes budget from rolling window of queued + completed books" do
+    it "computes target from rolling window of queued + completed books" do
       # Queue a mix of short and long books
       create_queued_book(pages: 150, position: 1, title: "Short")
       create_queued_book(pages: 600, position: 2, title: "Long")
@@ -151,8 +151,8 @@ RSpec.describe ReadingListScheduler do
       scheduler = ReadingListScheduler.new(user)
       scheduler.schedule!
 
-      # Budget should be based on average of both books
-      expect(scheduler.target_budget).to be > 0
+      # Target should be based on average of both books
+      expect(scheduler.daily_target).to be > 0
     end
   end
 
@@ -229,11 +229,11 @@ RSpec.describe ReadingListScheduler do
 
       # The maximum valley in the scheduled timeline should be bounded.
       # With 8 books, if placed well, the max undershoot should be well
-      # below the full budget (i.e., no completely empty weeks within the
+      # below the full target (i.e., no completely empty weeks within the
       # scheduled range).
       wpm = user.effective_reading_speed
-      budget_per_day = scheduler.target_budget
-      next unless budget_per_day&.positive?
+      target_per_day = scheduler.daily_target
+      next unless target_per_day&.positive?
 
       weekdays = (timeline_start..timeline_end).select { |d| !d.on_weekend? }
       daily_loads = weekdays.map do |date|
@@ -255,9 +255,9 @@ RSpec.describe ReadingListScheduler do
         "Load should be leveled, not peaked."
     end
 
-    it "fills to budget — no persistent shortfall in the core timeline" do
+    it "fills to target — no persistent shortfall in the core timeline" do
       # True heijunka: reading days in the core timeline (where multiple books
-      # overlap) should be close to the derived budget. The trailing tail after
+      # overlap) should be close to the derived target. The trailing tail after
       # the last book starts is excluded — only one overlay book remains there
       # and no further books exist to fill it.
       10.times { |i| create_queued_book(pages: 300, position: i + 1, title: "Book #{i}") }
@@ -266,8 +266,8 @@ RSpec.describe ReadingListScheduler do
       scheduler.schedule!
 
       goals = user.reading_goals.active.reload
-      budget = scheduler.target_budget
-      next unless budget&.positive?
+      target = scheduler.daily_target
+      next unless target&.positive?
 
       # Core timeline: from earliest start to the last book's START date.
       # After the last book starts, the tail only has residual overlay load
@@ -289,16 +289,16 @@ RSpec.describe ReadingListScheduler do
         end
       end
 
-      # No day should fall more than 20% below budget within the core timeline
+      # No day should fall more than 20% below target within the core timeline
       loaded_days = daily_loads.select { |load| load > 0 }
       next if loaded_days.empty?
 
-      shortfall_days = loaded_days.count { |load| load < budget * 0.8 }
+      shortfall_days = loaded_days.count { |load| load < target * 0.8 }
       total_days = loaded_days.size
       shortfall_pct = (shortfall_days.to_f / total_days * 100).round(1)
 
       expect(shortfall_pct).to be < 15,
-        "#{shortfall_pct}% of core days fall >20% below budget (#{budget.round} min). " \
+        "#{shortfall_pct}% of core days fall >20% below target (#{target.round} min). " \
         "Heijunka demands consistent load, not persistent valleys."
     end
   end
@@ -491,16 +491,16 @@ RSpec.describe ReadingListScheduler do
       metrics = ReadingListScheduler.new(user).metrics
 
       expect(metrics[:pace_status]).to be_nil
-      expect(metrics[:derived_budget]).to eq(0)
+      expect(metrics[:derived_target]).to eq(0)
       expect(metrics[:pace_target]).to eq(0)
     end
 
-    it "returns derived budget and pace status with active pace" do
+    it "returns derived target and pace status with active pace" do
       create_queued_book(pages: 300, position: 1)
       metrics = ReadingListScheduler.new(user).metrics
 
       expect(metrics[:pace_target]).to eq(50)
-      expect(metrics[:derived_budget]).to be > 0
+      expect(metrics[:derived_target]).to be > 0
       expect(metrics[:pace_status]).to be_a(String)
     end
 
@@ -541,30 +541,30 @@ RSpec.describe ReadingListScheduler do
       expect(goal.status).to eq("queued")
     end
 
-    # ─── Effective Daily Budget ─────────────────────────────────────
+    # ─── Effective Daily Target ─────────────────────────────────────
 
-    describe "derived_budget adjusts for weekend mode" do
-      it "shows weekday budget for skip-weekends users" do
+    describe "derived_target adjusts for weekend mode" do
+      it "shows weekday target for skip-weekends users" do
         user.update!(weekend_mode: :skip)
         create_queued_book(pages: 300, position: 1)
         metrics = ReadingListScheduler.new(user).metrics
 
-        # derived_budget should reflect 7/5 of the raw average
-        expect(metrics[:derived_budget]).to be > 0
+        # derived_target should reflect 7/5 of the raw average
+        expect(metrics[:derived_target]).to be > 0
       end
 
-      it "shows same budget for same-mode users" do
+      it "shows same target for same-mode users" do
         user.update!(weekend_mode: :same)
         create_queued_book(pages: 300, position: 1)
         same_metrics = ReadingListScheduler.new(user).metrics
-        expect(same_metrics[:derived_budget]).to be > 0
+        expect(same_metrics[:derived_target]).to be > 0
       end
 
-      it "shows adjusted weekday budget for capped-mode users" do
+      it "shows adjusted weekday target for capped-mode users" do
         user.update!(weekend_mode: :capped, weekend_reading_minutes: 20)
         create_queued_book(pages: 300, position: 1)
         metrics = ReadingListScheduler.new(user).metrics
-        expect(metrics[:derived_budget]).to be > 0
+        expect(metrics[:derived_target]).to be > 0
       end
     end
 

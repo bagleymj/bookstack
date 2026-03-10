@@ -117,9 +117,9 @@ RSpec.describe DailyReflow do
       allow_any_instance_of(ReadingListScheduler).to receive(:schedule!)
     end
 
-    context "when daily load exceeds budget" do
+    context "when daily load exceeds target" do
       before do
-        allow_any_instance_of(DailyReflow).to receive(:derived_daily_budget).and_return(40)
+        allow_any_instance_of(DailyReflow).to receive(:derived_daily_target).and_return(40)
       end
 
       let(:spiking_goal) do
@@ -156,9 +156,9 @@ RSpec.describe DailyReflow do
       end
     end
 
-    context "when daily load is within budget" do
+    context "when daily load is within target" do
       before do
-        allow_any_instance_of(DailyReflow).to receive(:derived_daily_budget).and_return(40)
+        allow_any_instance_of(DailyReflow).to receive(:derived_daily_target).and_return(40)
       end
 
       let(:comfortable_goal) do
@@ -183,14 +183,14 @@ RSpec.describe DailyReflow do
       end
     end
 
-    context "with a very low budget requiring multiple extensions" do
+    context "with a very low target requiring multiple extensions" do
       before do
-        allow_any_instance_of(DailyReflow).to receive(:derived_daily_budget).and_return(10)
+        allow_any_instance_of(DailyReflow).to receive(:derived_daily_target).and_return(10)
       end
 
       let(:heavy_goal) do
         # 3 remaining days: ~100 min/day > 10 * 1.1 = 11
-        # Needs several weekly extensions to bring share under budget
+        # Needs several weekly extensions to bring share under target
         g = create(:reading_goal, user: promo_user, book: dense_book, status: :active,
                    started_on: 3.days.ago.to_date,
                    target_completion_date: Date.current + 2,
@@ -204,7 +204,7 @@ RSpec.describe DailyReflow do
 
       before { heavy_goal; promo_user.reload }
 
-      it "extends multiple times until load is under budget" do
+      it "extends multiple times until load is under target" do
         original_end = heavy_goal.target_completion_date
         DailyReflow.new(promo_user).reflow!
         heavy_goal.reload
@@ -212,7 +212,7 @@ RSpec.describe DailyReflow do
         # Must have extended more than once
         expect(heavy_goal.target_completion_date).to be > original_end + 7
 
-        # Final daily share should be under budget * tolerance
+        # Final daily share should be under target * tolerance
         remaining_days = (heavy_goal.target_completion_date - Date.current).to_i + 1
         final_share = 299.0 / remaining_days  # 299 remaining minutes for this book
         expect(final_share).to be < 10 * DailyReflow::SPIKE_TOLERANCE
@@ -256,7 +256,7 @@ RSpec.describe DailyReflow do
 
     context "with concurrent goals causing a spike" do
       before do
-        allow_any_instance_of(DailyReflow).to receive(:derived_daily_budget).and_return(40)
+        allow_any_instance_of(DailyReflow).to receive(:derived_daily_target).and_return(40)
       end
 
       let(:book_a) { create(:book, user: promo_user, last_page: 300, current_page: 1) }
@@ -328,7 +328,7 @@ RSpec.describe DailyReflow do
       scheduler = instance_double(ReadingListScheduler)
       allow(ReadingListScheduler).to receive(:new).with(heijunka_user).and_return(scheduler)
       allow(scheduler).to receive(:schedule!)
-      allow(scheduler).to receive(:metrics).and_return({ derived_budget: 40 })
+      allow(scheduler).to receive(:metrics).and_return({ derived_target: 40 })
 
       heijunka_user.reload
       DailyReflow.new(heijunka_user).reflow!
@@ -352,7 +352,7 @@ RSpec.describe DailyReflow do
       scheduler = instance_double(ReadingListScheduler)
       allow(ReadingListScheduler).to receive(:new).with(heijunka_user).and_return(scheduler)
       allow(scheduler).to receive(:schedule!)
-      allow(scheduler).to receive(:metrics).and_return({ derived_budget: 40 })
+      allow(scheduler).to receive(:metrics).and_return({ derived_target: 40 })
 
       heijunka_user.reload
       DailyReflow.new(heijunka_user).reflow!
@@ -391,7 +391,7 @@ RSpec.describe DailyReflow do
       # Stub the scheduler (no queued books, so schedule! won't fire)
       scheduler = instance_double(ReadingListScheduler)
       allow(ReadingListScheduler).to receive(:new).with(heijunka_user).and_return(scheduler)
-      allow(scheduler).to receive(:metrics).and_return({ derived_budget: 40 })
+      allow(scheduler).to receive(:metrics).and_return({ derived_target: 40 })
 
       heijunka_user.reload
       DailyReflow.new(heijunka_user).reflow!

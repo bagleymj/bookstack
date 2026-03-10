@@ -153,7 +153,7 @@ RSpec.describe OpenLibraryService do
       expect(results.first[:author]).to eq("First Author")
     end
 
-    it "ranks works with covers higher than those without" do
+    it "preserves OpenLibrary relevance order (does not re-sort)" do
       stub_request(:get, search_url)
         .with(query: hash_including(q: "covers"))
         .to_return(status: 200, body: {
@@ -165,7 +165,8 @@ RSpec.describe OpenLibraryService do
 
       results = service.search_works("covers")
 
-      expect(results.first[:title]).to eq("Has Cover")
+      expect(results.first[:title]).to eq("No Cover")
+      expect(results.last[:title]).to eq("Has Cover")
     end
   end
 
@@ -174,7 +175,7 @@ RSpec.describe OpenLibraryService do
 
     it "returns normalized edition hashes sorted by score" do
       stub_request(:get, editions_url)
-        .with(query: hash_including(limit: "100"))
+        .with(query: hash_including(limit: "50", offset: "0"))
         .to_return(status: 200, body: {
           entries: [
             {
@@ -216,19 +217,19 @@ RSpec.describe OpenLibraryService do
 
     it "handles bare work ID without /works/ prefix" do
       stub_request(:get, editions_url)
-        .with(query: hash_including(limit: "100"))
+        .with(query: hash_including(limit: "50", offset: "0"))
         .to_return(status: 200, body: { entries: [] }.to_json,
                    headers: { "Content-Type" => "application/json" })
 
       editions = service.fetch_editions("OL55847W")
 
       expect(editions).to eq([])
-      expect(WebMock).to have_requested(:get, editions_url).with(query: hash_including(limit: "100"))
+      expect(WebMock).to have_requested(:get, editions_url).with(query: hash_including(limit: "50", offset: "0"))
     end
 
     it "filters out editions missing both pages and isbn" do
       stub_request(:get, editions_url)
-        .with(query: hash_including(limit: "100"))
+        .with(query: hash_including(limit: "50", offset: "0"))
         .to_return(status: 200, body: {
           entries: [
             {
@@ -265,7 +266,7 @@ RSpec.describe OpenLibraryService do
 
     it "prefers isbn_13 over isbn_10" do
       stub_request(:get, editions_url)
-        .with(query: hash_including(limit: "100"))
+        .with(query: hash_including(limit: "50", offset: "0"))
         .to_return(status: 200, body: {
           entries: [
             {
@@ -285,7 +286,7 @@ RSpec.describe OpenLibraryService do
 
     it "falls back to isbn_10 when isbn_13 is missing" do
       stub_request(:get, editions_url)
-        .with(query: hash_including(limit: "100"))
+        .with(query: hash_including(limit: "50", offset: "0"))
         .to_return(status: 200, body: {
           entries: [
             {
@@ -304,7 +305,7 @@ RSpec.describe OpenLibraryService do
 
     it "extracts year from various publish_date formats" do
       stub_request(:get, editions_url)
-        .with(query: hash_including(limit: "100"))
+        .with(query: hash_including(limit: "50", offset: "0"))
         .to_return(status: 200, body: {
           entries: [
             { key: "/books/OL1M", title: "A", publish_date: "2006", number_of_pages: 100 },
@@ -331,7 +332,7 @@ RSpec.describe OpenLibraryService do
 
     it "returns empty array on API error" do
       stub_request(:get, editions_url)
-        .with(query: hash_including(limit: "100"))
+        .with(query: hash_including(limit: "50", offset: "0"))
         .to_return(status: 503, body: "Service Unavailable")
 
       editions = service.fetch_editions("/works/OL55847W")
@@ -341,7 +342,7 @@ RSpec.describe OpenLibraryService do
 
     it "returns empty array on timeout" do
       stub_request(:get, editions_url)
-        .with(query: hash_including(limit: "100"))
+        .with(query: hash_including(limit: "50", offset: "0"))
         .to_timeout
 
       editions = service.fetch_editions("/works/OL55847W")
@@ -351,7 +352,7 @@ RSpec.describe OpenLibraryService do
 
     it "ranks editions with more metadata higher" do
       stub_request(:get, editions_url)
-        .with(query: hash_including(limit: "100"))
+        .with(query: hash_including(limit: "50", offset: "0"))
         .to_return(status: 200, body: {
           entries: [
             {
@@ -381,7 +382,7 @@ RSpec.describe OpenLibraryService do
 
     it "capitalizes the physical_format field" do
       stub_request(:get, editions_url)
-        .with(query: hash_including(limit: "100"))
+        .with(query: hash_including(limit: "50", offset: "0"))
         .to_return(status: 200, body: {
           entries: [
             {
