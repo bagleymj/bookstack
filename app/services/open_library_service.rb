@@ -9,13 +9,16 @@ class OpenLibraryService
   class ApiError < StandardError; end
 
   # Search for works (step 1).
-  # Returns an array of work hashes sorted by relevance/quality.
+  # Returns an array of work hashes preserving OpenLibrary's relevance
+  # ranking. We only filter out works missing editions or metadata —
+  # we do NOT re-sort by our own score, because OpenLibrary's relevance
+  # ranking already puts the best match first.
   def search_works(query, limit: 8)
     return [] if query.blank?
 
     params = {
       q: query,
-      limit: [limit * 3, 24].max, # overfetch for ranking
+      limit: [limit * 3, 24].max, # overfetch to allow filtering
       fields: "key,title,author_name,first_publish_year,edition_count,cover_i"
     }
 
@@ -26,7 +29,6 @@ class OpenLibraryService
       .select { |doc| doc["edition_count"].to_i > 0 }
       .map { |doc| normalize_work(doc) }
       .compact
-      .sort_by { |w| -work_score(w) }
       .first(limit)
   rescue ApiError, Net::OpenTimeout, Net::ReadTimeout, JSON::ParserError, Errno::ECONNREFUSED => e
     Rails.logger.error("OpenLibrary search error: #{e.message}")
