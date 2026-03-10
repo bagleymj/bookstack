@@ -351,9 +351,20 @@ discover that longer tiers would have produced a flatter schedule.
 weeks past the first viable candidate's start. This keeps the search
 space manageable (~128 candidates per state per book instead of ~4,160).
 
-**No separate refinement pass needed**: Beam search explores tier+start
-combinations across all books simultaneously, finding globally better
-schedules than greedy + post-hoc refinement could achieve.
+**Post-beam refinement**: After beam search completes, two refinement
+passes further improve leveling:
+
+1. **Single-book refinement**: Each book is temporarily removed from the
+   load profile and re-evaluated against every valid (tier, monday)
+   combination. Because all other books are already placed, the scoring
+   sees the full picture and can fix issues the beam couldn't (it places
+   books sequentially without seeing future placements).
+
+2. **Pair refinement**: Identifies the two books contributing most to the
+   worst above-budget spike, removes both, and tries all pair
+   combinations. This fixes spikes that require coordinating two books
+   — e.g., swapping one to a longer tier while the other fills the
+   freed gap. Runs up to 3 passes until spikes are ≤3 min above budget.
 
 ### Phase 4: Verify throughput
 
@@ -759,14 +770,14 @@ The concurrency hard cap does not exist in the schema. Needs a
 
 ### ~~Gap 3: Phase 3 objective function~~ — RESOLVED
 
-**Decision: Beam search with three-component scoring.** Phase 3 uses
-beam search (width 25) with stratified pruning to explore tier+start
-combinations across all books in queue order. Scoring:
-`[max_overshoot, max_abs_deviation, mean_sq_deviation]`. Overshoot
-beyond `budget + 15 min` tolerance always loses. Among no-overshoot
-options, the lowest max absolute deviation from budget wins (penalizes
-both over and under equally). Ties broken by overall variance. No
-separate refinement pass needed.
+**Decision: Beam search with three-component scoring + post-beam
+refinement.** Phase 3 uses beam search (width 25) with stratified
+pruning to explore tier+start combinations across all books in queue
+order. Scoring: `[max_overshoot, max_abs_deviation, mean_sq_deviation]`.
+Overshoot beyond `budget + 15 min` tolerance always loses. Among
+no-overshoot options, the lowest max absolute deviation from budget
+wins. Ties broken by overall variance. After beam search, single-book
+and pair refinement passes further reduce spikes.
 
 ### ~~Gap 4: Phase 4 feedback loop~~ — RESOLVED
 
