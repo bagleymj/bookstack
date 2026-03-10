@@ -6,8 +6,6 @@ class ReadingListScheduler
     twelve_weeks: 12, twenty_six_weeks: 26, fifty_two_weeks: 52
   }.freeze
   MAX_ADJUSTMENT_ITERATIONS = 5
-  BEAM_WIDTH = 25
-  MAX_REFINEMENT_PASSES = 3
   PLACEMENT_HORIZON_WEEKS = 104
   CEILING_TOLERANCE = 15  # minutes above budget before penalizing overshoot
 
@@ -58,17 +56,14 @@ class ReadingListScheduler
     return if @target_budget <= 0
     compute_weekend_budgets
 
-    # Phase 3: Beam search tier assignment
+    # Phase 3: Monday-by-Monday bin filling
     @load_profile = Hash.new(0.0)
     @concurrent_count = Hash.new(0)
     @timeline_end = nil
 
     locked_goals.each { |goal| add_goal_to_profiles(goal) }
 
-    @placements = beam_search_placements(gather_schedulable_goals)
-
-    # Phase 3.5: Refinement — re-evaluate each placement against full load
-    refine_placements!
+    @placements = monday_fill_placements(gather_schedulable_goals)
 
     # Phase 4: Verify throughput
     verify_throughput!
@@ -157,174 +152,145 @@ class ReadingListScheduler
     date.on_weekend? ? @weekend_budget : @weekday_budget
   end
 
-  # ─── Phase 3: Beam Search ──────────────────────────────────────
+  # ─── Phase 3: Monday-by-Monday Bin Filling ─────────────────────
 
-  def beam_search_placements(goals)
-    # Process books in queue order — respect the user's reading list
-    goals_with_minutes = goals.map { |g| [g, estimate_remaining_minutes(g.book)] }
+  def monday_fill_placements(goals)
+    return [] if goals.empty?
 
-    # Initial beam: one state with only locked-goal load
-    initial_state = {
-      load_profile: @load_profile.dup,
-      concurrent_count: @concurrent_count.dup,
-      timeline_end: @timeline_end,
-      placements: []
-    }
-    beam = [initial_state]
-
-    goals_with_minutes.each do |goal, book_minutes|
-      next_beam = []
-
-      beam.each do |state|
-        candidates = enumerate_candidates(state, book_minutes)
-
-        if candidates.empty?
-          placement = default_placement(book_minutes)
-          next_beam << apply_candidate(state, goal, placement, book_minutes)
-        else
-          candidates.each do |placement|
-            next_beam << apply_candidate(state, goal, placement, book_minutes)
-          end
-        end
-      end
-
-      # Stratified pruning: keep tier diversity in the beam
-      beam = stratified_prune(next_beam)
-    end
-
-    # Winner: apply to real profiles and goals
-    best = beam.first
-    return [] unless best
-
-    @load_profile = best[:load_profile]
-    @concurrent_count = best[:concurrent_count]
-    @timeline_end = best[:timeline_end]
-
-    best[:placements].each do |entry|
-      apply_placement!(entry[:goal], entry[:placement])
-    end
-
-    best[:placements]
-  end
-
-  # Ensure beam keeps at least one representative per tier to avoid
-  # premature convergence on short tiers. Without this, early books
-  # all lock into 1-week tiers (lowest immediate deviation) and the
-  # beam loses the ability to discover that longer tiers would have
-  # produced a flatter overall schedule.
-  def stratified_prune(states)
-    return states if states.size <= BEAM_WIDTH
-
-    tier_groups = states.group_by { |s| s[:placements].last[:tier] }
-
-    # Best state per tier (guaranteed diversity)
-    per_tier = tier_groups.map { |_, group| group.min_by { |s| s[:score] } }
-    selected = Set.new(per_tier.map(&:object_id))
-
-    beam = per_tier.dup
-
-    # Fill remaining slots with best overall
-    states.sort_by { |s| s[:score] }.each do |state|
-      break if beam.size >= BEAM_WIDTH
-      beam << state unless selected.include?(state.object_id)
-    end
-
-    beam.sort_by { |s| s[:score] }
-  end
-
-  def enumerate_candidates(state, book_minutes)
-    candidates = []
-    best_start = nil
+    share_index = build_share_index(goals)
+    unscheduled = goals.map(&:id).to_set
+    placements = []
 
     each_monday do |monday|
-      TIERS.each do |tier|
-        end_date = calendar_end(monday, tier)
-        daily_share = compute_weekday_share(book_minutes, monday, end_date)
-        next if daily_share <= 0
-        next unless fits_concurrency_in_state?(state, monday, end_date)
+      break if unscheduled.empty?
 
-        candidates << { start: monday, end: end_date, share: daily_share, tier: tier }
-        best_start ||= monday
+      # Skip if spillover from prior multi-week placements already fills this Monday
+      next if monday_at_or_above_budget?(monday)
+
+      # Fill this Monday until load >= budget
+      loop do
+        break if unscheduled.empty?
+
+        # Try to place a book that fits under remaining headroom (shortest tier first)
+        placed_under = try_fit_under_budget(share_index, goals, unscheduled, monday, placements)
+
+        if placed_under
+          # Check if this Monday is now at/above budget
+          break if monday_at_or_above_budget?(monday)
+          next  # Still under budget — keep filling
+        end
+
+        # No book fits under budget — backfill with min-overshoot to push over
+        try_best_backfill(share_index, goals, unscheduled, monday, placements)
+        break  # Backfill guarantees we're over budget (or no valid placements exist)
       end
-
-      # Stop searching well past the best candidate's start
-      break if best_start && monday > best_start + 8 * 7
     end
 
-    candidates
-  end
-
-  def apply_candidate(state, goal, placement, book_minutes)
-    new_load = state[:load_profile].dup
-    new_conc = state[:concurrent_count].dup
-
-    (placement[:start]..placement[:end]).each do |date|
-      next unless reading_day?(date)
-      new_load[date] += share_for_date(placement[:share], date)
-      new_conc[date] += 1
+    # Fallback: any books still unscheduled get default placement
+    goals.each do |goal|
+      next unless unscheduled.include?(goal.id)
+      book_minutes = estimate_remaining_minutes(goal.book)
+      placement = default_placement(book_minutes)
+      record_placement!(placements, goal, placement, book_minutes)
+      unscheduled.delete(goal.id)
     end
 
-    new_end = [state[:timeline_end], placement[:end]].compact.max
-    new_placements = state[:placements] + [{ goal: goal, placement: placement, tier: placement[:tier], book_minutes: book_minutes }]
-
-    score = compute_state_score(new_load, new_end)
-
-    {
-      load_profile: new_load,
-      concurrent_count: new_conc,
-      timeline_end: new_end,
-      placements: new_placements,
-      score: score
-    }
+    placements
   end
 
-  # Score: [max_overshoot_beyond_ceiling, max_abs_deviation, weighted_mean_sq]
-  #
-  # 1. Hard constraint: never exceed budget + ceiling tolerance
-  # 2. Minimax: minimize the worst absolute deviation from budget
-  # 3. Tiebreaker: minimize variance, weighted so early-timeline
-  #    deviations cost more (front-loading — valleys drift to end)
-  def compute_state_score(load_profile, timeline_end)
-    score_start = snap_to_monday(Date.current)
-    score_end = timeline_end || score_start
-    timeline_span = [(score_end - score_start).to_i, 1].max
+  def build_share_index(goals)
+    index = {}
+    goals.each do |goal|
+      book_minutes = estimate_remaining_minutes(goal.book)
+      index[goal.id] = { goal: goal, book_minutes: book_minutes }
+    end
+    index
+  end
 
-    max_overshoot = 0.0
-    max_abs_dev = 0.0
-    sum_weighted_sq = 0.0
-    total_weight = 0.0
+  def compute_share_for(book_minutes, monday, tier)
+    end_date = calendar_end(monday, tier)
+    share = compute_weekday_share(book_minutes, monday, end_date)
+    return nil if share <= 0
+    { start: monday, end: end_date, share: share, tier: tier }
+  end
 
-    (score_start..score_end).each do |date|
-      next unless reading_day?(date)
-      budget = budget_for_date(date)
-      next if budget <= 0
+  def monday_at_or_above_budget?(monday)
+    budget = budget_for_date(monday)
+    return true if budget <= 0
+    @load_profile[monday] >= budget
+  end
 
-      projected = load_profile[date]
+  def try_fit_under_budget(share_index, goals, unscheduled, monday, placements)
+    goals.each do |goal|
+      next unless unscheduled.include?(goal.id)
+      entry = share_index[goal.id]
 
-      over = projected - budget - CEILING_TOLERANCE
-      max_overshoot = over if over > 0 && over > max_overshoot
+      # Try tiers shortest to longest — use first where share fits under
+      # remaining headroom on this Monday (won't push load above budget)
+      TIERS.each do |tier|
+        placement = compute_share_for(entry[:book_minutes], monday, tier)
+        next unless placement
+        next unless fits_concurrency?(placement[:start], placement[:end])
 
-      dev = (projected - budget).abs
-      max_abs_dev = dev if dev > max_abs_dev
-
-      remaining = (score_end - date).to_i
-      weight = 1.0 + remaining.to_f / timeline_span
-      sum_weighted_sq += (projected - budget) ** 2 * weight
-      total_weight += weight
+        projected = @load_profile[monday] + share_for_date(placement[:share], monday)
+        budget = budget_for_date(monday)
+        if projected <= budget + CEILING_TOLERANCE
+          record_placement!(placements, goal, placement, entry[:book_minutes])
+          unscheduled.delete(goal.id)
+          return true
+        end
+      end
     end
 
-    weighted_mean_sq = total_weight > 0 ? sum_weighted_sq / total_weight : 0.0
-    [max_overshoot, max_abs_dev, weighted_mean_sq]
+    false
   end
 
-  def fits_concurrency_in_state?(state, start_date, end_date)
+  def try_best_backfill(share_index, goals, unscheduled, monday, placements)
+    best = nil
+    best_overshoot = Float::INFINITY
+    budget = budget_for_date(monday)
+
+    goals.each do |goal|
+      next unless unscheduled.include?(goal.id)
+      entry = share_index[goal.id]
+
+      # Try all tiers — find the (book, tier) that exceeds budget by the least
+      TIERS.each do |tier|
+        placement = compute_share_for(entry[:book_minutes], monday, tier)
+        next unless placement
+        next unless fits_concurrency?(placement[:start], placement[:end])
+
+        projected = @load_profile[monday] + share_for_date(placement[:share], monday)
+        overshoot = projected - budget
+
+        if overshoot < best_overshoot
+          best_overshoot = overshoot
+          best = { goal: goal, placement: placement, book_minutes: entry[:book_minutes] }
+        end
+      end
+    end
+
+    return false unless best
+
+    record_placement!(placements, best[:goal], best[:placement], best[:book_minutes])
+    unscheduled.delete(best[:goal].id)
+    true
+  end
+
+  def fits_concurrency?(start_date, end_date)
     limit = effective_concurrency_limit
     return true unless limit
     (start_date..end_date).each do |date|
       next unless reading_day?(date)
-      return false if state[:concurrent_count][date] >= limit
+      return false if @concurrent_count[date] >= limit
     end
     true
+  end
+
+  def record_placement!(placements, goal, placement, book_minutes)
+    apply_placement!(goal, placement)
+    add_range_to_profiles(placement[:start], placement[:end], placement[:share])
+    placements << { goal: goal, placement: placement, tier: placement[:tier], book_minutes: book_minutes }
   end
 
   def compute_weekday_share(book_minutes, start_date, end_date)
@@ -393,223 +359,6 @@ class ReadingListScheduler
     end_date = calendar_end(start, tier)
     share = compute_weekday_share(book_minutes, start, end_date)
     { start: start, end: end_date, share: share, tier: tier }
-  end
-
-  # ─── Phase 3.5: Refinement ────────────────────────────────────
-
-  def refine_placements!
-    # Pass 1: Single-book refinement — try moving each book individually
-    single_book_refine!
-
-    # Pass 2: Pair refinement — remove the 2 biggest spike contributors
-    # and re-place them together, exploring all (tier, monday) combos
-    # for both simultaneously. This fixes spikes that single-book
-    # refinement can't (moving one book shifts the spike rather than
-    # eliminating it).
-    pair_refine!
-  end
-
-  # Re-evaluate each book individually against the full load profile.
-  def single_book_refine!
-    MAX_REFINEMENT_PASSES.times do
-      improved = false
-
-      @placements.each do |entry|
-        goal = entry[:goal]
-        book_minutes = entry[:book_minutes]
-        old_placement = entry[:placement]
-
-        remove_range_from_profiles(old_placement[:start], old_placement[:end], old_placement[:share])
-
-        other_ends = @placements.reject { |e| e.equal?(entry) }.map { |e| e[:placement][:end] }
-        locked_ends = locked_goals.map(&:target_completion_date).compact
-        base_timeline_end = (other_ends + locked_ends).compact.max
-
-        add_range_to_profiles(old_placement[:start], old_placement[:end], old_placement[:share])
-        old_score = compute_state_score(@load_profile, [base_timeline_end, old_placement[:end]].compact.max)
-        remove_range_from_profiles(old_placement[:start], old_placement[:end], old_placement[:share])
-
-        best_placement = old_placement
-        best_score = old_score
-        first_monday = nil
-
-        # Disable @timeline_end side effect during trial evaluations
-        saved_timeline_end = @timeline_end
-        @timeline_end = false
-
-        each_monday do |monday|
-          TIERS.each do |tier|
-            end_date = calendar_end(monday, tier)
-            daily_share = compute_weekday_share(book_minutes, monday, end_date)
-            next if daily_share <= 0
-            next unless fits_concurrency_for_adjustment?(monday, end_date, entry)
-
-            add_range_to_profiles(monday, end_date, daily_share)
-            test_end = [base_timeline_end, end_date].compact.max
-            score = compute_state_score(@load_profile, test_end)
-
-            if (score <=> best_score) < 0
-              best_score = score
-              best_placement = { start: monday, end: end_date, share: daily_share, tier: tier }
-            end
-
-            remove_range_from_profiles(monday, end_date, daily_share)
-            first_monday ||= monday
-          end
-
-          break if first_monday && monday > first_monday + 12 * 7
-        end
-
-        @timeline_end = saved_timeline_end
-
-        add_range_to_profiles(best_placement[:start], best_placement[:end], best_placement[:share])
-        @timeline_end = [base_timeline_end, best_placement[:end]].compact.max
-
-        if best_placement[:start] != old_placement[:start] || best_placement[:end] != old_placement[:end]
-          improved = true
-          goal.update!(started_on: best_placement[:start], target_completion_date: best_placement[:end])
-          entry[:placement] = best_placement
-          entry[:tier] = best_placement[:tier]
-        end
-      end
-
-      break unless improved
-    end
-  end
-
-  # Remove the two books contributing most to the worst spike and
-  # re-place them together, trying all (tier, monday) combinations
-  # for both simultaneously. This can fix spikes that require
-  # coordinating two books — e.g., swapping one to a longer tier
-  # while the other fills the freed gap.
-  def pair_refine!
-    MAX_REFINEMENT_PASSES.times do
-      # Find worst above-budget day
-      score_start = snap_to_monday(Date.current)
-      score_end = @timeline_end || score_start
-      worst_day = nil
-      worst_over = 0.0
-
-      (score_start..score_end).each do |date|
-        next unless reading_day?(date)
-        budget = budget_for_date(date)
-        next if budget <= 0
-        over = @load_profile[date] - budget
-        if over > worst_over
-          worst_over = over
-          worst_day = date
-        end
-      end
-
-      break if worst_over <= 3.0  # Close enough to budget
-      break unless worst_day
-
-      # Find the 2 books with highest shares on that day
-      contributors = @placements
-        .select { |e| worst_day >= e[:placement][:start] && worst_day <= e[:placement][:end] }
-        .sort_by { |e| -e[:placement][:share] }
-        .first(2)
-
-      break if contributors.size < 2
-
-      # Remove both from the profile
-      contributors.each do |e|
-        remove_range_from_profiles(e[:placement][:start], e[:placement][:end], e[:placement][:share])
-      end
-
-      # Baseline: timeline_end and score without these two books
-      other_ends = @placements
-        .reject { |e| contributors.any? { |c| c.equal?(e) } }
-        .map { |e| e[:placement][:end] }
-      locked_ends = locked_goals.map(&:target_completion_date).compact
-      base_timeline_end = (other_ends + locked_ends).compact.max
-
-      # Score the current (original) pair as baseline
-      contributors.each do |e|
-        add_range_to_profiles(e[:placement][:start], e[:placement][:end], e[:placement][:share])
-      end
-      current_end = [base_timeline_end, *contributors.map { |e| e[:placement][:end] }].compact.max
-      best_score = compute_state_score(@load_profile, current_end)
-      contributors.each do |e|
-        remove_range_from_profiles(e[:placement][:start], e[:placement][:end], e[:placement][:share])
-      end
-
-      best_pair = nil
-
-      # Enumerate candidates for both books
-      c1_list = enumerate_pair_candidates(contributors[0][:book_minutes])
-      c2_list = enumerate_pair_candidates(contributors[1][:book_minutes])
-
-      # Trial loop: disable @timeline_end side effect in add_range_to_profiles
-      saved_timeline_end = @timeline_end
-      @timeline_end = false
-
-      c1_list.each do |p1|
-        next unless fits_concurrency_for_adjustment?(p1[:start], p1[:end], contributors[0])
-        add_range_to_profiles(p1[:start], p1[:end], p1[:share])
-
-        c2_list.each do |p2|
-          next unless fits_concurrency_for_adjustment?(p2[:start], p2[:end], contributors[1])
-          add_range_to_profiles(p2[:start], p2[:end], p2[:share])
-
-          test_end = [base_timeline_end, p1[:end], p2[:end]].compact.max
-          score = compute_state_score(@load_profile, test_end)
-
-          if (score <=> best_score) < 0
-            best_score = score
-            best_pair = [p1.dup, p2.dup]
-          end
-
-          remove_range_from_profiles(p2[:start], p2[:end], p2[:share])
-        end
-
-        remove_range_from_profiles(p1[:start], p1[:end], p1[:share])
-      end
-
-      @timeline_end = saved_timeline_end
-
-      if best_pair
-        # Apply the improved pair
-        best_pair.each_with_index do |placement, i|
-          entry = contributors[i]
-          add_range_to_profiles(placement[:start], placement[:end], placement[:share])
-          entry[:goal].update!(started_on: placement[:start], target_completion_date: placement[:end])
-          entry[:placement] = placement
-          entry[:tier] = placement[:tier]
-        end
-        @timeline_end = [base_timeline_end, *best_pair.map { |p| p[:end] }].compact.max
-      else
-        # No improvement found — re-add originals and stop
-        contributors.each do |e|
-          add_range_to_profiles(e[:placement][:start], e[:placement][:end], e[:placement][:share])
-        end
-        break
-      end
-    end
-  end
-
-  # Generate all valid (tier, monday) candidates for a book during refinement.
-  # Limits search to 8 weeks past the first valid start to keep the
-  # pair search space manageable (~8 tiers × ~16 mondays = ~128
-  # candidates per book, so ~16K pairs).
-  def enumerate_pair_candidates(book_minutes)
-    candidates = []
-    first_monday = nil
-
-    each_monday do |monday|
-      TIERS.each do |tier|
-        end_date = calendar_end(monday, tier)
-        daily_share = compute_weekday_share(book_minutes, monday, end_date)
-        next if daily_share <= 0
-
-        candidates << { start: monday, end: end_date, share: daily_share, tier: tier }
-        first_monday ||= monday
-      end
-
-      break if first_monday && monday > first_monday + 8 * 7
-    end
-
-    candidates
   end
 
   # ─── Phase 4 ────────────────────────────────────────────────────
