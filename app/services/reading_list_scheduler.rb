@@ -167,22 +167,13 @@ class ReadingListScheduler
       # Skip if spillover from prior multi-week placements already fills this Monday
       next if monday_at_or_above_target?(monday)
 
-      # Fill this Monday until load >= target
-      loop do
-        break if unscheduled.empty?
+      # Find the best combination of books to start this Monday
+      combo = best_combination_for(share_index, goals, unscheduled, monday)
+      next if combo.empty?
 
-        # Try to place a book that fits under remaining headroom (shortest tier first)
-        placed_under = try_fit_under_target(share_index, goals, unscheduled, monday, placements)
-
-        if placed_under
-          # Check if this Monday is now at/above target
-          break if monday_at_or_above_target?(monday)
-          next  # Still under target — keep filling
-        end
-
-        # No book fits under target — backfill with min-overshoot to push over
-        try_best_backfill(share_index, goals, unscheduled, monday, placements)
-        break  # Backfill guarantees we're over target (or no valid placements exist)
+      combo.each do |entry|
+        record_placement!(placements, entry[:goal], entry[:placement], entry[:book_minutes])
+        unscheduled.delete(entry[:goal].id)
       end
     end
 
@@ -220,61 +211,141 @@ class ReadingListScheduler
     @load_profile[monday] >= target
   end
 
-  def try_fit_under_target(share_index, goals, unscheduled, monday, placements)
-    goals.each do |goal|
-      next unless unscheduled.include?(goal.id)
-      entry = share_index[goal.id]
+  # Find the combination of (anchor + 0..N companions) × tiers that
+  # overshoots the daily target by the least. The anchor is the next
+  # unscheduled book in queue order. If no combination reaches the
+  # target, pick the one that gets closest.
+  def best_combination_for(share_index, goals, unscheduled, monday)
+    target = target_for_date(monday)
+    current_load = @load_profile[monday]
+    open_slots = available_concurrency_slots(monday)
+    return [] if open_slots <= 0
 
-      # Try tiers shortest to longest — use first where share fits under
-      # remaining headroom on this Monday (won't push load above target)
-      TIERS.each do |tier|
-        placement = compute_share_for(entry[:book_minutes], monday, tier)
-        next unless placement
-        next unless fits_concurrency?(placement[:start], placement[:end])
+    # Build candidate placements: each unscheduled book × each tier
+    candidates = build_candidates(share_index, goals, unscheduled, monday)
+    return [] if candidates.empty?
 
-        projected = @load_profile[monday] + share_for_date(placement[:share], monday)
-        target = target_for_date(monday)
-        if projected <= target + CEILING_TOLERANCE
-          record_placement!(placements, goal, placement, entry[:book_minutes])
-          unscheduled.delete(goal.id)
-          return true
+    # The anchor is the first unscheduled book in queue order
+    anchor_id = goals.find { |g| unscheduled.include?(g.id) }&.id
+    return [] unless anchor_id
+
+    anchor_options = candidates.select { |c| c[:goal_id] == anchor_id }
+    return [] if anchor_options.empty?
+
+    companion_options = candidates.reject { |c| c[:goal_id] == anchor_id }
+    max_companions = [open_slots - 1, companion_options.size].min
+
+    best_combo = nil
+    best_score = nil  # [over_target?, distance] — prefer over-target, then min distance
+
+    # Try each tier for the anchor
+    anchor_options.each do |anchor|
+      # Anchor alone
+      evaluate_combination([anchor], current_load, target, monday, best_score) do |score|
+        best_score = score
+        best_combo = [anchor]
+      end
+
+      next if max_companions <= 0
+
+      # Anchor + 1 companion
+      companion_options.each do |c1|
+        next if dates_overlap_exceeds_slots?(anchor, c1, monday, open_slots)
+
+        evaluate_combination([anchor, c1], current_load, target, monday, best_score) do |score|
+          best_score = score
+          best_combo = [anchor, c1]
+        end
+
+        next if max_companions <= 1
+
+        # Anchor + 2 companions
+        companion_options.each do |c2|
+          next if c2[:goal_id] <= c1[:goal_id]  # avoid duplicate pairs
+          next if c2[:goal_id] == c1[:goal_id]   # same book can't appear twice
+          next if dates_overlap_exceeds_slots?(anchor, c1, c2, monday, open_slots)
+
+          evaluate_combination([anchor, c1, c2], current_load, target, monday, best_score) do |score|
+            best_score = score
+            best_combo = [anchor, c1, c2]
+          end
         end
       end
     end
 
-    false
+    return [] unless best_combo
+
+    best_combo.map do |c|
+      { goal: share_index[c[:goal_id]][:goal],
+        placement: c[:placement],
+        book_minutes: c[:book_minutes] }
+    end
   end
 
-  def try_best_backfill(share_index, goals, unscheduled, monday, placements)
-    best = nil
-    best_overshoot = Float::INFINITY
-    target = target_for_date(monday)
-
+  def build_candidates(share_index, goals, unscheduled, monday)
+    candidates = []
     goals.each do |goal|
       next unless unscheduled.include?(goal.id)
       entry = share_index[goal.id]
 
-      # Try all tiers — find the (book, tier) that exceeds target by the least
       TIERS.each do |tier|
         placement = compute_share_for(entry[:book_minutes], monday, tier)
         next unless placement
         next unless fits_concurrency?(placement[:start], placement[:end])
 
-        projected = @load_profile[monday] + share_for_date(placement[:share], monday)
-        overshoot = projected - target
-
-        if overshoot < best_overshoot
-          best_overshoot = overshoot
-          best = { goal: goal, placement: placement, book_minutes: entry[:book_minutes] }
-        end
+        monday_share = share_for_date(placement[:share], monday)
+        candidates << {
+          goal_id: goal.id,
+          placement: placement,
+          book_minutes: entry[:book_minutes],
+          monday_share: monday_share
+        }
       end
     end
+    candidates
+  end
 
-    return false unless best
+  # Score: [priority_bucket, overshoot, max_tier_weeks, combo_size]
+  #
+  # Two-bucket scoring:
+  #   Bucket 0: "close" — at/above target OR just under (within CEILING_TOLERANCE)
+  #   Bucket 1: "far under" — more than CEILING_TOLERANCE below target
+  #
+  # Within each bucket, blend distance-from-target with schedule compactness.
+  # Adding max_tier (weeks) to gap.abs (minutes) penalizes long tiers that
+  # create extended low-load tails, while naturally preferring close-to-target
+  # combos when the gap is large (short tiers for big books overshoot hugely).
+  def evaluate_combination(combo, current_load, target, monday, current_best)
+    total_share = combo.sum { |c| c[:monday_share] }
+    projected = current_load + total_share
+    gap = projected - target
 
-    record_placement!(placements, best[:goal], best[:placement], best[:book_minutes])
-    unscheduled.delete(best[:goal].id)
-    true
+    bucket = gap >= -CEILING_TOLERANCE ? 0 : 1
+
+    max_tier = combo.map { |c| TIER_WEEKS[c[:placement][:tier]] }.max
+
+    score = [bucket, gap.abs + max_tier, combo.size]
+
+    if current_best.nil? || (score <=> current_best) < 0
+      yield score
+    end
+  end
+
+  def available_concurrency_slots(monday)
+    limit = effective_concurrency_limit
+    return TIERS.size unless limit  # effectively unlimited
+    [limit - @concurrent_count[monday], 0].max
+  end
+
+  # Check that placing these candidates together doesn't exceed concurrency
+  # on any reading day they share. Quick check: the worst case is on monday
+  # itself (all start the same day), plus we check individual placements.
+  def dates_overlap_exceeds_slots?(*candidates, monday, open_slots)
+    return false if open_slots >= candidates.size
+
+    # Count how many candidates overlap on monday (they all start monday,
+    # so all overlap there). The open_slots already accounts for existing load.
+    candidates.size > open_slots
   end
 
   def fits_concurrency?(start_date, end_date)
