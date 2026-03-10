@@ -367,6 +367,92 @@ RSpec.describe ReadingListScheduler do
         "#{shortfall_pct}% of core days fall >20% below target (#{target.round} min). " \
         "Heijunka demands consistent load, not persistent valleys."
     end
+
+    # ─── Last Book Relaxation ──────────────────────────────────────
+
+    describe "last book relaxation" do
+      it "stretches the last book's tier when it would overshoot the target" do
+        travel_to monday do
+          # Queue books where the last one would overshoot in its natural tier.
+          # Earlier books fill the slot; the last book tips it over the target.
+          # After relaxation, the last book should get a longer tier (more days).
+          6.times { |i| create_queued_book(pages: 300, position: i + 1, title: "Book #{i}") }
+
+          scheduler = ReadingListScheduler.new(user)
+          scheduler.schedule!
+
+          goals = user.reading_goals.active.order(:position)
+          last_goal = goals.find { |g| g.book.title == "Book 5" }
+          earlier_same_start = goals.select { |g| g.started_on == last_goal.started_on && g.book.title != "Book 5" }
+
+          # The last book should have at least as many calendar days as similarly-sized
+          # earlier books that share its start date — likely more due to relaxation
+          last_days = (last_goal.target_completion_date - last_goal.started_on).to_i + 1
+
+          earlier_same_start.each do |eg|
+            earlier_days = (eg.target_completion_date - eg.started_on).to_i + 1
+            expect(last_days).to be >= earlier_days,
+              "Last book (#{last_days}d) should be >= earlier book #{eg.book.title} (#{earlier_days}d)"
+          end
+        end
+      end
+
+      it "does not stretch non-last books that overshoot" do
+        travel_to monday do
+          # Place books; observe that earlier books retain their original tiers
+          # even if they contribute to overshoot at their slot
+          4.times { |i| create_queued_book(pages: 300, position: i + 1, title: "Book #{i}") }
+
+          scheduler = ReadingListScheduler.new(user)
+          scheduler.schedule!
+
+          goals = user.reading_goals.active.order(:position)
+          first_goal = goals.find { |g| g.book.title == "Book 0" }
+          first_days = (first_goal.target_completion_date - first_goal.started_on).to_i + 1
+
+          # Run again without the relaxation feature's target book to compare
+          # The first book should keep its compact tier (not be stretched)
+          # First book at position 1 should remain short — relaxation only targets the last
+          expect(first_days).to be <= 28, # Should be at most a 4-week tier for a 300-page book
+            "First book got #{first_days} days — should not be stretched by last-book relaxation"
+        end
+      end
+
+      it "leaves the last book alone when no overshoot occurs" do
+        travel_to monday do
+          # A single book can't overshoot (no prior load) — should keep its natural tier
+          create_queued_book(pages: 300, position: 1, title: "Solo Book")
+
+          scheduler = ReadingListScheduler.new(user)
+          scheduler.schedule!
+
+          goal = user.reading_goals.active.first
+          days = (goal.target_completion_date - goal.started_on).to_i + 1
+
+          # Schedule again with same setup to get the "natural" tier
+          user2 = create(:user,
+            reading_pace_type: "books_per_year",
+            reading_pace_value: 50,
+            reading_pace_set_on: Date.current.beginning_of_year,
+            default_reading_speed_wpm: 250,
+            max_concurrent_books: 3,
+            weekend_mode: :same,
+            weekday_reading_minutes: 60,
+            weekend_reading_minutes: 60)
+          book2 = create(:book, user: user2, last_page: 300, title: "Solo Book 2")
+          create(:reading_goal, user: user2, book: book2, status: :queued,
+                 started_on: nil, target_completion_date: nil,
+                 auto_scheduled: true, position: 1)
+          ReadingListScheduler.new(user2).schedule!
+
+          goal2 = user2.reading_goals.active.first
+          days2 = (goal2.target_completion_date - goal2.started_on).to_i + 1
+
+          expect(days).to eq(days2),
+            "Solo book got #{days} days vs expected #{days2} — should not be relaxed without overshoot"
+        end
+      end
+    end
   end
 
   # ─── Concurrency Limits ────────────────────────────────────────

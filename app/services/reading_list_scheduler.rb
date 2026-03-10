@@ -177,6 +177,9 @@ class ReadingListScheduler
       end
     end
 
+    # Stretch the last book if it caused overshoot
+    relax_last_placement!(placements, goals)
+
     # Fallback: any books still unscheduled get default placement
     goals.each do |goal|
       next unless unscheduled.include?(goal.id)
@@ -361,6 +364,52 @@ class ReadingListScheduler
     apply_placement!(goal, placement)
     add_range_to_profiles(placement[:start], placement[:end], placement[:share])
     placements << { goal: goal, placement: placement, tier: placement[:tier], book_minutes: book_minutes }
+  end
+
+  # After all books are placed, check whether the last book in queue order
+  # pushed its slot over the daily target. If so, promote it to progressively
+  # longer tiers until the overshoot is resolved or tiers are exhausted.
+  # This only affects the final book — earlier books benefit from subsequent
+  # placements filling remaining capacity, but the last book has nothing after it.
+  def relax_last_placement!(placements, goals)
+    return if placements.empty? || goals.empty?
+
+    last_goal = goals.last
+    entry = placements.find { |p| p[:goal].id == last_goal.id }
+    return unless entry
+
+    slot_start = entry[:placement][:start]
+    target = target_for_date(slot_start)
+    return if target <= 0
+    return if @load_profile[slot_start] <= target
+
+    current_tier_idx = TIERS.index(entry[:tier])
+    return if current_tier_idx.nil?
+
+    ((current_tier_idx + 1)...TIERS.size).each do |idx|
+      longer_tier = TIERS[idx]
+      new_end = calendar_end(slot_start, longer_tier)
+      new_share = compute_weekday_share(entry[:book_minutes], slot_start, new_end)
+      next if new_share <= 0
+
+      # Remove old range, check concurrency, apply new range
+      old_placement = entry[:placement]
+      remove_range_from_profiles(old_placement[:start], old_placement[:end], old_placement[:share])
+
+      unless fits_concurrency?(new_end > old_placement[:end] ? (old_placement[:end] + 1) : slot_start, new_end)
+        add_range_to_profiles(old_placement[:start], old_placement[:end], old_placement[:share])
+        next
+      end
+
+      new_placement = { start: slot_start, end: new_end, share: new_share, tier: longer_tier }
+      add_range_to_profiles(slot_start, new_end, new_share)
+
+      entry[:goal].update!(target_completion_date: new_end)
+      entry[:tier] = longer_tier
+      entry[:placement] = new_placement
+
+      break if @load_profile[slot_start] <= target
+    end
   end
 
   def compute_weekday_share(book_minutes, start_date, end_date)
