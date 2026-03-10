@@ -31,8 +31,7 @@ class DashboardController < ApplicationController
 
     # Derived stats
     if @stats && @stats.total_sessions > 0
-      wpp = current_user.default_words_per_page
-      @pages_per_hour = ((@stats.average_wpm * 60.0) / wpp).round(1)
+      @pages_per_hour = ((@stats.average_wpm * 60.0) / Book::WORDS_PER_PAGE).round(1)
       @avg_pages_per_session = (@stats.total_pages_read.to_f / @stats.total_sessions).round(1)
       @avg_session_duration_seconds = @stats.total_reading_time_seconds / @stats.total_sessions
     else

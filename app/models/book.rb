@@ -11,20 +11,20 @@ class Book < ApplicationRecord
     abandoned: 3
   }
 
-  enum :difficulty, {
-    easy: 1,
+  enum :density, {
+    light: 1,
     below_average: 2,
     average: 3,
-    challenging: 4,
+    above_average: 4,
     dense: 5
   }, prefix: true
 
-  # Difficulty modifiers for reading speed
-  DIFFICULTY_MODIFIERS = {
-    easy: 1.3,
+  # Density modifiers for reading speed
+  DENSITY_MODIFIERS = {
+    light: 1.3,
     below_average: 1.15,
     average: 1.0,
-    challenging: 0.85,
+    above_average: 0.85,
     dense: 0.7
   }.freeze
 
@@ -32,9 +32,8 @@ class Book < ApplicationRecord
   validates :title, presence: true
   validates :first_page, presence: true, numericality: { greater_than: 0 }
   validates :last_page, presence: true, numericality: { greater_than: 0 }
-  validates :words_per_page, numericality: { greater_than: 0 }, allow_nil: true
   validates :current_page, numericality: { greater_than: 0 }
-  validates :difficulty, inclusion: { in: difficulties.keys }
+  validates :density, inclusion: { in: densities.keys }
   validate :last_page_after_first_page
 
   # Scopes
@@ -54,8 +53,10 @@ class Book < ApplicationRecord
     last_page - first_page + 1
   end
 
+  WORDS_PER_PAGE = 250
+
   def total_words
-    total_pages * effective_words_per_page
+    total_pages * WORDS_PER_PAGE
   end
 
   def remaining_pages
@@ -63,7 +64,7 @@ class Book < ApplicationRecord
   end
 
   def remaining_words
-    remaining_pages * effective_words_per_page
+    remaining_pages * WORDS_PER_PAGE
   end
 
   def progress_percentage
@@ -77,12 +78,8 @@ class Book < ApplicationRecord
     current_page
   end
 
-  def effective_words_per_page
-    words_per_page || user.default_words_per_page
-  end
-
-  def difficulty_modifier
-    actual_difficulty_modifier || DIFFICULTY_MODIFIERS[difficulty.to_sym]
+  def density_modifier
+    actual_density_modifier || DENSITY_MODIFIERS[density.to_sym]
   end
 
   def actual_wpm
@@ -92,7 +89,7 @@ class Book < ApplicationRecord
   end
 
   def effective_reading_time_minutes
-    wpm = actual_wpm || (user.effective_reading_speed * difficulty_modifier)
+    wpm = actual_wpm || (user.effective_reading_speed * density_modifier)
     return 0 if wpm.zero? || remaining_words.zero?
     (remaining_words / wpm).round
   end
@@ -100,7 +97,7 @@ class Book < ApplicationRecord
   def estimated_reading_time_minutes
     return 0 if remaining_words.zero?
 
-    effective_wpm = user.effective_reading_speed * difficulty_modifier
+    effective_wpm = user.effective_reading_speed * density_modifier
     (remaining_words / effective_wpm).round
   end
 
@@ -145,8 +142,7 @@ class Book < ApplicationRecord
 
   def set_defaults
     self.current_page = first_page || 1 if current_page.nil? || current_page.zero?
-    self.difficulty ||= :average
-    self.words_per_page ||= user&.default_words_per_page || 250
+    self.density ||= :average
     self.first_page ||= 1
   end
 

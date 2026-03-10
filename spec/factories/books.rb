@@ -5,7 +5,7 @@ FactoryBot.define do
     author { "Test Author" }
     first_page { 1 }
     last_page { 300 }
-    difficulty { :average }
+    density { :average }
 
     trait :reading do
       status { :reading }

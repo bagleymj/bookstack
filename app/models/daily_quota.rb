@@ -70,10 +70,10 @@ class DailyQuota < ApplicationRecord
     remaining = pages_remaining
     return 0 if remaining <= 0
 
-    wpm = book.actual_wpm || (user.effective_reading_speed * book.difficulty_modifier)
+    wpm = book.actual_wpm || (user.effective_reading_speed * book.density_modifier)
     return 0 if wpm.zero?
 
-    words_remaining = remaining * book.effective_words_per_page
+    words_remaining = remaining * Book::WORDS_PER_PAGE
     (words_remaining / wpm).ceil
   end
 

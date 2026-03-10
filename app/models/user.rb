@@ -108,7 +108,7 @@ class User < ApplicationRecord
   def calculate_daily_minutes_for_book_pace(days_in_period)
     avg_pages = books.average(:total_pages)&.to_f || DEFAULT_AVG_BOOK_PAGES
     avg_pages = DEFAULT_AVG_BOOK_PAGES if avg_pages <= 0
-    words_per_book = avg_pages * (default_words_per_page || 250)
+    words_per_book = avg_pages * Book::WORDS_PER_PAGE
     minutes_per_book = words_per_book.to_f / effective_reading_speed
     books_per_day = reading_pace_value.to_f / days_in_period
     (minutes_per_book * books_per_day).ceil

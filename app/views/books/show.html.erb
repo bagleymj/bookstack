@@ -72,17 +72,13 @@
             <dd class="text-sm font-medium text-gray-900"><%= @book.first_page %> - <%= @book.last_page %> (<%= @book.total_pages %> pages)</dd>
           </div>
           <div class="flex justify-between">
-            <dt class="text-sm text-gray-500">Words per Page</dt>
-            <dd class="text-sm font-medium text-gray-900"><%= @book.effective_words_per_page %></dd>
+            <dt class="text-sm text-gray-500">Density</dt>
+            <dd class="text-sm font-medium text-gray-900"><%= @book.density.humanize %></dd>
           </div>
-          <div class="flex justify-between">
-            <dt class="text-sm text-gray-500">Difficulty</dt>
-            <dd class="text-sm font-medium text-gray-900"><%= @book.difficulty.humanize %></dd>
-          </div>
-          <% if @book.actual_difficulty_modifier %>
+          <% if @book.actual_density_modifier %>
             <div class="flex justify-between">
               <dt class="text-sm text-gray-500">Learned Modifier</dt>
-              <dd class="text-sm font-medium text-gray-900"><%= (@book.actual_difficulty_modifier * 100).round %>%</dd>
+              <dd class="text-sm font-medium text-gray-900"><%= (@book.actual_density_modifier * 100).round %>%</dd>
             </div>
           <% end %>
           <div class="flex justify-between">

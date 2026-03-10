@@ -32,7 +32,6 @@ class ProfilesController < ApplicationController
   def profile_params
     params.require(:user).permit(
       :name,
-      :default_words_per_page,
       :default_reading_speed_wpm,
       :concurrency_limit,
       :weekend_reading_minutes,

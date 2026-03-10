@@ -36,14 +36,6 @@
       </div>
 
       <div class="space-y-6">
-        <!-- Words per page -->
-        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <label class="block text-sm font-medium text-gray-700 mb-1">Words per page</label>
-          <p class="text-xs text-gray-500 mb-3">Most books average around 250 words per page. Adjust if you read books with denser text.</p>
-          <%= form.number_field :default_words_per_page, min: 50, max: 500,
-              class: "block w-32 rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" %>
-        </div>
-
         <!-- Reading speed -->
         <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <label class="block text-sm font-medium text-gray-700 mb-3">How fast do you read?</label>

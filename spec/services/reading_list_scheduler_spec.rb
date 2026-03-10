@@ -7,15 +7,14 @@ RSpec.describe ReadingListScheduler do
       reading_pace_value: 50,
       reading_pace_set_on: Date.current.beginning_of_year,
       default_reading_speed_wpm: 250,
-      default_words_per_page: 250,
       max_concurrent_books: 3,
       weekend_mode: :same,
       weekday_reading_minutes: 60,
       weekend_reading_minutes: 60)
   end
 
-  def create_queued_book(pages: 300, position: 1, difficulty: :average, title: "Book")
-    book = create(:book, user: user, last_page: pages, difficulty: difficulty, title: title)
+  def create_queued_book(pages: 300, position: 1, density: :average, title: "Book")
+    book = create(:book, user: user, last_page: pages, density: density, title: title)
     create(:reading_goal, user: user, book: book, status: :queued,
            started_on: nil, target_completion_date: nil,
            auto_scheduled: true, position: position)

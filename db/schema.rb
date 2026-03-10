@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_03_10_170000) do
+ActiveRecord::Schema[7.1].define(version: 2026_03_10_203551) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -22,8 +22,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_10_170000) do
     t.integer "words_per_page", default: 250
     t.integer "current_page", default: 0
     t.integer "status", default: 0
-    t.integer "difficulty", default: 3
-    t.float "actual_difficulty_modifier"
+    t.integer "density", default: 3
+    t.float "actual_density_modifier"
     t.string "cover_image_url"
     t.string "isbn"
     t.datetime "created_at", null: false

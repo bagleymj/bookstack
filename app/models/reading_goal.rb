@@ -80,10 +80,10 @@ class ReadingGoal < ApplicationRecord
     return fallback_minutes_per_day if avg_pages.zero?
 
     # Convert pages to minutes using book's effective WPM
-    wpm = book.actual_wpm || (user.effective_reading_speed * book.difficulty_modifier)
+    wpm = book.actual_wpm || (user.effective_reading_speed * book.density_modifier)
     return fallback_minutes_per_day if wpm.zero?
 
-    words = avg_pages * book.effective_words_per_page
+    words = avg_pages * Book::WORDS_PER_PAGE
     (words / wpm).ceil
   end
 
@@ -275,7 +275,7 @@ class ReadingGoal < ApplicationRecord
       end_date: target_completion_date.to_s,
       progress: progress_percentage,
       status: book.status,
-      difficulty: book.difficulty,
+      density: book.density,
       total_pages: book.total_pages,
       estimated_hours: book.estimated_reading_time_hours,
       estimated_minutes: book.effective_reading_time_minutes,
@@ -415,7 +415,7 @@ class ReadingGoal < ApplicationRecord
       end_date: nil,
       progress: book.progress_percentage,
       status: book.status,
-      difficulty: book.difficulty,
+      density: book.density,
       total_pages: book.total_pages,
       estimated_hours: book.estimated_reading_time_hours,
       estimated_minutes: book.effective_reading_time_minutes,
@@ -482,7 +482,7 @@ class ReadingGoal < ApplicationRecord
     # For finished books, effective_reading_time_minutes is 0 (no remaining pages),
     # so use total words to compute the reading time the goal originally represented
     reading_minutes = if book.remaining_pages.zero?
-                        wpm = book.actual_wpm || (user.effective_reading_speed * book.difficulty_modifier)
+                        wpm = book.actual_wpm || (user.effective_reading_speed * book.density_modifier)
                         return 0 if wpm.zero?
                         book.total_words.to_f / wpm
                       else
