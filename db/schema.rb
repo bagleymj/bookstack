@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_03_09_120913) do
+ActiveRecord::Schema[7.1].define(version: 2026_03_10_160002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -31,7 +31,6 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_09_120913) do
     t.integer "first_page", default: 1, null: false
     t.integer "last_page", null: false
     t.datetime "completed_at"
-    t.string "open_library_work_key"
     t.index ["isbn"], name: "index_books_on_isbn"
     t.index ["user_id", "status"], name: "index_books_on_user_id_and_status"
     t.index ["user_id"], name: "index_books_on_user_id"
@@ -50,10 +49,41 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_09_120913) do
     t.index ["reading_goal_id"], name: "index_daily_quotas_on_reading_goal_id"
   end
 
+  create_table "editions", force: :cascade do |t|
+    t.string "isbn", null: false
+    t.string "google_books_id"
+    t.string "title"
+    t.string "author"
+    t.string "publisher"
+    t.string "published_year"
+    t.integer "page_count"
+    t.string "cover_image_url"
+    t.string "format"
+    t.integer "recommended_first_page"
+    t.integer "recommended_last_page"
+    t.integer "page_range_votes_count", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["google_books_id"], name: "index_editions_on_google_books_id"
+    t.index ["isbn"], name: "index_editions_on_isbn", unique: true
+  end
+
   create_table "jwt_denylist", force: :cascade do |t|
     t.string "jti", null: false
     t.datetime "exp", null: false
     t.index ["jti"], name: "index_jwt_denylist_on_jti"
+  end
+
+  create_table "page_range_votes", force: :cascade do |t|
+    t.bigint "edition_id", null: false
+    t.bigint "user_id", null: false
+    t.integer "first_page", null: false
+    t.integer "last_page", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["edition_id", "user_id"], name: "index_page_range_votes_on_edition_id_and_user_id", unique: true
+    t.index ["edition_id"], name: "index_page_range_votes_on_edition_id"
+    t.index ["user_id"], name: "index_page_range_votes_on_user_id"
   end
 
   create_table "reading_goals", force: :cascade do |t|
@@ -134,6 +164,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_09_120913) do
 
   add_foreign_key "books", "users"
   add_foreign_key "daily_quotas", "reading_goals"
+  add_foreign_key "page_range_votes", "editions"
+  add_foreign_key "page_range_votes", "users"
   add_foreign_key "reading_goals", "books"
   add_foreign_key "reading_goals", "users"
   add_foreign_key "reading_sessions", "books"
