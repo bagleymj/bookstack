@@ -31,7 +31,6 @@ class OnboardingController < ApplicationController
   def onboarding_params
     params.require(:user).permit(
       :name,
-      :default_words_per_page,
       :default_reading_speed_wpm,
       :concurrency_limit,
       :reading_pace_type,

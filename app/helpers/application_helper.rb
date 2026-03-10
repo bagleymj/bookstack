@@ -22,15 +22,15 @@ module ApplicationHelper
     end
   end
 
-  def difficulty_badge_class(difficulty)
-    case difficulty.to_s
-    when "easy"
+  def density_badge_class(density)
+    case density.to_s
+    when "light"
       "bg-green-100 text-green-800"
     when "below_average"
       "bg-lime-100 text-lime-800"
     when "average"
       "bg-yellow-100 text-yellow-800"
-    when "challenging"
+    when "above_average"
       "bg-orange-100 text-orange-800"
     when "dense"
       "bg-red-100 text-red-800"

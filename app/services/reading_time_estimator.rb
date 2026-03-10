@@ -5,7 +5,7 @@ class ReadingTimeEstimator
 
   def estimate_for_book(book)
     words = book.total_words
-    effective_wpm = @user.effective_reading_speed * book.difficulty_modifier
+    effective_wpm = @user.effective_reading_speed * book.density_modifier
 
     minutes = (words / effective_wpm).round
     {
@@ -16,10 +16,9 @@ class ReadingTimeEstimator
     }
   end
 
-  def estimate_for_pages(pages, words_per_page: nil, difficulty_modifier: 1.0)
-    wpp = words_per_page || @user.default_words_per_page
-    words = pages * wpp
-    effective_wpm = @user.effective_reading_speed * difficulty_modifier
+  def estimate_for_pages(pages, density_modifier: 1.0)
+    words = pages * Book::WORDS_PER_PAGE
+    effective_wpm = @user.effective_reading_speed * density_modifier
 
     minutes = (words / effective_wpm).round
     format_time(minutes)

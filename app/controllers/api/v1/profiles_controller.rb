@@ -24,7 +24,7 @@ module Api
 
       def profile_params
         params.require(:profile).permit(
-          :name, :default_words_per_page, :default_reading_speed_wpm,
+          :name, :default_reading_speed_wpm,
           :concurrency_limit, :weekend_reading_minutes, :weekend_mode,
           :reading_pace_type, :reading_pace_value
         )

@@ -759,7 +759,7 @@ export default class extends Controller {
     this.goals.forEach(goal => {
       const dataSource = goal.uses_actual_data
         ? '<span class="text-green-400">Based on actual reading speed</span>'
-        : '<span class="text-gray-400">Estimated from difficulty</span>'
+        : '<span class="text-gray-400">Estimated from density</span>'
 
       let daysLine
       if (goal.goal_status === "completed") {

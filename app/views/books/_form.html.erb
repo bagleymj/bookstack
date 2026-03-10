@@ -172,15 +172,9 @@
     </div>
 
     <div>
-      <%= form.label :words_per_page, "Words per page (optional)", class: "block text-sm font-medium text-gray-700" %>
-      <%= form.number_field :words_per_page, min: 1, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm", placeholder: "Default: 250" %>
-      <p class="mt-1 text-xs text-gray-500">Leave blank to use your default (250 words/page)</p>
-    </div>
-
-    <div>
-      <%= form.label :difficulty, class: "block text-sm font-medium text-gray-700" %>
-      <%= form.select :difficulty, Book.difficulties.keys.map { |d| [d.humanize, d] }, {}, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" %>
-      <p class="mt-1 text-xs text-gray-500">How challenging do you expect this book to be?</p>
+      <%= form.label :density, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.select :density, Book.densities.keys.map { |d| [d.humanize, d] }, {}, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" %>
+      <p class="mt-1 text-xs text-gray-500">How dense is the material? Accounts for word count and complexity.</p>
     </div>
 
     <!-- Collapsible edition details (ISBN + cover URL) -->

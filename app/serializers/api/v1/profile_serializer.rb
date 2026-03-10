@@ -10,7 +10,6 @@ module Api
           id: @user.id,
           email: @user.email,
           name: @user.name,
-          default_words_per_page: @user.default_words_per_page,
           default_reading_speed_wpm: @user.default_reading_speed_wpm,
           effective_reading_speed: @user.effective_reading_speed,
           max_concurrent_books: @user.max_concurrent_books,

@@ -95,7 +95,7 @@ module Api
         update_daily_quotas(@session)
 
         if @session.book.reading_sessions.completed.count >= 3
-          DifficultyAnalyzer.new(@session.book).analyze!
+          DensityAnalyzer.new(@session.book).analyze!
         end
 
         render json: { reading_session: ReadingSessionSerializer.new(@session.reload).as_json }

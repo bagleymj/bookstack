@@ -214,7 +214,7 @@ export default class extends Controller {
     }
 
     const config = this.constructor.goalConfigs[this.selectedGoalType]
-    const wpp = parseFloat(this.element.querySelector('[name="user[default_words_per_page]"]').value) || 250
+    const wpp = 250
     const wpm = parseFloat(this.element.querySelector('[name="user[default_reading_speed_wpm]"]').value) || 200
     const avgPages = 300
     const wordsPerBook = avgPages * wpp

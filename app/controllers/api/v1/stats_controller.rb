@@ -7,8 +7,7 @@ module Api
           return render json: { stats: nil }
         end
 
-        wpp = current_user.default_words_per_page
-        pages_per_hour = stats.total_sessions > 0 ? ((stats.average_wpm * 60.0) / wpp).round(1) : 0
+        pages_per_hour = stats.total_sessions > 0 ? ((stats.average_wpm * 60.0) / Book::WORDS_PER_PAGE).round(1) : 0
         avg_pages_per_session = stats.total_sessions > 0 ? (stats.total_pages_read.to_f / stats.total_sessions).round(1) : 0
 
         render json: {

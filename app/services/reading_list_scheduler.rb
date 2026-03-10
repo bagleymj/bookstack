@@ -130,7 +130,7 @@ class ReadingListScheduler
   end
 
   def full_book_minutes(book)
-    wpm = book.actual_wpm || (@user.effective_reading_speed * book.difficulty_modifier)
+    wpm = book.actual_wpm || (@user.effective_reading_speed * book.density_modifier)
     return 60 if wpm.zero?
     (book.total_words.to_f / wpm).ceil
   end
@@ -624,7 +624,7 @@ class ReadingListScheduler
   # ─── Estimates ─────────────────────────────────────────────────
 
   def estimate_remaining_minutes(book)
-    wpm = book.actual_wpm || (@user.effective_reading_speed * book.difficulty_modifier)
+    wpm = book.actual_wpm || (@user.effective_reading_speed * book.density_modifier)
     return 60 if wpm.zero?
     (book.remaining_words.to_f / wpm).ceil
   end

@@ -312,7 +312,6 @@ RSpec.describe DailyReflow do
         reading_pace_value: 50,
         reading_pace_set_on: Date.current.beginning_of_year,
         default_reading_speed_wpm: 250,
-        default_words_per_page: 250,
         max_concurrent_books: 3,
         weekend_mode: :same)
     end

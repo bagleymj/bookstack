@@ -63,8 +63,8 @@ class ReadingSessionsController < ApplicationController
         # Update daily quotas
         update_daily_quotas(@reading_session.pages_read)
 
-        # Analyze difficulty
-        DifficultyAnalyzer.new(@book).analyze!
+        # Analyze density
+        DensityAnalyzer.new(@book).analyze!
 
         # Reschedule if this session is against a queued book on the reading list
         reschedule_if_queued!(@book)
@@ -98,8 +98,8 @@ class ReadingSessionsController < ApplicationController
     # Update any active daily quotas
     update_daily_quotas(@reading_session.pages_read)
 
-    # Analyze difficulty if we have enough sessions
-    DifficultyAnalyzer.new(@reading_session.book).analyze!
+    # Analyze density if we have enough sessions
+    DensityAnalyzer.new(@reading_session.book).analyze!
 
     redirect_to @reading_session, notice: "Great reading session! You read #{@reading_session.pages_read} pages."
   end

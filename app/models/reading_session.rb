@@ -84,7 +84,7 @@ class ReadingSession < ApplicationRecord
   def calculated_wpm
     return nil unless completed? && duration_seconds&.positive?
 
-    words_read = calculated_pages_read * book.effective_words_per_page
+    words_read = calculated_pages_read * Book::WORDS_PER_PAGE
     minutes = duration_seconds / 60.0
     return nil if minutes.zero?
 
@@ -108,12 +108,12 @@ class ReadingSession < ApplicationRecord
   end
 
   def calculate_estimated_duration
-    # Snapshot WPM: prefer book's actual WPM, fallback to user average * difficulty
-    self.wpm_snapshot = book.actual_wpm || (user.effective_reading_speed * book.difficulty_modifier)
+    # Snapshot WPM: prefer book's actual WPM, fallback to user average * density
+    self.wpm_snapshot = book.actual_wpm || (user.effective_reading_speed * book.density_modifier)
 
     return if wpm_snapshot.nil? || wpm_snapshot.zero? || pages_read.nil? || pages_read.zero?
 
-    words_read = pages_read * book.effective_words_per_page
+    words_read = pages_read * Book::WORDS_PER_PAGE
     minutes = words_read / wpm_snapshot
     self.estimated_duration_seconds = (minutes * 60).round
   end
