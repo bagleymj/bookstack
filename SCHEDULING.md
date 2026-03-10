@@ -101,12 +101,12 @@ target. The system must not allow new pace targets in minutes_per_day.
 
 The sum of daily shares across all concurrent books should be approximately
 equal on every reading day — and should track the derived budget. Peaks
-and valleys both violate heijunka. The scheduler uses **headroom-based
-scoring**: each placement is scored by how much budget capacity remains
-on its span days (lower headroom = closer to budget = better). This
-front-loads the timeline — books fill to 100% of budget for as long as
-possible, with natural taper only when books run out. Overshoot beyond
-a 15-minute tolerance is always the worst violation.
+and valleys both violate heijunka. The scheduler uses **Monday-by-Monday
+bin filling**: each Monday is filled to just above budget before
+advancing to the next. This front-loads the timeline — books fill to
+100% of budget for as long as possible, with natural taper only when
+books run out. Overshoot beyond a 15-minute tolerance is always the
+worst violation.
 
 ### Invariant 3: Throughput is verified
 
@@ -286,85 +286,64 @@ and book mix require. If the user wants a lower daily commitment, they
 adjust their pace target or choose shorter books. The controls are the
 inputs (pace, book selection), not the output (budget).
 
-### Phase 3: Beam search tier assignment
+### Phase 3: Monday-by-Monday bin filling
 
-Instead of placing books one at a time (greedy), the scheduler uses
-**beam search** to explore multiple scheduling combinations
-simultaneously. This solves the fundamental greedy limitation: early
-placements are made without knowledge of what later books need.
+Instead of placing books and then scoring the result, the scheduler
+**fills time slots**. It walks Mondays in order and fills each one to
+just above the daily budget before advancing. This naturally produces
+level schedules because the fill-forward approach guarantees every
+Monday carries at least budget-level load.
 
 **Algorithm**:
 
-1. Process books in **queue position order** — the user's reading list
-   determines which book is considered first. Earlier books get
-   priority in the beam search. Minor start-date reordering is allowed
-   when it significantly improves leveling.
-2. Initialize beam with a single state containing only locked-goal load
-3. For each book, generate all valid `(tier, monday)` candidates for
-   each state in the beam. Score each candidate, create new states,
-   then apply **stratified pruning** to keep the top 25 (BEAM_WIDTH)
-4. After all books are placed, pick the best state (lowest score) and
-   apply all its placements
-
-**Scoring**: Three-component lexicographic score
-`[max_overshoot, max_abs_deviation, mean_sq_deviation]`:
-
-- **max_overshoot**: How far daily load exceeds `budget +
-  CEILING_TOLERANCE` (15 min). Any overshoot is always the worst
-  violation — a placement that spikes the load always loses.
-- **max_abs_deviation**: Maximum `|projected - budget|` across all
-  days. Penalizes being above budget (even within tolerance) AND below
-  budget equally. This is the core heijunka criterion: minimize the
-  worst daily deviation from the target.
-- **mean_sq_deviation**: Average of `(projected - budget)²` across all
-  days. Tiebreaker that minimizes overall variance when multiple
-  states have equal worst-day deviation.
+1. Pre-compute a **share index**: for each schedulable book, cache its
+   `book_minutes` (reading time estimate). Daily shares are computed
+   lazily per (book, monday, tier) combination.
+2. Walk Mondays from earliest to latest across a 104-week horizon.
+3. For each Monday:
+   - **Skip** if spillover from prior multi-week placements already
+     puts this Monday at or above budget.
+   - **Fill loop**: Take the next unscheduled book (queue order). Try
+     tiers shortest to longest — use the first tier whose daily share
+     fits under remaining headroom (keeps Monday below budget). If
+     placement keeps Monday under budget, continue filling.
+   - **Backfill**: When no book fits under budget, find the (book, tier)
+     across all remaining books that overshoots budget by the least
+     amount. Place it — Monday is filled — advance to the next Monday.
+4. Any books still unscheduled after the horizon get a fallback
+   52-week placement.
 
 ```
-beam = [{ load_profile: locked_loads, placements: [] }]
+for each monday (earliest first):
+  skip if load already >= budget (from spillover)
+  break if no unscheduled books remain
 
-for each book (in queue order):
-  next_beam = []
-  for each state in beam:
-    for each Monday in horizon:
-      for each tier:
-        candidate_share = book_minutes / reading_days_in_tier
-        score = [max_overshoot, max_abs_dev, mean_sq_dev]
-        next_beam << apply(state, candidate)
-
-      break if searched 8+ weeks past best candidate's start
-
-  beam = stratified_prune(next_beam, width=25)
-
-apply beam.first.placements
+  loop:
+    try next unscheduled book in shortest-fitting tier
+    if fits under budget → place it, continue filling
+    if at/above budget → Monday done, advance
+    if nothing fits → backfill with min-overshoot → advance
 ```
 
-**Stratified beam pruning**: After expanding all candidates, states are
-grouped by the tier assigned to the current book. The beam keeps at
-least one representative per tier, then fills remaining slots with the
-best-scoring states overall. This prevents premature convergence on
-short tiers — without it, early books all lock into 1-week tiers
-(lowest immediate deviation) and the beam loses the ability to
-discover that longer tiers would have produced a flatter schedule.
+**Key properties**:
 
-**Search pruning**: For each state, Mondays are only searched up to 8
-weeks past the first viable candidate's start. This keeps the search
-space manageable (~128 candidates per state per book instead of ~4,160).
-
-**Post-beam refinement**: After beam search completes, two refinement
-passes further improve leveling:
-
-1. **Single-book refinement**: Each book is temporarily removed from the
-   load profile and re-evaluated against every valid (tier, monday)
-   combination. Because all other books are already placed, the scoring
-   sees the full picture and can fix issues the beam couldn't (it places
-   books sequentially without seeing future placements).
-
-2. **Pair refinement**: Identifies the two books contributing most to the
-   worst above-budget spike, removes both, and tries all pair
-   combinations. This fixes spikes that require coordinating two books
-   — e.g., swapping one to a longer tier while the other fills the
-   freed gap. Runs up to 3 passes until spikes are ≤3 min above budget.
+- **Every Monday filled above budget**: The algorithm guarantees
+  `load >= budget` before advancing. No Monday is left under-filled.
+- **Queue order preserved**: Books are placed in the user's reading
+  list order (position), not sorted by size.
+- **Shortest-fitting tier preferred**: For each book, try tiers from
+  shortest to longest; use the first one whose daily share fits under
+  remaining headroom. This naturally selects longer tiers when headroom
+  is tight (a short tier's high share would overshoot).
+- **Backfill = minimal overshoot**: When no book fits under budget,
+  pick the (book, tier) that overshoots by the least — this is the
+  "just above target" behavior.
+- **Self-leveling**: Multi-week tiers placed on early Mondays spill
+  load into later Mondays, reducing headroom. Later Mondays may
+  already be above budget from spillover alone — they're simply skipped.
+- **No refinement pass needed**: Because the algorithm fills forward
+  with full knowledge of current load, it doesn't need post-hoc
+  correction. The fill-forward approach is inherently self-leveling.
 
 ### Phase 4: Verify throughput
 
@@ -611,13 +590,13 @@ Tiers are preserved for psychological reasons (see CLAUDE.md). They provide:
 
 ### Tier selection criterion (restated)
 
-**Scoring**: Beam search uses `[max_overshoot, max_abs_deviation,
-mean_sq_deviation]` on the full timeline. Overshoot beyond `budget +
-CEILING_TOLERANCE` is always worst. Among no-overshoot options, the
-lowest max absolute deviation from budget wins (penalizes both over
-and under equally). Ties broken by lowest overall variance.
-Stratified pruning ensures every tier remains viable throughout the
-search.
+**Monday bin filling**: For each book, the scheduler tries tiers from
+shortest to longest and uses the first tier whose daily share fits
+under remaining headroom on the current Monday. When no tier fits
+under budget, the (book, tier) combination that overshoots budget by
+the least is chosen. This naturally selects longer tiers for larger
+books (their short-tier shares are too high) and shorter tiers for
+small books (they fit under headroom easily).
 
 ## Weekend Handling
 
@@ -770,14 +749,13 @@ The concurrency hard cap does not exist in the schema. Needs a
 
 ### ~~Gap 3: Phase 3 objective function~~ — RESOLVED
 
-**Decision: Beam search with three-component scoring + post-beam
-refinement.** Phase 3 uses beam search (width 25) with stratified
-pruning to explore tier+start combinations across all books in queue
-order. Scoring: `[max_overshoot, max_abs_deviation, mean_sq_deviation]`.
-Overshoot beyond `budget + 15 min` tolerance always loses. Among
-no-overshoot options, the lowest max absolute deviation from budget
-wins. Ties broken by overall variance. After beam search, single-book
-and pair refinement passes further reduce spikes.
+**Decision: Monday-by-Monday bin filling.** Phase 3 walks Mondays in
+order, filling each to just above the daily budget before advancing.
+For each Monday, books are tried in queue order with the shortest-
+fitting tier; when no book fits under budget, the (book, tier) with
+minimal overshoot is placed. Multi-week tiers spill load into future
+Mondays, making the approach self-leveling with no separate refinement
+pass needed.
 
 ### ~~Gap 4: Phase 4 feedback loop~~ — RESOLVED
 
