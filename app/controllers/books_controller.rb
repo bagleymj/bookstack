@@ -21,6 +21,7 @@ class BooksController < ApplicationController
     @book = current_user.books.build(book_params)
 
     if @book.save
+      record_edition_page_range(@book)
       if params[:add_to_reading_list] == "1"
         add_to_reading_list!(@book)
         redirect_to pipeline_path, notice: "#{@book.title} added and scheduled."
@@ -37,6 +38,7 @@ class BooksController < ApplicationController
 
   def update
     if @book.update(book_params)
+      record_edition_page_range(@book)
       reschedule_if_on_pipeline!
       redirect_to @book, notice: "Book was successfully updated."
     else
@@ -72,13 +74,30 @@ class BooksController < ApplicationController
   end
 
   def book_params
-    params.require(:book).permit(:title, :author, :first_page, :last_page, :words_per_page, :difficulty, :cover_image_url, :isbn, :open_library_work_key)
+    params.require(:book).permit(:title, :author, :first_page, :last_page, :words_per_page, :difficulty, :cover_image_url, :isbn)
   end
 
   def reschedule_if_on_pipeline!
     return unless @book.reading_goals.where(auto_scheduled: true).where.not(position: nil).exists?
 
     ReadingListScheduler.new(current_user).schedule!
+  end
+
+  def record_edition_page_range(book)
+    return if book.isbn.blank?
+
+    EditionCacheService.new.record_page_range(
+      user: current_user,
+      isbn: book.isbn,
+      first_page: book.first_page,
+      last_page: book.last_page,
+      metadata: {
+        title: book.title,
+        author: book.author,
+        page_count: book.total_pages,
+        cover_image_url: book.cover_image_url
+      }
+    )
   end
 
   def add_to_reading_list!(book)

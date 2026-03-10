@@ -63,14 +63,17 @@ RSpec.describe "API V1 Books", type: :request do
       expect(json_response["book"]["total_pages"]).to eq(200)
     end
 
-    it "creates a book with open_library_work_key" do
+    it "records edition page range when isbn is present" do
       post "/api/v1/books", params: {
         book: { title: "Meditations", author: "Marcus Aurelius", first_page: 1, last_page: 256,
-                open_library_work_key: "/works/OL55847W" }
+                isbn: "9780140449334" }
       }, headers: headers, as: :json
 
       expect(response).to have_http_status(:created)
-      expect(Book.last.open_library_work_key).to eq("/works/OL55847W")
+      edition = Edition.find_by(isbn: "9780140449334")
+      expect(edition).to be_present
+      expect(edition.recommended_first_page).to eq(1)
+      expect(edition.recommended_last_page).to eq(256)
     end
 
     it "returns errors for invalid book" do
@@ -95,26 +98,14 @@ RSpec.describe "API V1 Books", type: :request do
       expect(json_response["book"]["title"]).to eq("Updated Title")
     end
 
-    it "updates open_library_work_key" do
-      book = create(:book, user: user)
-
-      patch "/api/v1/books/#{book.id}", params: {
-        book: { open_library_work_key: "/works/OL55847W" }
-      }, headers: headers, as: :json
-
-      expect(response).to have_http_status(:ok)
-      expect(book.reload.open_library_work_key).to eq("/works/OL55847W")
-    end
-
     it "updates edition fields together" do
       book = create(:book, user: user, isbn: "old-isbn", last_page: 200)
 
       patch "/api/v1/books/#{book.id}", params: {
         book: {
           isbn: "9780140449334",
-          cover_image_url: "https://covers.openlibrary.org/b/id/12345-L.jpg",
-          last_page: 256,
-          open_library_work_key: "/works/OL55847W"
+          cover_image_url: "https://books.google.com/thumb.jpg",
+          last_page: 256
         }
       }, headers: headers, as: :json
 
@@ -122,7 +113,9 @@ RSpec.describe "API V1 Books", type: :request do
       book.reload
       expect(book.isbn).to eq("9780140449334")
       expect(book.last_page).to eq(256)
-      expect(book.open_library_work_key).to eq("/works/OL55847W")
+
+      edition = Edition.find_by(isbn: "9780140449334")
+      expect(edition).to be_present
     end
   end
 

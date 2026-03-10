@@ -11,8 +11,8 @@ module Api
           return
         end
 
-        service = OpenLibraryService.new
-        results = service.search_works(query, limit: 8)
+        service = GoogleBooksService.new
+        results = service.search_works(query, limit: 8, search_type: params[:search_type])
 
         render json: { results: results }
       end
@@ -25,8 +25,11 @@ module Api
           return
         end
 
-        service = OpenLibraryService.new
+        service = GoogleBooksService.new
         editions = service.fetch_editions(work_key)
+
+        # Overlay local edition cache data (recommended page ranges)
+        editions = EditionCacheService.new.overlay_local_data(editions)
 
         # Mark editions already in the user's collection
         user_isbns = current_user.books.where.not(isbn: [nil, ""]).pluck(:isbn).map(&:strip).to_set

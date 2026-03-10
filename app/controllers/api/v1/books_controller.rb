@@ -22,6 +22,7 @@ module Api
       def create
         book = current_user.books.build(book_params)
         if book.save
+          record_edition_page_range(book)
           render json: { book: BookSerializer.new(book).as_json }, status: :created
         else
           render_errors book.errors.full_messages
@@ -30,6 +31,7 @@ module Api
 
       def update
         if @book.update(book_params)
+          record_edition_page_range(@book)
           render json: { book: BookSerializer.new(@book).as_json }
         else
           render_errors @book.errors.full_messages
@@ -68,8 +70,24 @@ module Api
       def book_params
         params.require(:book).permit(
           :title, :author, :first_page, :last_page,
-          :words_per_page, :difficulty, :cover_image_url, :isbn,
-          :open_library_work_key
+          :words_per_page, :difficulty, :cover_image_url, :isbn
+        )
+      end
+
+      def record_edition_page_range(book)
+        return if book.isbn.blank?
+
+        EditionCacheService.new.record_page_range(
+          user: current_user,
+          isbn: book.isbn,
+          first_page: book.first_page,
+          last_page: book.last_page,
+          metadata: {
+            title: book.title,
+            author: book.author,
+            page_count: book.total_pages,
+            cover_image_url: book.cover_image_url
+          }
         )
       end
 
