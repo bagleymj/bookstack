@@ -54,16 +54,12 @@ Rails.application.routes.draw do
 
     resource :pipeline, only: [:show], controller: "pipeline"
     resource :profile, only: [:show, :update]
-    resource :reading_list, only: [:show], controller: "reading_list"
+    get "reading_list", to: redirect("/pipeline")
 
     # Existing web API endpoints (session auth)
     namespace :api do
       namespace :v1 do
-        resources :pipeline, only: [:index], controller: "pipeline" do
-          member do
-            patch :update
-          end
-        end
+        resources :pipeline, only: [:index], controller: "pipeline"
         resources :active_books, only: [:index]
         resources :book_search, only: [:index] do
           collection do

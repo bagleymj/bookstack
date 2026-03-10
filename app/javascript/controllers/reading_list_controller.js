@@ -119,6 +119,7 @@ export default class extends Controller {
         const data = await response.json()
         this.updateDates(data.goals)
         this.showToast("Order updated", "success")
+        document.dispatchEvent(new CustomEvent("pipeline:refresh"))
       } else {
         this.showToast("Failed to save order", "error")
       }

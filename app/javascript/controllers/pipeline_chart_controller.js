@@ -5,8 +5,7 @@ import * as d3 from "d3"
 export default class extends Controller {
   static values = {
     url: String,
-    compact: { type: Boolean, default: false },
-    editMode: { type: Boolean, default: false }
+    compact: { type: Boolean, default: false }
   }
 
   // Vibrant Breakout-style color palette
@@ -33,15 +32,15 @@ export default class extends Controller {
 
     this.resizeHandler = this.debounce(() => this.render(), 250)
     window.addEventListener("resize", this.resizeHandler)
-  }
 
-  toggleEditMode() {
-    this.editModeValue = !this.editModeValue
-    this.render()
+    // Listen for reading list changes to refresh the chart
+    this.refreshHandler = () => this.loadData()
+    document.addEventListener("pipeline:refresh", this.refreshHandler)
   }
 
   disconnect() {
     window.removeEventListener("resize", this.resizeHandler)
+    document.removeEventListener("pipeline:refresh", this.refreshHandler)
   }
 
   async loadData() {
@@ -316,31 +315,6 @@ export default class extends Controller {
   }
 
   createSvg() {
-    // Edit mode toggle button
-    if (!this.compactValue) {
-      const editToggle = d3.select(this.element)
-        .append("div")
-        .attr("class", "absolute top-2 right-2 z-10")
-
-      editToggle.append("button")
-        .attr("type", "button")
-        .attr("class", () => this.editModeValue
-          ? "inline-flex items-center gap-1.5 rounded-md bg-amber-100 px-2.5 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-200 transition-colors ring-2 ring-amber-300"
-          : "inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-200 transition-colors"
-        )
-        .html(() => this.editModeValue
-          ? `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg> Editing`
-          : `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg> Edit`
-        )
-        .on("click", () => this.toggleEditMode())
-
-      if (this.editModeValue) {
-        editToggle.append("div")
-          .attr("class", "mt-1 text-xs text-amber-600")
-          .text("Drag to move, resize edges")
-      }
-    }
-
     this.svg = d3.select(this.element)
       .append("svg")
       .attr("width", this.width + this.margin.left + this.margin.right)
@@ -817,7 +791,7 @@ export default class extends Controller {
 
       // Invisible hit target covering all bricks for this goal
       const hitTarget = this.overlayLayer.append("rect")
-        .attr("class", `overlay-hit ${this.editModeValue ? "cursor-move" : "cursor-pointer"}`)
+        .attr("class", "overlay-hit cursor-pointer")
         .attr("x", minX)
         .attr("y", minY)
         .attr("width", maxX - minX)
@@ -878,312 +852,6 @@ export default class extends Controller {
           window.location.href = `/reading_goals/${hitGoal.id}`
         }
       })
-
-      // ── Edit mode: remove button ──
-      if (this.editModeValue) {
-        const removeSize = 16
-        const removePad = 3
-        const removeX = maxX - removeSize - removePad
-        const removeY = minY + removePad
-
-        const removeGroup = this.overlayLayer.append("g")
-          .attr("class", "remove-btn")
-          .style("cursor", "pointer")
-          .on("click", (event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            const action = goal.has_sessions ? "abandon" : "delete"
-            const message = goal.has_sessions
-              ? `Abandon "${goal.title}"? You can create a new goal for this book later.`
-              : `Delete "${goal.title}"? This cannot be undone.`
-            if (confirm(message)) {
-              self.removeGoal(goal.id, action)
-            }
-          })
-
-        removeGroup.append("circle")
-          .attr("cx", removeX + removeSize / 2)
-          .attr("cy", removeY + removeSize / 2)
-          .attr("r", removeSize / 2)
-          .style("fill", "rgba(0,0,0,0.4)")
-          .style("transition", "fill 0.15s")
-
-        removeGroup.append("line")
-          .attr("x1", removeX + 4).attr("y1", removeY + 4)
-          .attr("x2", removeX + removeSize - 4).attr("y2", removeY + removeSize - 4)
-          .style("stroke", "#fff").style("stroke-width", 1.5).style("stroke-linecap", "round")
-        removeGroup.append("line")
-          .attr("x1", removeX + removeSize - 4).attr("y1", removeY + 4)
-          .attr("x2", removeX + 4).attr("y2", removeY + removeSize - 4)
-          .style("stroke", "#fff").style("stroke-width", 1.5).style("stroke-linecap", "round")
-
-        removeGroup
-          .on("mouseenter", () => removeGroup.select("circle").style("fill", "rgba(220,38,38,0.8)"))
-          .on("mouseleave", () => removeGroup.select("circle").style("fill", "rgba(0,0,0,0.4)"))
-      }
-
-      // ── Edit mode: resize handles (left + right edges) ──
-      if (this.editModeValue) {
-        const firstBrick = goalBricks[0]
-        const lastBrick = goalBricks[goalBricks.length - 1]
-        const resizeTooltip = d3.select(this.element)
-          .append("div")
-          .attr("class", "resize-tooltip absolute hidden bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-xl pointer-events-none z-50 border border-gray-700")
-
-        // Shared resize drag builder
-        const buildResizeDrag = (edge) => d3.drag()
-          .on("start", function(event) {
-            goal._resizeStartX = event.x
-            goal._origStartDate = goal.startDate
-            goal._origEndDate = goal.endDate
-            goal._origMinutesPerDay = goal.minutes_per_day
-            goal._totalPlannedMinutes = goal.duration_days * goal.minutes_per_day
-            goal._resizeEdge = edge
-
-            d3.select(this)
-              .style("fill", "rgba(255,255,255,0.7)")
-              .style("width", "10px")
-
-            const dateToShow = edge === "left" ? goal._origStartDate : goal._origEndDate
-            resizeTooltip
-              .classed("hidden", false)
-              .html(self.formatResizeTooltip(dateToShow, 0, edge))
-          })
-          .on("drag", function(event) {
-            const dx = event.x - goal._resizeStartX
-            const msPerPx = (self.endDate - self.startDate) / self.width
-            const offsetMs = dx * msPerPx
-            const dayMs = 86400000
-            const snappedOffsetMs = Math.round(offsetMs / dayMs) * dayMs
-            const daysChanged = Math.round(snappedOffsetMs / dayMs)
-
-            if (edge === "left") {
-              const newStart = new Date(goal._origStartDate.getTime() + snappedOffsetMs)
-              if (newStart < goal.endDate) {
-                goal.startDate = newStart
-
-                const newActiveDays = self.countActiveDays(goal.startDate, goal.endDate, self.includesWeekends)
-                if (newActiveDays > 0) {
-                  goal.minutes_per_day = goal._totalPlannedMinutes / newActiveDays
-                }
-
-                self.updateBricksForDrag({ rescale: true })
-
-                resizeTooltip
-                  .html(self.formatResizeTooltip(goal.startDate, daysChanged, "left"))
-                  .style("left", `${event.sourceEvent.offsetX + 20}px`)
-                  .style("top", `${event.sourceEvent.offsetY - 40}px`)
-              }
-            } else {
-              const newEnd = new Date(goal._origEndDate.getTime() + snappedOffsetMs)
-              if (newEnd > goal.startDate) {
-                goal.endDate = newEnd
-
-                const newActiveDays = self.countActiveDays(goal.startDate, goal.endDate, self.includesWeekends)
-                if (newActiveDays > 0) {
-                  goal.minutes_per_day = goal._totalPlannedMinutes / newActiveDays
-                }
-
-                self.updateBricksForDrag({ rescale: true })
-
-                resizeTooltip
-                  .html(self.formatResizeTooltip(goal.endDate, daysChanged, "right"))
-                  .style("left", `${event.sourceEvent.offsetX + 20}px`)
-                  .style("top", `${event.sourceEvent.offsetY - 40}px`)
-              }
-            }
-          })
-          .on("end", function() {
-            d3.select(this)
-              .style("fill", "rgba(255,255,255,0.3)")
-              .style("width", "8px")
-
-            resizeTooltip.classed("hidden", true)
-            goal.minutes_per_day = goal._origMinutesPerDay
-
-            const startChanged = goal.startDate.getTime() !== goal._origStartDate.getTime()
-            const endChanged = goal.endDate.getTime() !== goal._origEndDate.getTime()
-            if (startChanged || endChanged) {
-              self.updateGoalDates(goal.id, goal.startDate, goal.endDate)
-            }
-          })
-
-        // Left resize handle
-        this.overlayLayer.append("rect")
-          .attr("class", "resize-handle")
-          .attr("x", this.xScale(firstBrick.date) - 2)
-          .attr("y", minY)
-          .attr("width", 8)
-          .attr("height", Math.max(maxY - minY, 2))
-          .style("fill", "rgba(255,255,255,0.3)")
-          .style("cursor", "ew-resize")
-          .attr("rx", 2)
-          .call(buildResizeDrag("left"))
-
-        // Right resize handle
-        this.overlayLayer.append("rect")
-          .attr("class", "resize-handle")
-          .attr("x", this.xScale(lastBrick.nextDate) - 6)
-          .attr("y", minY)
-          .attr("width", 8)
-          .attr("height", Math.max(maxY - minY, 2))
-          .style("fill", "rgba(255,255,255,0.3)")
-          .style("cursor", "ew-resize")
-          .attr("rx", 2)
-          .call(buildResizeDrag("right"))
-      }
-
-      // ── Edit mode: drag to move/postpone ──
-      if (this.editModeValue) {
-        const dragTooltip = d3.select(this.element)
-          .append("div")
-          .attr("class", "drag-tooltip absolute hidden bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-xl pointer-events-none z-50 border border-gray-700")
-          .style("transition", "opacity 0.1s")
-
-        hitTarget.call(d3.drag()
-          .filter(function(event) {
-            return !event.target.classList.contains("resize-handle")
-          })
-          .on("start", function(event) {
-            goal._dragStartX = event.x
-            goal._origStartDate = goal.startDate
-            goal._origEndDate = goal.endDate
-
-            // Determine move vs postpone mode
-            goal._hasSessionHistory = goal.has_sessions && goal.earliest_session_date
-            if (goal._hasSessionHistory) {
-              goal._earliestSessionDate = new Date(goal.earliest_session_date + "T00:00:00")
-              goal._latestSessionDate = new Date(goal.latest_session_date + "T00:00:00")
-              const dayAfterLastSession = new Date(goal._latestSessionDate.getTime() + 86400000)
-              goal._lockDate = new Date(Math.max(dayAfterLastSession.getTime(), today.getTime()))
-              goal._isPostponeMode = goal._lockDate <= goal._origEndDate
-            } else {
-              goal._isPostponeMode = false
-            }
-
-            // Ghost outline: draw original brick positions as outlines
-            goal._ghostGroup = self.svg.insert("g", ".layer-bricks")
-              .attr("class", "drag-ghost")
-              .style("pointer-events", "none")
-
-            const ghostBricks = self.currentBricks.filter(b => b.goalId === goal.id)
-            const gap = 1
-            goal._ghostGroup.selectAll(".ghost-brick")
-              .data(ghostBricks)
-              .enter()
-              .append("rect")
-              .attr("x", d => self.xScale(d.date) + gap / 2)
-              .attr("y", d => self.yScale(d.yOffset + d.minutes) + gap / 2)
-              .attr("width", d => Math.max(self.xScale(d.nextDate) - self.xScale(d.date) - gap, 1))
-              .attr("height", d => Math.max(self.yScale(d.yOffset) - self.yScale(d.yOffset + d.minutes) - gap, 1))
-              .attr("rx", 2)
-              .style("fill", "none")
-              .style("stroke", goal.color)
-              .style("stroke-width", 1.5)
-              .style("stroke-dasharray", "4,3")
-              .style("opacity", 0.5)
-
-            // Postpone mode: locked history indicator
-            if (goal._isPostponeMode) {
-              const lockedStart = self.xScale(goal._origStartDate)
-              const lockedEnd = self.xScale(goal._lockDate)
-              const lockedWidth = lockedEnd - lockedStart
-
-              if (lockedWidth > 0) {
-                goal._lockedGhost = self.svg.insert("g", ".layer-bricks")
-                  .attr("class", "locked-ghost")
-                  .style("pointer-events", "none")
-
-                goal._lockedGhost.append("rect")
-                  .attr("x", lockedStart)
-                  .attr("y", 0)
-                  .attr("width", lockedWidth)
-                  .attr("height", self.chartHeight)
-                  .style("fill", "rgba(34, 197, 94, 0.1)")
-                  .style("stroke", "#22c55e")
-                  .style("stroke-width", 1)
-                  .style("stroke-dasharray", "4,4")
-
-                goal._lockedGhost.append("text")
-                  .attr("x", lockedStart + lockedWidth / 2)
-                  .attr("y", 12)
-                  .attr("text-anchor", "middle")
-                  .style("fill", "#22c55e")
-                  .style("font-size", "10px")
-                  .style("font-weight", "600")
-                  .text("\ud83d\udccc Locked history")
-              }
-            }
-
-            // Show drag tooltip
-            const mode = goal._isPostponeMode ? "postpone" : "move"
-            dragTooltip
-              .classed("hidden", false)
-              .html(self.formatDragTooltip(goal._origStartDate, goal._origEndDate, 0, null, mode))
-          })
-          .on("drag", function(event) {
-            const dx = event.x - goal._dragStartX
-            const msPerPx = (self.endDate - self.startDate) / self.width
-            const offsetMs = dx * msPerPx
-            const dayMs = 86400000
-            const snappedOffsetMs = Math.round(offsetMs / dayMs) * dayMs
-            const daysShifted = Math.round(snappedOffsetMs / dayMs)
-
-            if (goal._isPostponeMode) {
-              const origDuration = goal._origEndDate.getTime() - goal._lockDate.getTime()
-              goal._newFutureStart = new Date(goal._lockDate.getTime() + snappedOffsetMs)
-              goal.endDate = new Date(goal._newFutureStart.getTime() + origDuration)
-              goal.startDate = goal._origStartDate
-            } else {
-              goal.startDate = new Date(goal._origStartDate.getTime() + snappedOffsetMs)
-              goal.endDate = new Date(goal._origEndDate.getTime() + snappedOffsetMs)
-            }
-
-            // Update drag tooltip
-            const mode = goal._isPostponeMode ? "postpone" : "move"
-            dragTooltip
-              .html(self.formatDragTooltip(goal.startDate, goal.endDate, daysShifted, null, mode, goal._newFutureStart))
-              .style("left", `${event.sourceEvent.offsetX + 20}px`)
-              .style("top", `${event.sourceEvent.offsetY - 60}px`)
-
-            // Live reflow (throttled to rAF)
-            if (!self._dragRafPending) {
-              self._dragRafPending = true
-              requestAnimationFrame(() => {
-                self.updateBricksForDrag()
-                self._dragRafPending = false
-              })
-            }
-          })
-          .on("end", function() {
-            // Remove ghosts
-            if (goal._ghostGroup) {
-              goal._ghostGroup.remove()
-              goal._ghostGroup = null
-            }
-            if (goal._lockedGhost) {
-              goal._lockedGhost.remove()
-              goal._lockedGhost = null
-            }
-
-            dragTooltip.classed("hidden", true)
-
-            const hasDateChange = goal.endDate.getTime() !== goal._origEndDate.getTime() ||
-                                  goal.startDate.getTime() !== goal._origStartDate.getTime()
-
-            if (hasDateChange) {
-              if (goal._isPostponeMode && goal._newFutureStart) {
-                self.updateGoalDates(goal.id, goal._newFutureStart, goal.endDate)
-              } else {
-                self.updateGoalDates(goal.id, goal.startDate, goal.endDate)
-              }
-            } else {
-              // Snap back — re-render with original data
-              self.updateBricksForDrag()
-            }
-          })
-        )
-      }
     })
   }
 
@@ -1205,23 +873,6 @@ export default class extends Controller {
     return null
   }
 
-  // ── Live reflow during drag ───────────────────────────────────────
-
-  updateBricksForDrag(opts = {}) {
-    const { bricks, maxY } = this.computeBricks(this.goals)
-    this.currentBricks = bricks
-
-    if (opts.rescale) {
-      this.totalMinutes = maxY || 1
-      this.yScale.domain([0, this.totalMinutes])
-      this.updateYGrid()
-    }
-
-    const labels = this.computeLabels(bricks, this.goals)
-    this.renderBricks(bricks, { transition: true, duration: 80 })
-    this.renderLabels(labels, { transition: true, duration: 80 })
-  }
-
   // ── Legend ────────────────────────────────────────────────────────
 
   renderLegend(goals) {
@@ -1241,194 +892,7 @@ export default class extends Controller {
       `)
   }
 
-  // ── API ───────────────────────────────────────────────────────────
-
-  async removeGoal(goalId, action) {
-    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
-
-    try {
-      const url = action === "abandon"
-        ? `/reading_goals/${goalId}/mark_abandoned`
-        : `/reading_goals/${goalId}`
-      const method = action === "abandon" ? "POST" : "DELETE"
-
-      const response = await fetch(url, {
-        method,
-        headers: {
-          "X-CSRF-Token": csrfToken,
-          "X-Requested-With": "XMLHttpRequest",
-          "Accept": "application/json"
-        },
-        credentials: "same-origin"
-      })
-
-      if (!response.ok) {
-        console.error("Failed to remove goal")
-      }
-      this.loadData()
-    } catch (error) {
-      console.error("Error removing goal:", error)
-      this.loadData()
-    }
-  }
-
-  async updateGoalDates(goalId, startDate, endDate) {
-    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
-    const formatDate = (d) => d.toISOString().split("T")[0]
-
-    try {
-      const response = await fetch(`/api/v1/pipeline/${goalId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRF-Token": csrfToken,
-          "X-Requested-With": "XMLHttpRequest"
-        },
-        credentials: "same-origin",
-        body: JSON.stringify({
-          start_date: formatDate(startDate),
-          end_date: formatDate(endDate)
-        })
-      })
-
-      if (!response.ok) {
-        console.error("Failed to update goal dates")
-      }
-      this.loadData()
-    } catch (error) {
-      console.error("Error updating goal:", error)
-      this.loadData()
-    }
-  }
-
-  // ── Tooltip formatting ────────────────────────────────────────────
-
-  formatDragTooltip(startDate, endDate, daysShifted, sessionInfo = null, mode = "move", newFutureStart = null) {
-    const formatDate = d3.timeFormat("%b %d")
-    const startStr = formatDate(startDate)
-    const endStr = formatDate(endDate)
-
-    if (mode === "postpone") {
-      let shiftText = ""
-      if (daysShifted > 0) {
-        shiftText = `<div class="text-amber-400 font-medium">\u23f8 Postponing ${daysShifted} day${daysShifted !== 1 ? "s" : ""}</div>`
-      } else if (daysShifted < 0) {
-        shiftText = `<div class="text-cyan-400 font-medium">\u23e9 Moving up ${Math.abs(daysShifted)} day${Math.abs(daysShifted) !== 1 ? "s" : ""}</div>`
-      } else {
-        shiftText = `<div class="text-gray-400">No change</div>`
-      }
-
-      const futureStartStr = newFutureStart ? formatDate(newFutureStart) : formatDate(startDate)
-
-      return `
-        <div class="text-xs space-y-1">
-          <div class="font-semibold text-white">Postponing remaining work:</div>
-          <div class="mt-1 pt-1 border-t border-green-500/30">
-            <div class="text-green-400 text-[10px]">\ud83d\udccc History preserved</div>
-          </div>
-          <div><span class="text-gray-400">Resume on:</span> ${futureStartStr}</div>
-          <div><span class="text-gray-400">Finish by:</span> ${endStr}</div>
-          ${shiftText}
-        </div>
-      `
-    }
-
-    let shiftText = ""
-    if (daysShifted > 0) {
-      shiftText = `<div class="text-amber-400 font-medium">\u2192 ${daysShifted} day${daysShifted !== 1 ? "s" : ""} later</div>`
-    } else if (daysShifted < 0) {
-      shiftText = `<div class="text-cyan-400 font-medium">\u2190 ${Math.abs(daysShifted)} day${Math.abs(daysShifted) !== 1 ? "s" : ""} earlier</div>`
-    } else {
-      shiftText = `<div class="text-gray-400">No change</div>`
-    }
-
-    return `
-      <div class="text-xs space-y-1">
-        <div class="font-semibold text-white">Moving to:</div>
-        <div><span class="text-gray-400">Start:</span> ${startStr}</div>
-        <div><span class="text-gray-400">End:</span> ${endStr}</div>
-        ${shiftText}
-      </div>
-    `
-  }
-
-  formatResizeTooltip(date, daysChanged, edge = "right") {
-    const formatDate = d3.timeFormat("%b %d")
-    const dateStr = formatDate(date)
-    const label = edge === "left" ? "New start date:" : "New end date:"
-
-    let changeText = ""
-    if (daysChanged > 0) {
-      changeText = `<div class="text-amber-400 font-medium">+${daysChanged} day${daysChanged !== 1 ? "s" : ""}</div>`
-    } else if (daysChanged < 0) {
-      changeText = `<div class="text-cyan-400 font-medium">${daysChanged} day${Math.abs(daysChanged) !== 1 ? "s" : ""}</div>`
-    } else {
-      changeText = `<div class="text-gray-400">No change</div>`
-    }
-
-    return `
-      <div class="text-xs space-y-1">
-        <div class="font-semibold text-white">${label}</div>
-        <div>${dateStr}</div>
-        ${changeText}
-      </div>
-    `
-  }
-
-  // ── Y-axis live update during drag ──────────────────────────────
-
-  updateYGrid() {
-    const minuteTicks = this.niceMinuteTicks(this.totalMinutes)
-
-    // Update y-axis
-    this.gridLayer.select(".y-axis")
-      .transition().duration(80).ease(d3.easeCubicOut)
-      .call(
-        d3.axisLeft(this.yScale)
-          .tickValues(minuteTicks)
-          .tickFormat(d => `${d}m`)
-      )
-      .selectAll("text")
-      .style("font-size", "11px")
-      .style("fill", "#6b7280")
-
-    // Update horizontal grid lines
-    const gridLines = this.gridLayer.selectAll(".minute-line")
-      .data(minuteTicks)
-
-    gridLines.exit().remove()
-
-    const enter = gridLines.enter()
-      .append("line")
-      .attr("class", "minute-line")
-      .attr("x1", 0)
-      .attr("x2", this.width)
-      .style("stroke", "#e5e7eb")
-      .style("stroke-dasharray", "2,2")
-
-    enter
-      .attr("y1", d => this.yScale(d))
-      .attr("y2", d => this.yScale(d))
-
-    gridLines.transition().duration(80).ease(d3.easeCubicOut)
-      .attr("y1", d => this.yScale(d))
-      .attr("y2", d => this.yScale(d))
-  }
-
   // ── Utilities ─────────────────────────────────────────────────────
-
-  countActiveDays(startDate, endDate, includeWeekends) {
-    const dayMs = 86400000
-    let count = 0
-    let d = new Date(startDate)
-    while (d < endDate) {
-      if (includeWeekends || (d.getDay() !== 0 && d.getDay() !== 6)) {
-        count++
-      }
-      d = new Date(d.getTime() + dayMs)
-    }
-    return count
-  }
 
   niceMinuteTicks(totalMinutes) {
     if (totalMinutes <= 30) return d3.range(0, totalMinutes + 1, 5)

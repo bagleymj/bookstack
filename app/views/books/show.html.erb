@@ -149,7 +149,7 @@
             <p class="mt-1 text-sm text-indigo-600">Projected: <%= @queued_goal.started_on.strftime("%b %d") %> - <%= @queued_goal.target_completion_date.strftime("%b %d") %></p>
           <% end %>
           <div class="mt-4">
-            <%= link_to "View Reading List", reading_list_path, class: "text-sm text-indigo-600 hover:text-indigo-500" %>
+            <%= link_to "View Reading List", pipeline_path, class: "text-sm text-indigo-600 hover:text-indigo-500" %>
           </div>
         </div>
       </div>

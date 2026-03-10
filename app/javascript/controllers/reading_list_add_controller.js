@@ -40,6 +40,7 @@ export default class extends Controller {
       })
 
       if (response.ok) {
+        document.dispatchEvent(new CustomEvent("pipeline:refresh"))
         window.location.reload()
       } else {
         const data = await response.json()

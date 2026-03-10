@@ -6,14 +6,17 @@ class PipelineController < ApplicationController
                                   .pipeline_visible
                                   .ordered_by_start
                                   .includes(:book, :daily_quotas)
-    @active_goals = current_user.reading_goals.active.ordered_by_start.includes(:book, :daily_quotas)
     @completed_goals = current_user.reading_goals.completed.includes(:book).limit(10)
 
-    # Books eligible for new pipeline goals
-    books_with_active_goals = current_user.reading_goals.active.select(:book_id)
+    # Reading list data
+    list_goals = current_user.reading_goals.in_reading_list.includes(:book, :daily_quotas)
+    @currently_reading = list_goals.select { |g| g.active? && g.has_reading_sessions? }
+    @up_next = list_goals.reject { |g| g.active? && g.has_reading_sessions? }
     @available_books = current_user.books
                                    .where.not(status: :completed)
-                                   .where.not(id: books_with_active_goals)
+                                   .where.not(id: current_user.reading_goals
+                                                               .where(status: [:active, :queued])
+                                                               .select(:book_id))
                                    .order(:title)
   end
 end
