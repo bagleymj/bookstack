@@ -33,16 +33,31 @@ class OpenLibraryService
     []
   end
 
-  # Fetch editions for a work (step 2).
+  # Fetch ALL editions for a work (step 2).
+  # Paginates through OpenLibrary's API to get every edition,
+  # not just the first page. Essential for works with thousands
+  # of editions (e.g. Meditations has 6000+).
   # work_key: e.g. "/works/OL55847W" or just "OL55847W"
-  def fetch_editions(work_key, limit: 100)
+  def fetch_editions(work_key)
     return [] if work_key.blank?
 
-    work_id = work_key.split("/").last # handle both "/works/OL55847W" and "OL55847W"
-    data = get("/works/#{work_id}/editions.json", { limit: limit })
-    entries = data["entries"] || []
+    work_id = work_key.split("/").last
+    all_entries = []
+    offset = 0
+    batch_size = 50
 
-    entries
+    loop do
+      data = get("/works/#{work_id}/editions.json", { limit: batch_size, offset: offset })
+      entries = data["entries"] || []
+      break if entries.empty?
+
+      all_entries.concat(entries)
+      break if entries.size < batch_size # last page
+
+      offset += batch_size
+    end
+
+    all_entries
       .map { |entry| normalize_edition(entry) }
       .compact
       .sort_by { |e| -edition_score(e) }

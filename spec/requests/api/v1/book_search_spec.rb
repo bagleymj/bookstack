@@ -72,7 +72,7 @@ RSpec.describe "API V1 BookSearch", type: :request do
 
     it "returns editions for a work" do
       stub_request(:get, editions_url)
-        .with(query: hash_including(limit: "100"))
+        .with(query: hash_including(limit: "50", offset: "0"))
         .to_return(status: 200, body: {
           entries: [
             {
@@ -117,7 +117,7 @@ RSpec.describe "API V1 BookSearch", type: :request do
       create(:book, user: user, isbn: "9780140449334")
 
       stub_request(:get, editions_url)
-        .with(query: hash_including(limit: "100"))
+        .with(query: hash_including(limit: "50", offset: "0"))
         .to_return(status: 200, body: {
           entries: [
             {
@@ -147,7 +147,7 @@ RSpec.describe "API V1 BookSearch", type: :request do
 
     it "does not mark editions without isbn as in_collection" do
       stub_request(:get, editions_url)
-        .with(query: hash_including(limit: "100"))
+        .with(query: hash_including(limit: "50", offset: "0"))
         .to_return(status: 200, body: {
           entries: [
             {
