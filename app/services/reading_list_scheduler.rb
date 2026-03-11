@@ -712,7 +712,7 @@ class ReadingListScheduler
 
       book_ids_with_sessions_this_week = ReadingSession
         .where(user: @user)
-        .where(status: :completed)
+        .where.not(ended_at: nil)
         .where("started_at >= ?", Date.current.beginning_of_week(:monday).beginning_of_day)
         .pluck(:book_id)
         .to_set

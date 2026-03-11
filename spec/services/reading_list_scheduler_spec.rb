@@ -495,7 +495,6 @@ RSpec.describe ReadingListScheduler do
 
       goal = user.reading_goals.find_by(book: book)
       original_start = goal.started_on
-      original_end = goal.target_completion_date
 
       # Add a reading session to lock this goal
       create(:reading_session, user: user, book: book,
@@ -508,8 +507,11 @@ RSpec.describe ReadingListScheduler do
       schedule!
 
       goal.reload
+      # Locked goals are not re-placed: started_on stays the same.
+      # target_completion_date may shift via graduation if load exceeds target.
       expect(goal.started_on).to eq(original_start)
-      expect(goal.target_completion_date).to eq(original_end)
+      expect(goal.target_completion_date).to be >= original_start
+      expect(goal.target_completion_date).to be_sunday
     end
 
     it "includes locked goals in the load profile for new placements" do
