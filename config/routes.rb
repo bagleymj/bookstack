@@ -40,16 +40,11 @@ Rails.application.routes.draw do
       end
     end
 
-    resources :reading_goals, except: [:index] do
+    resources :reading_goals, only: [:show, :new, :create, :destroy] do
       member do
         post :mark_completed
         post :mark_abandoned
-        get :redistribute
-        post :redistribute
-        post :catch_up
-        post :resolve_discrepancy
       end
-      resources :daily_quotas, only: [:update], shallow: true
     end
 
     resource :pipeline, only: [:show], controller: "pipeline"
@@ -99,13 +94,10 @@ Rails.application.routes.draw do
         end
       end
 
-      resources :reading_goals, controller: "reading_goals" do
+      resources :reading_goals, only: [:index, :show, :create, :destroy], controller: "reading_goals" do
         member do
           post :mark_completed
           post :mark_abandoned
-          post :redistribute
-          post :catch_up
-          post :resolve_discrepancy
         end
       end
 

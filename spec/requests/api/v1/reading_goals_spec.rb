@@ -78,29 +78,6 @@ RSpec.describe "API V1 Reading Goals", type: :request do
     end
   end
 
-  describe "POST /api/v1/reading_goals/:id/redistribute" do
-    it "redistributes quotas" do
-      goal = create(:reading_goal, user: user, book: book)
-
-      post "/api/v1/reading_goals/#{goal.id}/redistribute", headers: headers
-
-      expect(response).to have_http_status(:ok)
-      expect(json_response["reading_goal"]).to have_key("daily_quotas")
-    end
-  end
-
-  describe "POST /api/v1/reading_goals/:id/resolve_discrepancy" do
-    it "returns error for invalid strategy" do
-      goal = create(:reading_goal, user: user, book: book)
-
-      post "/api/v1/reading_goals/#{goal.id}/resolve_discrepancy", params: {
-        strategy: "invalid"
-      }, headers: headers, as: :json
-
-      expect(response).to have_http_status(:unprocessable_entity)
-    end
-  end
-
   describe "DELETE /api/v1/reading_goals/:id" do
     it "deletes a goal" do
       goal = create(:reading_goal, user: user, book: book)

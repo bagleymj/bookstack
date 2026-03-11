@@ -57,8 +57,10 @@ class DashboardController < ApplicationController
     # Calculate total reading time remaining for today's quotas
     @today_reading_minutes = @today_quotas.sum(&:estimated_minutes_remaining)
 
-    # Find goals with unresolved discrepancies from yesterday
-    @goals_with_discrepancies = @active_goals.select(&:has_unresolved_discrepancy?)
+    # Auto-resolve any discrepancies from yesterday via redistribution
+    @active_goals.select(&:has_unresolved_discrepancy?).each do |goal|
+      goal.resolve_discrepancy!(:redistribute)
+    end
 
     # Reading pace progress
     @reading_pace_progress = current_user.reading_pace_progress
