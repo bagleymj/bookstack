@@ -450,7 +450,7 @@
     </div>
   </div>
 
-  <!-- Up Next (scheduled queued books) -->
+  <!-- Up Next -->
   <% if @up_next_goals.any? %>
     <div class="rounded-lg bg-white shadow">
       <div class="px-4 py-5 sm:p-6">
@@ -470,6 +470,29 @@
               <p class="font-medium text-gray-900 text-sm truncate"><%= book.title %></p>
               <p class="text-xs text-gray-500 truncate"><%= book.author %></p>
               <p class="text-xs text-gray-400 mt-1">Starts <%= goal.started_on.strftime("%-b %-d") %></p>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    </div>
+  <% elsif @unread_books&.any? %>
+    <div class="rounded-lg bg-white shadow">
+      <div class="px-4 py-5 sm:p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-medium leading-6 text-gray-900">Up Next</h3>
+          <%= link_to "View all", books_path(status: :unread), class: "text-sm text-indigo-600 hover:text-indigo-500" %>
+        </div>
+        <div class="flex gap-4 overflow-x-auto pb-2 -mx-1 px-1">
+          <% @unread_books.each do |book| %>
+            <%= link_to book, class: "flex-none w-40 rounded-lg border border-gray-200 p-3 hover:border-indigo-300 hover:shadow-sm transition-all" do %>
+              <div class="aspect-[3/4] rounded bg-gradient-to-br from-indigo-100 to-indigo-50 flex items-center justify-center mb-2">
+                <svg class="w-8 h-8 text-indigo-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                </svg>
+              </div>
+              <p class="font-medium text-gray-900 text-sm truncate"><%= book.title %></p>
+              <p class="text-xs text-gray-500 truncate"><%= book.author %></p>
+              <p class="text-xs text-gray-400 mt-1"><%= book.total_pages %> pages</p>
             <% end %>
           <% end %>
         </div>

@@ -22,6 +22,7 @@ class DashboardController < ApplicationController
                                      .order(:started_on)
                                      .includes(:book)
                                      .limit(5)
+    @unread_books = current_user.books.unread.limit(5) if @up_next_goals.empty?
 
     # Yearly book counts (based on reading goals targeted for this year)
     yearly_goals = current_user.reading_goals.where(target_completion_date: Date.current.all_year)
