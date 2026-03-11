@@ -10,6 +10,11 @@ class DashboardController < ApplicationController
                               .where(date: Date.current)
                               .where.not(status: :missed)  # Don't show missed quotas as active goals
                               .includes(reading_goal: :book)
+
+    # Books with reading due today: books with today quotas first, then any in-progress books without quotas
+    quota_books = @today_quotas.map { |q| q.reading_goal.book }
+    other_in_progress = @books_in_progress.reject { |b| quota_books.include?(b) }
+    @books_due_today = (quota_books + other_in_progress).first(3)
     @stats = current_user.user_reading_stats
     @unread_books = current_user.books.unread.limit(5)
 
