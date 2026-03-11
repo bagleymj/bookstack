@@ -149,7 +149,13 @@ class Book < ApplicationRecord
   def set_defaults
     self.first_page ||= 1
     self.current_page = first_page || 1 if current_page.nil? || current_page.zero?
-    self.current_page = first_page if first_page && current_page && current_page < first_page
+    if first_page && current_page
+      if current_page < first_page
+        self.current_page = first_page
+      elsif first_page_changed? && current_page == first_page_was
+        self.current_page = first_page
+      end
+    end
     self.density ||= :average
   end
 

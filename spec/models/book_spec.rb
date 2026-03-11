@@ -10,10 +10,16 @@ RSpec.describe Book, type: :model do
       expect(book.current_page).to eq(31)
     end
 
-    it "does not move current_page when first_page is lowered" do
+    it "does not move current_page when first_page is lowered but user has read ahead" do
       book = create(:book, user: user, first_page: 20, last_page: 300, current_page: 50)
       book.update!(first_page: 10)
       expect(book.current_page).to eq(50)
+    end
+
+    it "resets current_page when first_page is lowered and user hasn't read past start" do
+      book = create(:book, user: user, first_page: 5, last_page: 300, current_page: 5)
+      book.update!(first_page: 1)
+      expect(book.current_page).to eq(1)
     end
 
     it "does not move current_page when it is already past first_page" do
