@@ -450,16 +450,17 @@
     </div>
   </div>
 
-  <!-- Up Next (Unread Books) -->
-  <% if @unread_books.any? %>
+  <!-- Up Next (scheduled queued books) -->
+  <% if @up_next_goals.any? %>
     <div class="rounded-lg bg-white shadow">
       <div class="px-4 py-5 sm:p-6">
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-lg font-medium leading-6 text-gray-900">Up Next</h3>
-          <%= link_to "View all", books_path(status: :unread), class: "text-sm text-indigo-600 hover:text-indigo-500" %>
+          <%= link_to "Reading list", reading_list_path, class: "text-sm text-indigo-600 hover:text-indigo-500" %>
         </div>
         <div class="flex gap-4 overflow-x-auto pb-2 -mx-1 px-1">
-          <% @unread_books.each do |book| %>
+          <% @up_next_goals.each do |goal| %>
+            <% book = goal.book %>
             <%= link_to book, class: "flex-none w-40 rounded-lg border border-gray-200 p-3 hover:border-indigo-300 hover:shadow-sm transition-all" do %>
               <div class="aspect-[3/4] rounded bg-gradient-to-br from-indigo-100 to-indigo-50 flex items-center justify-center mb-2">
                 <svg class="w-8 h-8 text-indigo-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -468,7 +469,7 @@
               </div>
               <p class="font-medium text-gray-900 text-sm truncate"><%= book.title %></p>
               <p class="text-xs text-gray-500 truncate"><%= book.author %></p>
-              <p class="text-xs text-gray-400 mt-1"><%= book.total_pages %> pages</p>
+              <p class="text-xs text-gray-400 mt-1">Starts <%= goal.started_on.strftime("%-b %-d") %></p>
             <% end %>
           <% end %>
         </div>
