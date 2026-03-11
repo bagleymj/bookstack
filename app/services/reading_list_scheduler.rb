@@ -305,6 +305,7 @@ class ReadingListScheduler
     candidates = []
     goals.each do |goal|
       next unless unscheduled.include?(goal.id)
+      next if current_week_slot?(slot_start) && !goal.book.owned?
       entry = share_index[goal.id]
 
       TIERS.each do |tier|
@@ -742,6 +743,10 @@ class ReadingListScheduler
   end
 
   # ─── Calendar Helpers ──────────────────────────────────────────
+
+  def current_week_slot?(slot_start)
+    Date.current.beginning_of_week(:monday) == slot_start.beginning_of_week(:monday)
+  end
 
   # End date is always computed from the week's Monday, so tier
   # boundaries always land on Sundays regardless of start day.

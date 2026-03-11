@@ -150,7 +150,8 @@ export default class extends Controller {
             isToday,
             todayProgress,
             color: g.color,
-            isQueued: g._isQueued
+            isQueued: g._isQueued,
+            isUnowned: g._isUnowned
           })
           yOffset += minutes
         }
@@ -265,6 +266,7 @@ export default class extends Controller {
       g.color = this.constructor.BLOCK_COLORS[i % this.constructor.BLOCK_COLORS.length]
       g._index = i
       g._isQueued = g.goal_status === "queued"
+      g._isUnowned = !g.owned
     })
 
     this.setupScales()
@@ -587,6 +589,35 @@ export default class extends Controller {
     }
 
     // ── Queued goal dashed borders ──
+    // ── Unowned goal amber dotted borders ──
+    const unownedBricks = bricks.filter(b => b.isUnowned)
+    const unownedJoin = this.brickLayer.selectAll(".brick-unowned-border")
+      .data(unownedBricks, d => d.key + "-ub")
+
+    unownedJoin.exit().remove()
+
+    const ubEnter = unownedJoin.enter()
+      .append("rect")
+      .attr("class", "brick-unowned-border")
+      .attr("rx", 2)
+      .style("fill", "none")
+      .style("stroke", "#f59e0b")
+      .style("stroke-width", 1.5)
+      .style("stroke-dasharray", "2,2")
+      .style("pointer-events", "none")
+
+    const applyUnowned = (sel) => {
+      sel
+        .attr("x", d => this.xScale(d.date) + gap / 2)
+        .attr("y", d => this.yScale(d.yOffset + d.minutes) + gap / 2)
+        .attr("width", d => Math.max(this.xScale(d.nextDate) - this.xScale(d.date) - gap, 1))
+        .attr("height", d => Math.max(this.yScale(d.yOffset) - this.yScale(d.yOffset + d.minutes) - gap, 1))
+    }
+
+    applyUnowned(ubEnter)
+    if (t) { applyUnowned(unownedJoin.transition(t)) } else { applyUnowned(unownedJoin) }
+
+    // ── Queued goal dashed borders ──
     const queuedBricks = bricks.filter(b => b.isQueued)
     const queuedJoin = this.brickLayer.selectAll(".brick-queued-border")
       .data(queuedBricks, d => d.key + "-qb")
@@ -761,9 +792,14 @@ export default class extends Controller {
         `
       }
 
+      const unownedLine = goal._isUnowned
+        ? '<div class="text-amber-400 font-medium">Not yet owned</div>'
+        : ''
+
       goal._tooltipHtml = `
         <div class="font-semibold mb-1">${goal.title}</div>
         <div class="text-gray-300 text-xs">${goal.author || "Unknown author"}</div>
+        ${unownedLine}
         <div class="mt-2 space-y-1 text-xs">
           <div><span class="text-gray-400">Planned:</span> ${goal.minutes_per_day}m/day</div>
           <div>${daysLine}</div>
@@ -890,6 +926,16 @@ export default class extends Controller {
         <span class="text-gray-600">${d.title}</span>
         ${!d.uses_actual_data ? '<span class="text-gray-400 text-xs">(est.)</span>' : ''}
       `)
+
+    // Unowned legend entry
+    if (goals.some(g => g._isUnowned)) {
+      legend.append("div")
+        .attr("class", "legend-item flex items-center gap-2")
+        .html(`
+          <span class="w-3 h-3 rounded border-2 border-dashed" style="border-color: #f59e0b"></span>
+          <span class="text-gray-600">Not yet owned</span>
+        `)
+    }
   }
 
   // ── Utilities ─────────────────────────────────────────────────────

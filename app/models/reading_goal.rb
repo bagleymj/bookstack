@@ -296,7 +296,8 @@ class ReadingGoal < ApplicationRecord
       session_count: session_boundaries[:count],
       position: position,
       auto_scheduled: auto_scheduled,
-      snap_label: snap_period_label
+      snap_label: snap_period_label,
+      owned: book.owned?
     }
   end
 
@@ -435,7 +436,8 @@ class ReadingGoal < ApplicationRecord
       latest_session_date: nil,
       session_count: 0,
       position: position,
-      auto_scheduled: auto_scheduled
+      auto_scheduled: auto_scheduled,
+      owned: book.owned?
     }
   end
 

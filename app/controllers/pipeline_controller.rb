@@ -18,5 +18,14 @@ class PipelineController < ApplicationController
                                                                .where(status: [:active, :queued])
                                                                .select(:book_id))
                                    .order(:title)
+
+    # Warn about unowned books starting next week
+    next_monday = Date.current.beginning_of_week(:monday) + 7
+    next_sunday = next_monday + 6
+    @unowned_next_week = current_user.reading_goals
+      .where(status: [:active, :queued])
+      .where(started_on: next_monday..next_sunday)
+      .includes(:book)
+      .select { |g| !g.book.owned? }
   end
 end

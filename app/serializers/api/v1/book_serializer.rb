@@ -20,6 +20,7 @@ module Api
           status: @book.status,
           cover_image_url: @book.cover_image_url,
           isbn: @book.isbn,
+          owned: @book.owned?,
           estimated_reading_time_minutes: @book.effective_reading_time_minutes,
           actual_wpm: @book.actual_wpm,
           created_at: @book.created_at,

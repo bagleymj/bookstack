@@ -41,6 +41,8 @@ class Book < ApplicationRecord
   scope :not_started, -> { where(status: :unread) }
   scope :finished, -> { where(status: :completed) }
   scope :by_status, ->(status) { where(status: status) }
+  scope :owned, -> { where(owned: true) }
+  scope :unowned, -> { where(owned: false) }
 
   # Callbacks
   before_validation :set_defaults
@@ -116,6 +118,10 @@ class Book < ApplicationRecord
       days = (minutes / 1440.0).round(1)
       "#{days} days"
     end
+  end
+
+  def mark_owned!
+    update!(owned: true)
   end
 
   def start_reading!

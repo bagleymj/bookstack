@@ -75,6 +75,17 @@
             <dt class="text-sm text-gray-500">Density</dt>
             <dd class="text-sm font-medium text-gray-900"><%= @book.density.humanize %></dd>
           </div>
+          <div class="flex justify-between">
+            <dt class="text-sm text-gray-500">Owned</dt>
+            <dd class="text-sm font-medium text-gray-900">
+              <% if @book.owned? %>
+                Yes
+              <% else %>
+                <span class="text-amber-600">Not owned</span>
+                <%= button_to "Mark as owned", book_path(@book, book: { owned: true }), method: :patch, class: "ml-2 inline-flex items-center rounded px-2 py-0.5 text-xs font-medium text-amber-800 bg-amber-100 hover:bg-amber-200" %>
+              <% end %>
+            </dd>
+          </div>
           <% if @book.actual_density_modifier %>
             <div class="flex justify-between">
               <dt class="text-sm text-gray-500">Learned Modifier</dt>

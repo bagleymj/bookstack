@@ -93,7 +93,7 @@ class BooksController < ApplicationController
   end
 
   def book_params
-    params.require(:book).permit(:title, :author, :first_page, :last_page, :density, :cover_image_url, :isbn)
+    params.require(:book).permit(:title, :author, :first_page, :last_page, :density, :cover_image_url, :isbn, :owned)
   end
 
   def reschedule_if_on_pipeline!

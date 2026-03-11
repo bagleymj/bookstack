@@ -6,6 +6,7 @@ FactoryBot.define do
     first_page { 1 }
     last_page { 300 }
     density { :average }
+    owned { true }
 
     trait :reading do
       status { :reading }
@@ -20,6 +21,10 @@ FactoryBot.define do
 
     trait :unread do
       status { :unread }
+    end
+
+    trait :unowned do
+      owned { false }
     end
   end
 end
