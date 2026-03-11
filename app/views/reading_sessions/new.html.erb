@@ -74,7 +74,7 @@
               <label for="end_page" class="block text-sm font-medium text-gray-700">What page did you finish on?</label>
               <div class="mt-1 flex items-center gap-3">
                 <%= form.number_field :end_page,
-                    min: @book.first_page,
+                    min: @book.current_page,
                     max: @book.last_page,
                     value: @book.actual_current_page,
                     class: "block w-32 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-lg",

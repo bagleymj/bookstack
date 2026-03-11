@@ -97,7 +97,14 @@ class ReadingSessionsController < ApplicationController
   end
 
   def complete
-    @reading_session.complete!(params[:end_page].to_i)
+    end_page = params[:end_page].to_i
+
+    if end_page < @reading_session.start_page
+      redirect_to @reading_session, alert: "End page must be greater than or equal to start page (#{@reading_session.start_page})."
+      return
+    end
+
+    @reading_session.complete!(end_page)
 
     # Update any active daily quotas
     update_daily_quotas(@reading_session.pages_read)

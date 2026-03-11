@@ -31,4 +31,25 @@ RSpec.describe "ReadingSessions", type: :request do
       end
     end
   end
+
+  describe "POST /reading_sessions/:id/complete" do
+    let(:reading_session) { create(:reading_session, :in_progress, user: user, book: book, start_page: 50) }
+
+    it "rejects end_page less than start_page" do
+      post complete_reading_session_path(reading_session), params: { end_page: 30 }
+
+      expect(response).to redirect_to(reading_session)
+      follow_redirect!
+      expect(response.body).to include("End page must be greater than or equal to start page")
+    end
+
+    it "completes the session when end_page is valid" do
+      post complete_reading_session_path(reading_session), params: { end_page: 75 }
+
+      expect(response).to redirect_to(reading_session)
+      reading_session.reload
+      expect(reading_session.end_page).to eq(75)
+      expect(reading_session.ended_at).to be_present
+    end
+  end
 end
