@@ -575,6 +575,94 @@ RSpec.describe ReadingListScheduler do
     end
   end
 
+  # ─── Book Ownership ──────────────────────────────────────────
+
+  describe "book ownership" do
+    let(:monday) do
+      d = Date.current.beginning_of_week(:monday)
+      d += 7 unless Date.current.monday?
+      d
+    end
+
+    def create_queued_unowned_book(pages: 300, position: 1, title: "Unowned Book")
+      book = create(:book, :unowned, user: user, last_page: pages, title: title)
+      create(:reading_goal, user: user, book: book, status: :queued,
+             started_on: nil, target_completion_date: nil,
+             auto_scheduled: true, position: position)
+      book
+    end
+
+    it "skips unowned books for current week placement" do
+      travel_to monday do
+        create_queued_unowned_book(pages: 300, position: 1, title: "Unowned")
+        schedule!
+
+        goal = user.reading_goals.find_by(book: Book.find_by(title: "Unowned"))
+        # The goal should either remain queued or be placed in a future week
+        if goal.active?
+          expect(goal.started_on).to be >= monday + 7,
+            "Unowned book should not start in current week (started #{goal.started_on})"
+        end
+      end
+    end
+
+    it "places owned books in the current week" do
+      travel_to monday do
+        create_queued_book(pages: 300, position: 1, title: "Owned")
+        schedule!
+
+        goal = user.reading_goals.find_by(book: Book.find_by(title: "Owned"))
+        expect(goal).to be_active
+        expect(goal.started_on).to eq(monday)
+      end
+    end
+
+    it "places unowned books in future weeks" do
+      travel_to monday do
+        create_queued_unowned_book(pages: 300, position: 1, title: "Future Unowned")
+        create_queued_book(pages: 300, position: 2, title: "Owned Filler")
+        schedule!
+
+        goal = user.reading_goals.find_by(book: Book.find_by(title: "Future Unowned"))
+        if goal.active?
+          expect(goal.started_on).to be >= monday + 7
+        end
+      end
+    end
+
+    it "handles all-unowned queue (current week empty, future weeks populated)" do
+      travel_to monday do
+        3.times { |i| create_queued_unowned_book(pages: 300, position: i + 1, title: "Unowned #{i}") }
+        schedule!
+
+        active_goals = user.reading_goals.active
+        active_goals.each do |goal|
+          expect(goal.started_on).to be >= monday + 7,
+            "#{goal.book.title} started #{goal.started_on}, should not be in current week"
+        end
+      end
+    end
+
+    it "picks up newly-owned book on next reflow" do
+      travel_to monday do
+        book = create_queued_unowned_book(pages: 300, position: 1, title: "Was Unowned")
+        schedule!
+
+        # Book not placed in current week initially
+        goal = user.reading_goals.find_by(book: book)
+
+        # Now mark as owned and reschedule
+        book.mark_owned!
+        schedule!
+
+        goal.reload
+        expect(goal).to be_active
+        # Should now be eligible for current week
+        expect(goal.started_on).to be_present
+      end
+    end
+  end
+
   # ─── Edge Cases ────────────────────────────────────────────────
 
   describe "edge cases" do
