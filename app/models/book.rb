@@ -141,9 +141,10 @@ class Book < ApplicationRecord
   end
 
   def set_defaults
-    self.current_page = first_page || 1 if current_page.nil? || current_page.zero?
-    self.density ||= :average
     self.first_page ||= 1
+    self.current_page = first_page || 1 if current_page.nil? || current_page.zero?
+    self.current_page = first_page if first_page && current_page && current_page < first_page
+    self.density ||= :average
   end
 
   def calculate_total_pages
