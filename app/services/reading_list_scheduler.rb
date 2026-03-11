@@ -47,30 +47,46 @@ class ReadingListScheduler
   end
 
   def schedule!
-    return unless throughput_pace?
+    return Set.new unless throughput_pace?
 
     # Phase 1: Measure actuals
     measure_actuals!
 
     # Phase 2: Compute derived daily target
     @daily_target = compute_daily_target
-    return if @daily_target <= 0
+    return Set.new if @daily_target <= 0
     compute_weekend_targets
 
     # Phase 3: Slot-by-slot bin filling (first slot may be mid-week)
     @load_profile = Hash.new(0.0)
     @concurrent_count = Hash.new(0)
     @timeline_end = nil
+    @graduated_ids = Set.new
 
     locked_goals.each { |goal| add_goal_to_profiles(goal) }
 
+    # Phase 3a: Graduate under-read locked goals to longer tiers
+    adjust_locked_goals!
+
+    # Phase 3b: Place stale + queued goals
     @placements = fill_placements(gather_schedulable_goals)
 
     # Phase 4: Verify throughput
     verify_throughput!
 
     # Phase 5: Generate quotas
-    @placements.each { |entry| generate_quotas_for!(entry[:goal]) }
+    handled_ids = Set.new(@graduated_ids)
+    @placements.each do |entry|
+      goal = entry[:goal]
+      if @stale_goal_ids.include?(goal.id)
+        regenerate_quotas_from_today!(goal)
+      else
+        generate_quotas_for!(goal)
+      end
+      handled_ids << goal.id
+    end
+
+    handled_ids
   end
 
   private
@@ -436,11 +452,10 @@ class ReadingListScheduler
   end
 
   def apply_placement!(goal, placement)
-    goal.update!(
-      started_on: placement[:start],
-      target_completion_date: placement[:end],
-      status: :active
-    )
+    attrs = { target_completion_date: placement[:end], status: :active }
+    # Preserve started_on for stale re-placements (already active goals)
+    attrs[:started_on] = placement[:start] unless goal.active?
+    goal.update!(attrs)
   end
 
   def add_goal_to_profiles(goal)
@@ -475,6 +490,67 @@ class ReadingListScheduler
     end_date = calendar_end(start, tier)
     share = compute_weekday_share(book_minutes, start, end_date)
     { start: start, end: end_date, share: share, tier: tier }
+  end
+
+  # ─── Phase 3a: Locked Goal Graduation ──────────────────────────
+  #
+  # When locked goals' combined load overshoots the daily target in the
+  # near term, graduate the heaviest one to a longer tier. This prevents
+  # spikes from under-reading without waiting for the goal to become stale.
+
+  def adjust_locked_goals!
+    MAX_ADJUSTMENT_ITERATIONS.times do
+      overshooting = (Date.current..(Date.current + 6)).any? do |date|
+        next false unless reading_day?(date)
+        target = target_for_date(date)
+        target > 0 && @load_profile[date] > target
+      end
+      break unless overshooting
+
+      # Find the locked goal with the highest daily share
+      heaviest = locked_goals.max_by do |goal|
+        book_minutes = estimate_remaining_minutes(goal.book)
+        compute_weekday_share(book_minutes, [goal.started_on, Date.current].max, goal.target_completion_date)
+      end
+      break unless heaviest
+
+      graduation_tier = find_graduation_tier(heaviest)
+      break unless graduation_tier
+
+      graduate_goal!(heaviest, graduation_tier)
+      @graduated_ids << heaviest.id
+    end
+  end
+
+  def find_graduation_tier(goal)
+    current_end = goal.target_completion_date
+    TIERS.each do |tier|
+      tier_end = calendar_end(goal.started_on, tier)
+      next if tier_end <= current_end
+      return tier
+    end
+    nil
+  end
+
+  def graduate_goal!(goal, tier)
+    old_start = [goal.started_on, Date.current].max
+    old_end = goal.target_completion_date
+    book_minutes = estimate_remaining_minutes(goal.book)
+    old_share = compute_weekday_share(book_minutes, old_start, old_end)
+
+    # Remove old load
+    remove_range_from_profiles(old_start, old_end, old_share)
+
+    # Apply new end date
+    new_end = calendar_end(goal.started_on, tier)
+    goal.update!(target_completion_date: new_end)
+
+    # Add new load
+    new_share = compute_weekday_share(book_minutes, old_start, new_end)
+    add_range_to_profiles(old_start, new_end, new_share)
+
+    # Regenerate quotas from today
+    regenerate_quotas_from_today!(goal)
   end
 
   # ─── Phase 4 ────────────────────────────────────────────────────
@@ -515,7 +591,7 @@ class ReadingListScheduler
 
   def try_shorten_longest_tier!
     adjustable = @placements
-      .reject { |p| p[:goal].has_reading_sessions? }
+      .reject { |p| locked_goal_ids.include?(p[:goal].id) }
       .sort_by { |p| -TIER_WEEKS[p[:tier]] }
 
     pace_window_end = @pace_start + 365
@@ -562,7 +638,7 @@ class ReadingListScheduler
 
   def try_lengthen_shortest_tier!
     adjustable = @placements
-      .reject { |p| p[:goal].has_reading_sessions? }
+      .reject { |p| locked_goal_ids.include?(p[:goal].id) }
       .sort_by { |p| TIER_WEEKS[p[:tier]] }
 
     adjustable.each do |entry|
@@ -619,24 +695,49 @@ class ReadingListScheduler
     ProfileAwareQuotaCalculator.new(goal, @user).generate_quotas!
   end
 
+  def regenerate_quotas_from_today!(goal)
+    goal.daily_quotas.where("date >= ?", Date.current).delete_all
+    goal.daily_quotas.reload
+    ProfileAwareQuotaCalculator.new(goal, @user).generate_quotas!(from_date: Date.current)
+  end
+
   # ─── Timeline & Goals ──────────────────────────────────────────
 
   def locked_goals
-    @locked_goals ||= @user.reading_goals
-                            .active
-                            .where.not(target_completion_date: nil)
-                            .includes(:book)
-                            .select(&:has_reading_sessions?)
+    @locked_goals ||= begin
+      active_goals = @user.reading_goals
+                          .active
+                          .where.not(target_completion_date: nil)
+                          .includes(:book)
+
+      book_ids_with_sessions_this_week = ReadingSession
+        .where(user: @user)
+        .where(status: :completed)
+        .where("started_at >= ?", Date.current.beginning_of_week(:monday).beginning_of_day)
+        .pluck(:book_id)
+        .to_set
+
+      active_goals.select { |g| book_ids_with_sessions_this_week.include?(g.book_id) }
+    end
+  end
+
+  def locked_goal_ids
+    @locked_goal_ids ||= locked_goals.map(&:id).to_set
   end
 
   def gather_schedulable_goals
-    @user.reading_goals
-         .where(status: [:queued, :active])
-         .where(auto_scheduled: true)
-         .where.not(position: nil)
-         .includes(:book)
-         .order(:position)
-         .reject { |g| g.active? && g.has_reading_sessions? }
+    goals = @user.reading_goals
+                 .where(status: [:queued, :active])
+                 .where(auto_scheduled: true)
+                 .where.not(position: nil)
+                 .includes(:book)
+                 .order(:position)
+                 .reject { |g| locked_goal_ids.include?(g.id) }
+
+    # Track which goals are stale (active with sessions, but not this week)
+    @stale_goal_ids = goals.select { |g| g.active? && g.has_reading_sessions? }.map(&:id).to_set
+
+    goals
   end
 
   # ─── Calendar Helpers ──────────────────────────────────────────
