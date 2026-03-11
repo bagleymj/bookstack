@@ -162,5 +162,44 @@ RSpec.describe "API V1 Books", type: :request do
       expect(response).to have_http_status(:ok)
       expect(json_response["book"]["current_page"]).to eq(100)
     end
+
+    it "creates an untracked session when advancing forward" do
+      book = create(:book, :reading, user: user, current_page: 50, last_page: 300)
+
+      expect {
+        post "/api/v1/books/#{book.id}/update_progress", params: { current_page: 100 }, headers: headers, as: :json
+      }.to change(ReadingSession, :count).by(1)
+
+      session = ReadingSession.last
+      expect(session.start_page).to eq(50)
+      expect(session.end_page).to eq(100)
+      expect(session.untracked?).to be true
+    end
+
+    it "does not create a session when page is not advancing" do
+      book = create(:book, :reading, user: user, current_page: 50, last_page: 300)
+
+      expect {
+        post "/api/v1/books/#{book.id}/update_progress", params: { current_page: 50 }, headers: headers, as: :json
+      }.not_to change(ReadingSession, :count)
+    end
+
+    it "updates daily quota actual_pages" do
+      book = create(:book, :reading, user: user, current_page: 50, last_page: 300)
+      goal = create(:reading_goal, user: user, book: book, status: :active)
+      quota = goal.today_quota
+
+      post "/api/v1/books/#{book.id}/update_progress", params: { current_page: 80 }, headers: headers, as: :json
+
+      expect(quota.reload.actual_pages).to eq(30)
+    end
+
+    it "transitions unread book to reading" do
+      book = create(:book, :unread, user: user, current_page: 1, last_page: 300)
+
+      post "/api/v1/books/#{book.id}/update_progress", params: { current_page: 20 }, headers: headers, as: :json
+
+      expect(book.reload.status).to eq("reading")
+    end
   end
 end

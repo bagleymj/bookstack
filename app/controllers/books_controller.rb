@@ -63,6 +63,25 @@ class BooksController < ApplicationController
 
   def update_progress
     page = params[:page].to_i
+    old_page = @book.current_page
+
+    if page > old_page
+      @book.reading_sessions.create!(
+        user: current_user,
+        start_page: old_page,
+        end_page: page,
+        started_at: Time.current,
+        ended_at: Time.current,
+        untracked: true
+      )
+
+      @book.start_reading! if @book.unread?
+
+      current_user.reading_goals.active.where(book: @book).each do |goal|
+        goal.today_quota&.record_pages!(page - old_page)
+      end
+    end
+
     @book.update_progress!(page)
     redirect_to @book, notice: "Progress updated to page #{page}."
   end
