@@ -453,8 +453,9 @@ class ReadingListScheduler
 
   def apply_placement!(goal, placement)
     attrs = { target_completion_date: placement[:end], status: :active }
-    # Preserve started_on for stale re-placements (already active goals)
-    attrs[:started_on] = placement[:start] unless goal.active?
+    # Only preserve started_on for stale goals (active with prior sessions).
+    # Active goals without sessions are effectively queued — update their start.
+    attrs[:started_on] = placement[:start] unless @stale_goal_ids&.include?(goal.id)
     goal.update!(attrs)
   end
 
