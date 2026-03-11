@@ -495,7 +495,6 @@ RSpec.describe ReadingListScheduler do
 
       goal = user.reading_goals.find_by(book: book)
       original_start = goal.started_on
-      original_end = goal.target_completion_date
 
       # Add a reading session to lock this goal
       create(:reading_session, user: user, book: book,
@@ -508,8 +507,11 @@ RSpec.describe ReadingListScheduler do
       schedule!
 
       goal.reload
+      # Locked goals are not re-placed: started_on stays the same.
+      # target_completion_date may shift via graduation if load exceeds target.
       expect(goal.started_on).to eq(original_start)
-      expect(goal.target_completion_date).to eq(original_end)
+      expect(goal.target_completion_date).to be >= original_start
+      expect(goal.target_completion_date).to be_sunday
     end
 
     it "includes locked goals in the load profile for new placements" do
@@ -632,6 +634,167 @@ RSpec.describe ReadingListScheduler do
       end
 
       expect(second_run).to eq(first_run)
+    end
+  end
+
+  # ─── Daily Re-Run Adjustments ──────────────────────────────────
+
+  describe "daily re-run adjustments" do
+    let(:monday) do
+      d = Date.current.beginning_of_week(:monday)
+      d += 7 unless Date.current.monday?
+      d
+    end
+
+    def create_active_book_with_sessions(title:, pages:, position:, started_on:, target_completion_date:, session_date:)
+      book = create(:book, user: user, last_page: pages, title: title)
+      goal = create(:reading_goal, user: user, book: book, status: :active,
+                    started_on: started_on, target_completion_date: target_completion_date,
+                    auto_scheduled: true, position: position)
+      goal.daily_quotas.destroy_all
+      (Date.current..target_completion_date).each do |date|
+        goal.daily_quotas.create!(date: date, target_pages: 10, actual_pages: 0, status: :pending)
+      end
+      create(:reading_session, user: user, book: book,
+             start_page: 1, end_page: 10, pages_read: 9,
+             started_at: session_date.to_time, ended_at: session_date.to_time + 30.minutes,
+             duration_seconds: 1800)
+      [book, goal]
+    end
+
+    it "re-places stale goals from today" do
+      travel_to monday + 2 do # Wednesday
+        # Goal with session last week only — stale
+        last_monday = monday - 7
+        _, stale_goal = create_active_book_with_sessions(
+          title: "Stale Book", pages: 300, position: 1,
+          started_on: last_monday, target_completion_date: last_monday + 13,
+          session_date: last_monday + 1 # Tuesday of last week
+        )
+        original_start = stale_goal.started_on
+
+        result = schedule!
+
+        stale_goal.reload
+        expect(result).to include(stale_goal.id)
+        expect(stale_goal.started_on).to eq(original_start) # preserved
+        expect(stale_goal.target_completion_date).to be_present
+        expect(stale_goal.status).to eq("active")
+      end
+    end
+
+    it "keeps locked goals with sessions this week" do
+      travel_to monday + 2 do # Wednesday
+        _, locked_goal = create_active_book_with_sessions(
+          title: "Locked Book", pages: 300, position: 1,
+          started_on: monday, target_completion_date: monday + 13,
+          session_date: monday + 1 # Tuesday of this week
+        )
+        original_start = locked_goal.started_on
+        original_end = locked_goal.target_completion_date
+
+        schedule!
+
+        locked_goal.reload
+        expect(locked_goal.started_on).to eq(original_start)
+        expect(locked_goal.target_completion_date).to eq(original_end)
+      end
+    end
+
+    it "graduates under-read locked goal to longer tier" do
+      travel_to monday + 2 do # Wednesday
+        # Two locked goals with very short tiers — combined load will overshoot
+        _, goal_a = create_active_book_with_sessions(
+          title: "Heavy A", pages: 500, position: 1,
+          started_on: monday, target_completion_date: monday + 6, # 1-week tier
+          session_date: monday + 1
+        )
+        _, goal_b = create_active_book_with_sessions(
+          title: "Heavy B", pages: 500, position: 2,
+          started_on: monday, target_completion_date: monday + 6, # 1-week tier
+          session_date: monday + 1
+        )
+
+        original_end_a = goal_a.target_completion_date
+        original_end_b = goal_b.target_completion_date
+
+        result = schedule!
+
+        goal_a.reload
+        goal_b.reload
+
+        # At least one should have been graduated to a longer tier
+        graduated = [goal_a, goal_b].select { |g| result.include?(g.id) }
+        extended = graduated.select { |g|
+          g.target_completion_date > (g.book.title == "Heavy A" ? original_end_a : original_end_b)
+        }
+        expect(extended).not_to be_empty,
+          "Expected at least one locked goal to be graduated to a longer tier"
+      end
+    end
+
+    it "does not graduate when load is within target" do
+      travel_to monday + 2 do # Wednesday
+        # Single locked goal with a long tier — load well within target
+        _, goal = create_active_book_with_sessions(
+          title: "Easy Book", pages: 100, position: 1,
+          started_on: monday, target_completion_date: monday + 27, # 4-week tier
+          session_date: monday + 1
+        )
+        original_end = goal.target_completion_date
+
+        schedule!
+
+        goal.reload
+        expect(goal.target_completion_date).to eq(original_end)
+      end
+    end
+
+    it "credits over-reading via reduced daily share" do
+      travel_to monday + 2 do # Wednesday
+        # Book with pages already read — remaining_minutes is smaller
+        book = create(:book, user: user, last_page: 300, current_page: 200, title: "Half-Read")
+        goal = create(:reading_goal, user: user, book: book, status: :active,
+                      started_on: monday - 7, target_completion_date: monday + 6,
+                      auto_scheduled: true, position: 1)
+        goal.daily_quotas.destroy_all
+        # Session from last week — makes it stale
+        create(:reading_session, user: user, book: book,
+               start_page: 1, end_page: 200, pages_read: 199,
+               started_at: (monday - 5).to_time, ended_at: (monday - 5).to_time + 2.hours,
+               duration_seconds: 7200)
+
+        result = schedule!
+
+        goal.reload
+        expect(result).to include(goal.id)
+        # With fewer remaining pages, the daily share is lower
+        remaining_quotas = goal.daily_quotas.where("date >= ?", Date.current)
+        expect(remaining_quotas.sum(:target_pages)).to eq(book.remaining_pages)
+      end
+    end
+
+    it "Monday: all active goals are stale and re-placed" do
+      travel_to monday do
+        # Create two active goals with sessions from last week
+        last_monday = monday - 7
+        _, goal_a = create_active_book_with_sessions(
+          title: "Book A", pages: 200, position: 1,
+          started_on: last_monday, target_completion_date: last_monday + 13,
+          session_date: last_monday + 3
+        )
+        _, goal_b = create_active_book_with_sessions(
+          title: "Book B", pages: 200, position: 2,
+          started_on: last_monday, target_completion_date: last_monday + 13,
+          session_date: last_monday + 4
+        )
+
+        result = schedule!
+
+        # On Monday, no sessions exist for this week → all goals are stale
+        expect(result).to include(goal_a.id)
+        expect(result).to include(goal_b.id)
+      end
     end
   end
 

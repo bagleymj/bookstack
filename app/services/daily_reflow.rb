@@ -1,7 +1,4 @@
 class DailyReflow
-  SPIKE_TOLERANCE = 1.1  # Allow 10% over derived target before promoting
-  MAX_EXTENSIONS = 5     # Safety cap on extensions per reflow cycle
-
   def initialize(user)
     @user = user
   end
@@ -19,22 +16,11 @@ class DailyReflow
     goals = active_goals.to_a
 
     goals.each { |goal| mark_missed_quotas(goal) }
-    promoted_ids = promote_spiking_goals!(goals)
 
-    # In heijunka mode, call the scheduler only when there are queued books
-    # waiting to enter the pipeline. Active books stay on their current
-    # placements — the reflow handles their quota redistribution. This prevents
-    # the scheduler from re-placing already-running books (which would shift
-    # their start dates and thrash quotas daily).
-    #
-    # Immediate triggers (add/reorder/profile change) still call schedule!
-    # with full re-leveling when the user takes a deliberate action.
-    if heijunka_mode? && queued_books_waiting?
-      ReadingListScheduler.new(@user).schedule!
-    end
+    handled_ids = heijunka_mode? ? ReadingListScheduler.new(@user).schedule! : Set.new
 
     goals.each do |goal|
-      next if promoted_ids.include?(goal.id)
+      next if handled_ids.include?(goal.id)
       redistribute_remaining(goal)
     end
 
@@ -81,83 +67,6 @@ class DailyReflow
         status: DailyQuota.statuses[:pending]
       )
     end
-  end
-
-  # ─── Tier Promotion ─────────────────────────────────────────
-
-  # When the total daily reading load exceeds the derived target, extend the
-  # heaviest goal by one week. This prevents spikes caused by books taking
-  # longer than estimated (e.g., slower actual_wpm than predicted).
-  def promote_spiking_goals!(goals)
-    promoted = Set.new
-    return promoted unless heijunka_mode?
-
-    target = derived_daily_target
-    return promoted unless target&.positive?
-
-    MAX_EXTENSIONS.times do
-      goal_shares = goals.filter_map do |goal|
-        share = daily_share_minutes(goal)
-        [goal, share] if share > 0
-      end
-      break if goal_shares.empty?
-
-      total_load = goal_shares.sum { |_, share| share }
-      break if total_load <= target * SPIKE_TOLERANCE
-
-      heaviest_goal, _ = goal_shares.max_by { |_, share| share }
-      break unless extend_by_one_week(heaviest_goal)
-
-      promoted << heaviest_goal.id
-    end
-
-    promoted
-  end
-
-  def daily_share_minutes(goal)
-    remaining_minutes = estimate_remaining_minutes(goal.book)
-    remaining_days = count_remaining_reading_days(goal)
-    return 0.0 if remaining_days <= 0
-    remaining_minutes.to_f / remaining_days
-  end
-
-  def estimate_remaining_minutes(book)
-    wpm = book.actual_wpm || (@user.effective_reading_speed * book.density_modifier)
-    return 60.0 if wpm.zero?
-    book.remaining_words.to_f / wpm
-  end
-
-  def count_remaining_reading_days(goal)
-    end_date = goal.target_completion_date
-    return 0 if end_date.nil? || end_date < Date.current
-    if @user.includes_weekends?
-      (end_date - Date.current).to_i + 1
-    else
-      (Date.current..end_date).count { |d| !d.on_weekend? }
-    end
-  end
-
-  def extend_by_one_week(goal)
-    new_end = goal.target_completion_date + 7
-    return false if new_end > Date.current + 730  # 2-year safety cap
-
-    goal.update!(target_completion_date: new_end)
-
-    # Regenerate future quotas across the extended range
-    DailyQuota.where(reading_goal_id: goal.id)
-              .where("date >= ?", Date.current)
-              .delete_all
-    ProfileAwareQuotaCalculator.new(goal, @user).generate_quotas!(from_date: Date.current)
-
-    true
-  end
-
-  def derived_daily_target
-    ReadingListScheduler.new(@user).metrics[:derived_target]
-  end
-
-  def queued_books_waiting?
-    @user.reading_goals.where(status: :queued, auto_scheduled: true).exists?
   end
 
   def heijunka_mode?
