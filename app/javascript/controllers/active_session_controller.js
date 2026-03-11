@@ -15,11 +15,13 @@ export default class extends Controller {
   }
 
   updateTimer() {
-    const elapsed = Math.floor((Date.now() - this.startTime.getTime()) / 1000)
-    this.timerTargets.forEach(el => el.textContent = this.formatTime(elapsed))
+    this.frozenElapsed = Math.floor((Date.now() - this.startTime.getTime()) / 1000)
+    this.timerTargets.forEach(el => el.textContent = this.formatTime(this.frozenElapsed))
   }
 
   stop() {
+    if (this.interval) clearInterval(this.interval)
+    this.interval = null
     this.completionFormTarget.classList.remove("hidden")
     this.stopButtonTarget.classList.add("hidden")
     this.endPageFieldTarget.focus()
@@ -28,6 +30,10 @@ export default class extends Controller {
   cancelStop() {
     this.completionFormTarget.classList.add("hidden")
     this.stopButtonTarget.classList.remove("hidden")
+    if (!this.interval) {
+      this.startTime = new Date(Date.now() - this.frozenElapsed * 1000)
+      this.interval = setInterval(() => this.updateTimer(), 1000)
+    }
   }
 
   formatTime(totalSeconds) {

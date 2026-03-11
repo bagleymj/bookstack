@@ -9,6 +9,10 @@ class ReadingSessionsController < ApplicationController
   end
 
   def show
+    if @reading_session.in_progress?
+      active_goal = current_user.reading_goals.active.find_by(book: @reading_session.book)
+      @today_target_page = active_goal&.today_quota&.target_page_number
+    end
   end
 
   def start
