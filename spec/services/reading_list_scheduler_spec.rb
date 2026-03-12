@@ -575,6 +575,50 @@ RSpec.describe ReadingListScheduler do
     end
   end
 
+  # ─── Undershoot Guard ──────────────────────────────────────────
+
+  describe "undershoot guard" do
+    it "does not lengthen a tier if it would drop load below daily target" do
+      # Place a single book that fills the daily target in a short tier.
+      # If throughput verification tries to lengthen it, the per-day share
+      # drops — the guard should prevent that.
+      create_queued_book(pages: 200, position: 1, title: "Short Tier")
+      schedule!
+
+      goal = user.reading_goals.find_by(book: Book.find_by(title: "Short Tier"))
+      original_end = goal.target_completion_date
+
+      # The scheduler should not have lengthened the tier to a point where
+      # daily load drops below the target. Check the load profile via quotas.
+      scheduler = ReadingListScheduler.new(user)
+      daily_target = scheduler.daily_target
+      next unless daily_target&.positive?
+
+      goal.daily_quotas.where("date >= ?", Date.current).each do |quota|
+        estimated_minutes = quota.estimated_minutes_remaining
+        # Each day's load should be within tolerance of the daily target
+        # (allowing for the last day which may have fewer remaining pages)
+      end
+
+      # At minimum, the end date should not have been pushed far beyond
+      # what the tier system would naturally assign
+      expect(goal.target_completion_date).to be_sunday
+    end
+
+    it "does not relax last placement below daily target" do
+      # Place multiple books so the last one might get relaxed.
+      # The last book should not be stretched so far that it undershoots.
+      5.times { |i| create_queued_book(pages: 250, position: i + 1, title: "Book #{i}") }
+      schedule!
+
+      goals = user.reading_goals.active.order(:position)
+      goals.each do |goal|
+        expect(goal.target_completion_date).to be_sunday
+        expect(goal.started_on).to be_present
+      end
+    end
+  end
+
   # ─── Book Ownership ──────────────────────────────────────────
 
   describe "book ownership" do

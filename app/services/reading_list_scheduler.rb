@@ -419,6 +419,12 @@ class ReadingListScheduler
         next
       end
 
+      # Don't relax if it would drop load below the daily target
+      if would_undershoot?(old_placement[:start], old_placement[:end], new_share)
+        add_range_to_profiles(old_placement[:start], old_placement[:end], old_placement[:share])
+        next
+      end
+
       new_placement = { start: slot_start, end: new_end, share: new_share, tier: longer_tier }
       add_range_to_profiles(slot_start, new_end, new_share)
 
@@ -655,6 +661,13 @@ class ReadingListScheduler
       next if new_share <= 0
 
       remove_range_from_profiles(goal.started_on, goal.target_completion_date, entry[:placement][:share])
+
+      # Don't lengthen if it would drop load below the daily target (preserve leveling)
+      if would_undershoot?(goal.started_on, goal.target_completion_date, new_share)
+        add_range_to_profiles(goal.started_on, goal.target_completion_date, entry[:placement][:share])
+        next
+      end
+
       goal.update!(target_completion_date: new_end)
       new_placement = { start: goal.started_on, end: new_end, share: new_share, tier: longer_tier }
       add_range_to_profiles(goal.started_on, new_end, new_share)
@@ -674,6 +687,21 @@ class ReadingListScheduler
       next if target <= 0
       projected = @load_profile[date] + share_for_date(daily_share, date)
       return true if projected > target + CEILING_TOLERANCE
+    end
+    false
+  end
+
+  # Mirror of would_overshoot? — called after old range is removed from
+  # profiles. Returns true if adding new_share would leave any day in the
+  # range below the daily target (floor check).
+  def would_undershoot?(start_date, end_date, new_share)
+    (start_date..end_date).each do |date|
+      next unless reading_day?(date)
+      next if date < Date.current
+      target = target_for_date(date)
+      next if target <= 0
+      projected = @load_profile[date] + share_for_date(new_share, date)
+      return true if projected < target - CEILING_TOLERANCE
     end
     false
   end
