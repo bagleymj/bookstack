@@ -531,6 +531,36 @@ RSpec.describe ReadingListScheduler do
       new_goal = user.reading_goals.find_by(book: Book.find_by(title: "New Book"))
       expect(new_goal).to be_active
     end
+
+    it "contracts locked goals to shorter tiers when undershooting" do
+      # Place a book in a long tier, add a session to lock it, then
+      # reschedule. The contraction should shorten the tier to get the
+      # daily load back up toward the target.
+      book = create_queued_book(pages: 200, position: 1, title: "Long Tier")
+      schedule!
+
+      goal = user.reading_goals.find_by(book: book)
+      original_end = goal.target_completion_date
+
+      # Manually extend to a very long tier (simulating a previous graduation)
+      ref_monday = goal.started_on.beginning_of_week(:monday)
+      long_end = ref_monday + (12 * 7) - 1
+      goal.update!(target_completion_date: long_end)
+
+      # Add a reading session to lock it
+      create(:reading_session, user: user, book: book,
+             start_page: 1, end_page: 10, pages_read: 10,
+             started_at: Time.current, ended_at: 30.minutes.from_now,
+             duration_seconds: 1800)
+
+      # Reschedule — contraction should shorten the tier
+      schedule!
+
+      goal.reload
+      expect(goal.target_completion_date).to be < long_end,
+        "Expected contraction to shorten from #{long_end}, got #{goal.target_completion_date}"
+      expect(goal.target_completion_date).to be_sunday
+    end
   end
 
   # ─── Weekend Modes ─────────────────────────────────────────────
@@ -899,9 +929,10 @@ RSpec.describe ReadingListScheduler do
       end
     end
 
-    it "does not graduate when load is within target" do
+    it "contracts a locked goal from an over-long tier toward the target" do
       travel_to monday + 2 do # Wednesday
-        # Single locked goal with a long tier — load well within target
+        # Single locked goal with an over-long tier — load well under target.
+        # Contraction should shorten the tier to bring load closer to target.
         _, goal = create_active_book_with_sessions(
           title: "Easy Book", pages: 100, position: 1,
           started_on: monday, target_completion_date: monday + 27, # 4-week tier
@@ -912,7 +943,9 @@ RSpec.describe ReadingListScheduler do
         schedule!
 
         goal.reload
-        expect(goal.target_completion_date).to eq(original_end)
+        expect(goal.target_completion_date).to be < original_end,
+          "Expected contraction from #{original_end}, got #{goal.target_completion_date}"
+        expect(goal.target_completion_date).to be_sunday
       end
     end
 
