@@ -307,7 +307,7 @@ class ReadingListScheduler
     goals.each do |goal|
       next unless unscheduled.include?(goal.id)
       next if current_week_slot?(slot_start) && !goal.book.owned?
-      next if current_week_slot?(slot_start) && !Date.current.monday? && !@stale_goal_ids.include?(goal.id)
+      next if current_week_slot?(slot_start) && !Date.current.monday? && user_has_sessions_this_week? && !@stale_goal_ids.include?(goal.id)
       entry = share_index[goal.id]
 
       TIERS.each do |tier|
@@ -819,15 +819,22 @@ class ReadingListScheduler
                           .where.not(target_completion_date: nil)
                           .includes(:book)
 
-      book_ids_with_sessions_this_week = ReadingSession
-        .where(user: @user)
-        .where.not(ended_at: nil)
-        .where("started_at >= ?", Date.current.beginning_of_week(:monday).beginning_of_day)
-        .pluck(:book_id)
-        .to_set
-
-      active_goals.select { |g| book_ids_with_sessions_this_week.include?(g.book_id) }
+      # If the user has read ANY book this week, lock ALL active goals.
+      # The current week is a committed work cell — no swapping mid-week.
+      if user_has_sessions_this_week?
+        active_goals.to_a
+      else
+        []
+      end
     end
+  end
+
+  def user_has_sessions_this_week?
+    @user_has_sessions_this_week ||= ReadingSession
+      .where(user: @user)
+      .where.not(ended_at: nil)
+      .where("started_at >= ?", Date.current.beginning_of_week(:monday).beginning_of_day)
+      .exists?
   end
 
   def locked_goal_ids
