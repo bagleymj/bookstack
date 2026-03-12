@@ -8,7 +8,8 @@ export default class extends Controller {
 
   connect() {
     this.debounceTimer = null
-    this.fetchImpact()
+    // Don't fetch on connect — form fields are empty until book-search populates them.
+    // The update() method will fire when fields change.
   }
 
   // Called when first_page, last_page, or density changes

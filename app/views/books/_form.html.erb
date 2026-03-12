@@ -78,7 +78,7 @@
   </div>
 <% end %>
 
-<%= form_with(model: book, class: "space-y-6") do |form| %>
+<%= form_with(model: book, class: "space-y-6", data: book.new_record? ? { controller: "impact-preview", impact_preview_url_value: impact_preview_api_v1_reading_list_index_path } : {}) do |form| %>
   <% if book.errors.any? %>
     <div class="rounded-md bg-red-50 p-4">
       <div class="flex">
@@ -128,7 +128,7 @@
         <div class="flex-1">
           <label for="book_first_page" class="block text-xs text-gray-500 mb-1">First page</label>
           <%= form.number_field :first_page, min: 1,
-              data: { page_range_slider_target: "minInput", action: "input->page-range-slider#inputMin input->impact-preview#update" },
+              data: { page_range_slider_target: "minInput", action: "input->page-range-slider#inputMin input->impact-preview#update change->impact-preview#update" },
               class: "block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm",
               placeholder: "1" %>
         </div>
@@ -138,7 +138,7 @@
         <div class="flex-1">
           <label for="book_last_page" class="block text-xs text-gray-500 mb-1">Last page</label>
           <%= form.number_field :last_page, min: 1,
-              data: { page_range_slider_target: "maxInput", action: "input->page-range-slider#inputMax input->impact-preview#update" },
+              data: { page_range_slider_target: "maxInput", action: "input->page-range-slider#inputMax input->impact-preview#update change->impact-preview#update" },
               class: "block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm",
               placeholder: "Total pages" %>
         </div>
@@ -201,9 +201,7 @@
   </div>
 
   <% if book.new_record? %>
-    <div class="relative flex items-start mt-2"
-         data-controller="impact-preview"
-         data-impact-preview-url-value="<%= impact_preview_api_v1_reading_list_index_path %>">
+    <div class="relative flex items-start mt-2">
       <div class="flex h-6 items-center">
         <%= check_box_tag :add_to_reading_list, "1", true,
             class: "h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600",
