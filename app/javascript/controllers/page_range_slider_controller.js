@@ -95,7 +95,8 @@ export default class extends Controller {
 
   inputMin() {
     const val = parseInt(this.minInputTarget.value, 10)
-    if (!isNaN(val) && val >= this.minValue && val < this.currentMaxValue) {
+    if (!isNaN(val) && val >= 1 && val < this.currentMaxValue) {
+      if (val < this.minValue) this.minValue = val
       this.currentMinValue = val
       this.syncToInput("min")
     }
@@ -103,7 +104,9 @@ export default class extends Controller {
 
   inputMax() {
     const val = parseInt(this.maxInputTarget.value, 10)
-    if (!isNaN(val) && val <= this.maxValue && val > this.currentMinValue) {
+    if (!isNaN(val) && val > this.currentMinValue) {
+      // Expand slider range if user typed a value beyond the original max
+      if (val > this.maxValue) this.maxValue = val
       this.currentMaxValue = val
       this.syncToInput("max")
     }

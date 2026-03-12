@@ -48,6 +48,30 @@ module Api
         render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
       end
 
+      # GET /api/v1/reading_list/impact_preview — compute schedule impact for a hypothetical book
+      def impact_preview
+        first_page = (params[:first_page] || 1).to_i
+        last_page = (params[:last_page] || 0).to_i
+        density = params[:density] || "average"
+
+        if last_page <= first_page
+          render json: { delta: 0 }
+          return
+        end
+
+        # Build a transient book to compute impact (not persisted)
+        book = current_user.books.build(
+          first_page: first_page,
+          last_page: last_page,
+          total_pages: last_page - first_page + 1,
+          density: density,
+          title: "preview"
+        )
+
+        delta = ScheduleImpactCalculator.new(current_user).impact_for(book)
+        render json: { delta: delta }
+      end
+
       # DELETE /api/v1/reading_list/:id — remove from list
       def destroy
         goal = current_user.reading_goals.find(params[:id])

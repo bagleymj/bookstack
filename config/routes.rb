@@ -64,6 +64,7 @@ Rails.application.routes.draw do
         resources :reading_list, only: [:create, :destroy], controller: "reading_list" do
           collection do
             post :reorder
+            get :impact_preview
           end
         end
       end
