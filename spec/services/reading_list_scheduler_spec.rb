@@ -91,27 +91,24 @@ RSpec.describe ReadingListScheduler do
 
     context "when run mid-week (Wednesday)" do
       let(:wednesday) { Date.current.beginning_of_week(:monday) + 2 }
+      let(:next_monday) { wednesday.beginning_of_week(:monday) + 7 }
 
-      it "starts the first batch today, subsequent batches on Mondays" do
+      it "defers new queued books to next Monday" do
         travel_to wednesday do
           8.times { |i| create_queued_book(pages: 300, position: i + 1, title: "Book #{i}") }
           schedule!
 
           goals = user.reading_goals.active.order(:started_on, :position)
-          first_batch_start = goals.first.started_on
-          expect(first_batch_start).to eq(wednesday)
-          expect(first_batch_start).to be_wednesday
-
-          # Any books starting after the first batch should start on a Monday
-          later_goals = goals.select { |g| g.started_on > first_batch_start }
-          later_goals.each do |goal|
+          goals.each do |goal|
             expect(goal.started_on).to be_monday,
-              "#{goal.book.title} started on #{goal.started_on} (#{goal.started_on.strftime('%A')})"
+              "#{goal.book.title} started on #{goal.started_on} (#{goal.started_on.strftime('%A')}), expected Monday"
+            expect(goal.started_on).to be >= next_monday,
+              "#{goal.book.title} started #{goal.started_on}, should not start in current week"
           end
         end
       end
 
-      it "ends all tiers on Sundays even with mid-week start" do
+      it "ends all tiers on Sundays" do
         travel_to wednesday do
           3.times { |i| create_queued_book(pages: 300, position: i + 1) }
           schedule!
@@ -123,19 +120,22 @@ RSpec.describe ReadingListScheduler do
         end
       end
 
-      it "computes share over actual remaining days (not full week)" do
+      it "still places stale goals (active with sessions) in the current week" do
         travel_to wednesday do
-          create_queued_book(pages: 300, position: 1)
+          # Create an already-active goal with a session (stale)
+          book = create(:book, :reading, user: user, last_page: 300, current_page: 20, title: "Stale Book")
+          goal = create(:reading_goal, user: user, book: book, status: :active,
+                        started_on: wednesday.beginning_of_week(:monday),
+                        target_completion_date: wednesday.beginning_of_week(:monday) + 6,
+                        auto_scheduled: true, position: 1)
+          create(:reading_session, :completed, user: user, book: book,
+                 start_page: 1, end_page: 20, started_at: wednesday - 1.day, ended_at: wednesday - 1.day + 1.hour)
+
           schedule!
 
-          goal = user.reading_goals.active.first
-          # Wednesday to Sunday of the tier end — fewer days than a full
-          # Monday-start tier, so more pages per day
-          reading_days = (goal.started_on..goal.target_completion_date).count
-          full_week_days = (goal.started_on.beginning_of_week(:monday)..goal.target_completion_date).count
-
-          expect(reading_days).to be < full_week_days
-          expect(goal.daily_quotas.count).to eq(reading_days)
+          goal.reload
+          expect(goal).to be_active
+          expect(goal.started_on).to eq(wednesday.beginning_of_week(:monday))
         end
       end
     end
@@ -640,6 +640,40 @@ RSpec.describe ReadingListScheduler do
           expect(goal.started_on).to be >= monday + 7,
             "#{goal.book.title} started #{goal.started_on}, should not be in current week"
         end
+      end
+    end
+
+    it "does not place new owned books mid-week" do
+      wednesday = monday + 2
+      travel_to wednesday do
+        create_queued_book(pages: 300, position: 1, title: "New Mid-Week")
+        schedule!
+
+        goal = user.reading_goals.find_by(book: Book.find_by(title: "New Mid-Week"))
+        expect(goal).to be_active
+        expect(goal.started_on).to be >= monday + 7,
+          "New book should not start mid-week (started #{goal.started_on})"
+      end
+    end
+
+    it "still reschedules stale goals mid-week" do
+      wednesday = monday + 2
+      # Create an active goal with a reading session before mid-week reflow
+      travel_to monday do
+        book = create(:book, :reading, user: user, last_page: 300, current_page: 20, title: "Already Active")
+        goal = create(:reading_goal, user: user, book: book, status: :active,
+                      started_on: monday, target_completion_date: monday + 6,
+                      auto_scheduled: true, position: 1)
+        create(:reading_session, :completed, user: user, book: book,
+               start_page: 1, end_page: 20, started_at: monday, ended_at: monday + 1.hour)
+      end
+
+      travel_to wednesday do
+        schedule!
+
+        goal = user.reading_goals.find_by(book: Book.find_by(title: "Already Active"))
+        expect(goal).to be_active
+        expect(goal.started_on).to eq(monday)
       end
     end
 
