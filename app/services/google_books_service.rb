@@ -33,14 +33,18 @@ class GoogleBooksService
 
   # Fetch editions for a work (step 2).
   # work_key is "title|||author" — searches Google Books with intitle+inauthor.
+  # Results are filtered to only include editions whose normalized title matches
+  # the work, so broad keyword searches don't return unrelated books.
   def fetch_editions(work_key)
     return [] if work_key.blank?
 
     title, author = work_key.split("|||", 2)
     return [] if title.blank?
 
-    parts = ["intitle:\"#{title}\""]
-    parts << "inauthor:\"#{author}\"" if author.present?
+    expected_norm = normalize_text(title)
+
+    parts = ["intitle:#{title}"]
+    parts << "inauthor:#{author}" if author.present?
     query = parts.join("+")
 
     all_items = []
@@ -70,6 +74,7 @@ class GoogleBooksService
     all_items
       .map { |item| normalize_edition(item) }
       .compact
+      .select { |e| title_matches?(e[:title], expected_norm) }
       .reject { |e| e[:isbn] && !seen_isbns.add?(e[:isbn]) } # deduplicate by ISBN
       .sort_by { |e| -edition_score(e) }
   rescue ApiError, Net::OpenTimeout, Net::ReadTimeout, JSON::ParserError, Errno::ECONNREFUSED => e
@@ -146,9 +151,19 @@ class GoogleBooksService
   end
 
   def normalize_work_key(title, author)
-    normalized_title = title.to_s.downcase.gsub(/[^a-z0-9\s]/, "").squish
-    normalized_author = author.to_s.downcase.gsub(/[^a-z0-9\s]/, "").squish
-    "#{normalized_title}|||#{normalized_author}"
+    "#{normalize_text(title)}|||#{normalize_text(author)}"
+  end
+
+  def normalize_text(text)
+    text.to_s.downcase.gsub(/[^a-z0-9\s]/, "").squish
+  end
+
+  # Check if an edition's title matches the expected work title.
+  # Handles subtitles (e.g. "Nature and Selected Essays: Penguin Edition")
+  # by checking if the normalized title starts with the expected text.
+  def title_matches?(edition_title, expected_norm)
+    norm = normalize_text(edition_title)
+    norm == expected_norm || norm.start_with?("#{expected_norm} ")
   end
 
   def normalize_edition(item)
