@@ -159,6 +159,22 @@ RSpec.describe GoogleBooksService do
       results = service.search_works("test")
       expect(results.first[:key]).to eq("My Book|||Jane Doe")
     end
+
+    it "includes volume_ids from grouped volumes" do
+      stub_google_books(
+        params: { q: "meditations" },
+        body: {
+          "items" => [
+            volume(title: "Meditations", authors: ["Marcus Aurelius"], id: "vol_1"),
+            volume(title: "Meditations", authors: ["Marcus Aurelius"], id: "vol_2"),
+            volume(title: "Meditations", authors: ["Marcus Aurelius"], id: "vol_3")
+          ]
+        }
+      )
+
+      results = service.search_works("meditations")
+      expect(results.first[:volume_ids]).to contain_exactly("vol_1", "vol_2", "vol_3")
+    end
   end
 
   describe "#fetch_editions" do
@@ -332,6 +348,88 @@ RSpec.describe GoogleBooksService do
 
       editions = service.fetch_editions("Test|||Author")
       expect(editions.first[:cover_url]).to start_with("https://")
+    end
+
+    context "with seed volume IDs" do
+      def stub_volume_by_id(id:, title:, **opts)
+        stub_request(:get, "#{api_url}/#{id}")
+          .to_return(
+            status: 200,
+            body: volume(title: title, id: id, **opts).to_json,
+            headers: { "Content-Type" => "application/json" }
+          )
+      end
+
+      it "fetches seed volumes by ID and includes them in results" do
+        stub_volume_by_id(id: "seed_1", title: "Nature and Selected Essays", pages: 300, isbn_13: "9781111111111")
+
+        # Keyword search returns different results
+        stub_google_books(
+          params: { q: "intitle:Nature and Selected Essays+inauthor:Emerson" },
+          body: {
+            "items" => [
+              volume(title: "Nature and Selected Essays", publisher: "Createspace", pages: 200, id: "other_1")
+            ]
+          }
+        )
+
+        editions = service.fetch_editions("Nature and Selected Essays|||Emerson", seed_volume_ids: ["seed_1"])
+
+        keys = editions.map { |e| e[:key] }
+        expect(keys).to include("seed_1")
+        expect(keys).to include("other_1")
+      end
+
+      it "deduplicates seed volumes that also appear in search results" do
+        stub_volume_by_id(id: "vol_1", title: "Test", pages: 256, isbn_13: "9781111111111")
+
+        stub_google_books(
+          params: { q: "intitle:Test+inauthor:Author" },
+          body: {
+            "items" => [
+              volume(title: "Test", pages: 256, isbn_13: "9781111111111", id: "vol_1"),
+              volume(title: "Test", pages: 192, isbn_13: "9782222222222", id: "vol_2")
+            ]
+          }
+        )
+
+        editions = service.fetch_editions("Test|||Author", seed_volume_ids: ["vol_1"])
+
+        keys = editions.map { |e| e[:key] }
+        expect(keys.count("vol_1")).to eq(1)
+        expect(keys).to include("vol_2")
+      end
+
+      it "still works when seed volume fetch fails" do
+        stub_request(:get, "#{api_url}/bad_id")
+          .to_return(status: 404, body: "Not found")
+
+        stub_google_books(
+          params: { q: "intitle:Test+inauthor:Author" },
+          body: {
+            "items" => [volume(title: "Test", pages: 100, id: "v1")]
+          }
+        )
+
+        editions = service.fetch_editions("Test|||Author", seed_volume_ids: ["bad_id"])
+        expect(editions.length).to eq(1)
+        expect(editions.first[:key]).to eq("v1")
+      end
+
+      it "applies title filtering to seed volumes" do
+        stub_volume_by_id(id: "wrong_title", title: "Completely Different Book", pages: 300)
+
+        stub_google_books(
+          params: { q: "intitle:Test+inauthor:Author" },
+          body: { "items" => [volume(title: "Test", pages: 100, id: "v1")] }
+        )
+
+        editions = service.fetch_editions("Test|||Author", seed_volume_ids: ["wrong_title"])
+
+        keys = editions.map { |e| e[:key] }
+        expect(keys).not_to include("wrong_title")
+        expect(keys).to include("v1")
+      end
     end
   end
 end

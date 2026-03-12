@@ -33,15 +33,19 @@ class GoogleBooksService
 
   # Fetch editions for a work (step 2).
   # work_key is "title|||author" — searches Google Books with intitle+inauthor.
-  # Results are filtered to only include editions whose normalized title matches
-  # the work, so broad keyword searches don't return unrelated books.
-  def fetch_editions(work_key)
+  # seed_volume_ids are Google Books volume IDs from step 1 that are fetched
+  # directly by ID and guaranteed to appear in results, solving the problem
+  # where the keyword re-search returns different volumes than step 1 found.
+  def fetch_editions(work_key, seed_volume_ids: [])
     return [] if work_key.blank?
 
     title, author = work_key.split("|||", 2)
     return [] if title.blank?
 
     expected_norm = normalize_text(title)
+
+    # Fetch seed volumes by ID first — these are guaranteed to appear
+    seed_items = fetch_volumes_by_id(seed_volume_ids)
 
     parts = ["intitle:#{title}"]
     parts << "inauthor:#{author}" if author.present?
@@ -70,8 +74,16 @@ class GoogleBooksService
       start_index += batch_size
     end
 
+    # Merge seed volumes with search results, seeds first
+    seen_ids = Set.new
+    merged_items = []
+    (seed_items + all_items).each do |item|
+      id = item["id"]
+      merged_items << item if id.blank? || seen_ids.add?(id)
+    end
+
     seen_isbns = Set.new
-    all_items
+    merged_items
       .map { |item| normalize_edition(item) }
       .compact
       .select { |e| title_matches?(e[:title], expected_norm) }
@@ -83,6 +95,39 @@ class GoogleBooksService
   end
 
   private
+
+  # Fetch specific volumes by their Google Books IDs.
+  # Returns raw API item hashes, silently skipping any that fail.
+  def fetch_volumes_by_id(volume_ids)
+    return [] if volume_ids.blank?
+
+    volume_ids.filter_map do |vol_id|
+      get_volume(vol_id)
+    rescue ApiError, Net::OpenTimeout, Net::ReadTimeout, JSON::ParserError, Errno::ECONNREFUSED => e
+      Rails.logger.warn("GoogleBooks: failed to fetch volume #{vol_id}: #{e.message}")
+      nil
+    end
+  end
+
+  def get_volume(volume_id)
+    uri = URI("#{BASE_URL}/#{volume_id}")
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.open_timeout = TIMEOUT
+    http.read_timeout = TIMEOUT
+
+    request = Net::HTTP::Get.new(uri)
+    request["Accept"] = "application/json"
+
+    response = http.request(request)
+
+    unless response.is_a?(Net::HTTPSuccess)
+      raise ApiError, "HTTP #{response.code}: #{response.message}"
+    end
+
+    JSON.parse(response.body)
+  end
 
   def build_qualified_query(query, search_type)
     case search_type&.to_s
@@ -131,6 +176,7 @@ class GoogleBooksService
 
       if groups[key]
         groups[key][:count] += 1
+        groups[key][:volume_ids] << item["id"] if item["id"].present?
         # Keep the best cover (first one that has it)
         groups[key][:cover_url] ||= extract_cover_url(info)
       else
@@ -141,6 +187,7 @@ class GoogleBooksService
           first_publish_year: extract_year(info["publishedDate"]),
           edition_count: 1,
           cover_url: extract_cover_url(info),
+          volume_ids: [item["id"]].compact,
           count: 1
         }
       end

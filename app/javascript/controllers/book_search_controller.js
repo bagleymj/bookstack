@@ -295,7 +295,12 @@ export default class extends Controller {
     this.showEditionsLoading(work)
 
     try {
-      const response = await fetch(`${this.editionsUrlValue}?work_key=${encodeURIComponent(work.key)}`, {
+      let editionsUrl = `${this.editionsUrlValue}?work_key=${encodeURIComponent(work.key)}`
+      if (work.volume_ids && work.volume_ids.length > 0) {
+        const idsParam = work.volume_ids.map(id => `volume_ids[]=${encodeURIComponent(id)}`).join("&")
+        editionsUrl += `&${idsParam}`
+      }
+      const response = await fetch(editionsUrl, {
         headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" },
         credentials: "same-origin",
         signal: this.abortController.signal

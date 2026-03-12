@@ -25,8 +25,10 @@ module Api
           return
         end
 
+        seed_volume_ids = Array(params[:volume_ids]).map(&:strip).reject(&:blank?)
+
         service = GoogleBooksService.new
-        editions = service.fetch_editions(work_key)
+        editions = service.fetch_editions(work_key, seed_volume_ids: seed_volume_ids)
 
         # Overlay local edition cache data (recommended page ranges)
         editions = EditionCacheService.new.overlay_local_data(editions)

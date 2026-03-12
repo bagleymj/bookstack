@@ -192,6 +192,32 @@ RSpec.describe "API V1 BookSearch", type: :request do
       expect(editions.first["in_collection"]).to be false
     end
 
+    it "passes seed volume IDs to the service" do
+      stub_request(:get, "#{api_url}/seed_vol_1")
+        .to_return(status: 200, body: google_volume(
+          title: "Meditations", pages: 300, isbn_13: "9783333333333", id: "seed_vol_1"
+        ).to_json, headers: { "Content-Type" => "application/json" })
+
+      stub_request(:get, api_url)
+        .with(query: hash_including(q: "intitle:Meditations+inauthor:Marcus Aurelius"))
+        .to_return(status: 200, body: {
+          "items" => [
+            google_volume(title: "Meditations", isbn_13: "9780140449334", pages: 256, id: "v1")
+          ]
+        }.to_json, headers: { "Content-Type" => "application/json" })
+
+      get "/api/v1/book_search/editions", params: {
+        work_key: "Meditations|||Marcus Aurelius",
+        volume_ids: ["seed_vol_1"]
+      }
+
+      expect(response).to have_http_status(:ok)
+      editions = json_response["editions"]
+      keys = editions.map { |e| e["key"] }
+      expect(keys).to include("seed_vol_1")
+      expect(keys).to include("v1")
+    end
+
     it "requires authentication" do
       sign_out user
       get "/api/v1/book_search/editions", params: { work_key: "Test|||Author" }
