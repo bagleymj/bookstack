@@ -805,9 +805,10 @@ class ReadingListScheduler
   end
 
   def regenerate_quotas_from_today!(goal)
-    goal.daily_quotas.where("date >= ?", Date.current).delete_all
+    cutoff = quota_modification_cutoff
+    goal.daily_quotas.where("date >= ?", cutoff).delete_all
     goal.daily_quotas.reload
-    ProfileAwareQuotaCalculator.new(goal, @user).generate_quotas!(from_date: Date.current)
+    ProfileAwareQuotaCalculator.new(goal, @user).generate_quotas!(from_date: cutoff)
   end
 
   # ─── Timeline & Goals ──────────────────────────────────────────
@@ -827,6 +828,20 @@ class ReadingListScheduler
         []
       end
     end
+  end
+
+  # If the user has already read today, don't touch today's quotas.
+  # Redistribution starts tomorrow; otherwise it starts today.
+  def quota_modification_cutoff
+    user_has_sessions_today? ? Date.current + 1 : Date.current
+  end
+
+  def user_has_sessions_today?
+    @user_has_sessions_today ||= ReadingSession
+      .where(user: @user)
+      .where.not(ended_at: nil)
+      .where("started_at >= ?", Date.current.beginning_of_day)
+      .exists?
   end
 
   def user_has_sessions_this_week?

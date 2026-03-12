@@ -219,9 +219,10 @@ class ReadingGoal < ApplicationRecord
 
   def reschedule!(new_start, new_end)
     update!(started_on: new_start, target_completion_date: new_end)
-    daily_quotas.destroy_all
+    cutoff = quota_modification_cutoff
+    daily_quotas.where("date >= ?", cutoff).destroy_all
     daily_quotas.reload  # Clear association cache
-    QuotaCalculator.new(self).generate_quotas!
+    QuotaCalculator.new(self).generate_quotas!(from_date: cutoff)
   end
 
   # Postpone remaining work while preserving past activity
@@ -239,8 +240,10 @@ class ReadingGoal < ApplicationRecord
       anchor_date = session_bounds[:earliest]
     end
 
-    # Delete only future quotas (from today onward)
-    daily_quotas.where("date >= ?", Date.current).destroy_all
+    # Delete only quotas from the modification cutoff onward (protects today if read)
+    cutoff = quota_modification_cutoff
+    effective_start = [new_future_start, cutoff].max
+    daily_quotas.where("date >= ?", cutoff).destroy_all
 
     # Update the goal's date range
     update!(
@@ -250,7 +253,7 @@ class ReadingGoal < ApplicationRecord
 
     # Generate new quotas only for the future portion
     daily_quotas.reload
-    QuotaCalculator.new(self).generate_quotas!(from_date: new_future_start)
+    QuotaCalculator.new(self).generate_quotas!(from_date: effective_start)
   end
 
   def as_pipeline_data
@@ -404,7 +407,20 @@ class ReadingGoal < ApplicationRecord
     end
   end
 
+  # If the user has read today, today's quotas are committed — start modifications tomorrow.
+  def quota_modification_cutoff
+    user_has_sessions_today? ? Date.current + 1 : Date.current
+  end
+
   private
+
+  def user_has_sessions_today?
+    ReadingSession
+      .where(user: user)
+      .where.not(ended_at: nil)
+      .where("started_at >= ?", Date.current.beginning_of_day)
+      .exists?
+  end
 
   def queued_pipeline_data
     {

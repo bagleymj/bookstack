@@ -96,6 +96,47 @@ RSpec.describe DailyReflow do
     end
   end
 
+  # ─── Today-Quota Protection ─────────────────────────────────
+
+  describe "today-quota protection" do
+    context "when user has completed a reading session today" do
+      before do
+        create(:reading_session, :completed, user: user, book: book,
+               started_at: Time.current - 30.minutes, ended_at: Time.current)
+      end
+
+      it "does not modify today's quota during redistribute" do
+        original_today = goal.daily_quotas.find_by(date: Date.current)
+        original_target = original_today.target_pages
+
+        DailyReflow.new(user).reflow!
+
+        expect(original_today.reload.target_pages).to eq(original_target)
+      end
+
+      it "redistributes remaining pages across tomorrow onward" do
+        book.update!(current_page: 50) # 50 remaining
+        today_target = goal.daily_quotas.find_by(date: Date.current).target_pages
+
+        DailyReflow.new(user).reflow!
+
+        future_quotas = goal.daily_quotas.where("date > ?", Date.current)
+        expect(future_quotas.sum(:target_pages)).to eq(50 - today_target)
+      end
+    end
+
+    context "when user has no reading session today" do
+      it "includes today's quota in redistribution" do
+        book.update!(current_page: 50) # 50 remaining
+
+        DailyReflow.new(user).reflow!
+
+        future_quotas = goal.daily_quotas.where("date >= ?", Date.current)
+        expect(future_quotas.sum(:target_pages)).to eq(50)
+      end
+    end
+  end
+
   # ─── Scheduler Integration ───────────────────────────────────
 
   describe "scheduler integration in heijunka mode" do
