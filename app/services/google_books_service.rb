@@ -39,8 +39,8 @@ class GoogleBooksService
     title, author = work_key.split("|||", 2)
     return [] if title.blank?
 
-    parts = ["intitle:#{title}"]
-    parts << "inauthor:#{author}" if author.present?
+    parts = ["intitle:\"#{title}\""]
+    parts << "inauthor:\"#{author}\"" if author.present?
     query = parts.join("+")
 
     all_items = []

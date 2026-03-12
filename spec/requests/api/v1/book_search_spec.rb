@@ -98,7 +98,7 @@ RSpec.describe "API V1 BookSearch", type: :request do
   describe "GET /api/v1/book_search/editions" do
     it "returns editions for a work" do
       stub_request(:get, api_url)
-        .with(query: hash_including(q: "intitle:Meditations+inauthor:Marcus Aurelius"))
+        .with(query: hash_including(q: 'intitle:"Meditations"+inauthor:"Marcus Aurelius"'))
         .to_return(status: 200, body: {
           "items" => [
             google_volume(
@@ -138,7 +138,7 @@ RSpec.describe "API V1 BookSearch", type: :request do
       create(:book, user: user, isbn: "9780140449334")
 
       stub_request(:get, api_url)
-        .with(query: hash_including(q: "intitle:Meditations+inauthor:Marcus Aurelius"))
+        .with(query: hash_including(q: 'intitle:"Meditations"+inauthor:"Marcus Aurelius"'))
         .to_return(status: 200, body: {
           "items" => [
             google_volume(title: "Meditations", isbn_13: "9780140449334", pages: 256, id: "v1"),
@@ -160,7 +160,7 @@ RSpec.describe "API V1 BookSearch", type: :request do
       create(:edition, isbn: "9780140449334", recommended_first_page: 5, recommended_last_page: 240)
 
       stub_request(:get, api_url)
-        .with(query: hash_including(q: "intitle:Test+inauthor:Author"))
+        .with(query: hash_including(q: 'intitle:"Test"+inauthor:"Author"'))
         .to_return(status: 200, body: {
           "items" => [
             google_volume(title: "Test", isbn_13: "9780140449334", pages: 256, id: "v1")
@@ -178,7 +178,7 @@ RSpec.describe "API V1 BookSearch", type: :request do
 
     it "does not mark editions without isbn as in_collection" do
       stub_request(:get, api_url)
-        .with(query: hash_including(q: "intitle:Test+inauthor:Author"))
+        .with(query: hash_including(q: 'intitle:"Test"+inauthor:"Author"'))
         .to_return(status: 200, body: {
           "items" => [
             google_volume(title: "Test", pages: 256, id: "v1")

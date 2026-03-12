@@ -164,7 +164,7 @@ RSpec.describe GoogleBooksService do
   describe "#fetch_editions" do
     it "returns normalized editions for a work key" do
       stub_google_books(
-        params: { q: "intitle:Meditations+inauthor:Marcus Aurelius" },
+        params: { q: 'intitle:"Meditations"+inauthor:"Marcus Aurelius"' },
         body: {
           "items" => [
             volume(
@@ -191,7 +191,7 @@ RSpec.describe GoogleBooksService do
 
     it "deduplicates editions by ISBN" do
       stub_google_books(
-        params: { q: "intitle:Test+inauthor:Author" },
+        params: { q: 'intitle:"Test"+inauthor:"Author"' },
         body: {
           "items" => [
             volume(title: "Test", isbn_13: "9780140449334", pages: 256, id: "v1"),
@@ -210,7 +210,7 @@ RSpec.describe GoogleBooksService do
 
     it "prefers ISBN_13 over ISBN_10" do
       stub_google_books(
-        params: { q: "intitle:Test+inauthor:Author" },
+        params: { q: 'intitle:"Test"+inauthor:"Author"' },
         body: {
           "items" => [
             volume(title: "Test", isbn_13: "9780140449334", isbn_10: "0140449334", pages: 100)
@@ -224,7 +224,7 @@ RSpec.describe GoogleBooksService do
 
     it "falls back to ISBN_10 when ISBN_13 is missing" do
       stub_google_books(
-        params: { q: "intitle:Test+inauthor:Author" },
+        params: { q: 'intitle:"Test"+inauthor:"Author"' },
         body: {
           "items" => [volume(title: "Test", isbn_10: "0199573204", pages: 100)]
         }
@@ -236,7 +236,7 @@ RSpec.describe GoogleBooksService do
 
     it "includes editions even when missing pages and isbn" do
       stub_google_books(
-        params: { q: "intitle:Test+inauthor:Author" },
+        params: { q: 'intitle:"Test"+inauthor:"Author"' },
         body: {
           "items" => [
             volume(title: "Has Both", isbn_13: "9780140449334", pages: 256),
@@ -255,7 +255,7 @@ RSpec.describe GoogleBooksService do
 
     it "ranks editions with more metadata higher" do
       stub_google_books(
-        params: { q: "intitle:Test+inauthor:Author" },
+        params: { q: 'intitle:"Test"+inauthor:"Author"' },
         body: {
           "items" => [
             volume(title: "Sparse", isbn_10: "1111111111"),
@@ -276,14 +276,14 @@ RSpec.describe GoogleBooksService do
     end
 
     it "returns empty array on API error" do
-      stub_google_books(params: { q: "intitle:Test+inauthor:Author" }, status: 503, body: "error")
+      stub_google_books(params: { q: 'intitle:"Test"+inauthor:"Author"' }, status: 503, body: "error")
 
       expect(service.fetch_editions("Test|||Author")).to eq([])
     end
 
     it "returns empty array on timeout" do
       stub_request(:get, api_url)
-        .with(query: hash_including(q: "intitle:Test+inauthor:Author"))
+        .with(query: hash_including(q: 'intitle:"Test"+inauthor:"Author"'))
         .to_timeout
 
       expect(service.fetch_editions("Test|||Author")).to eq([])
@@ -291,7 +291,7 @@ RSpec.describe GoogleBooksService do
 
     it "works with title-only work key (no author)" do
       stub_google_books(
-        params: { q: "intitle:Meditations" },
+        params: { q: 'intitle:"Meditations"' },
         body: { "items" => [volume(title: "Meditations", pages: 200)] }
       )
 
@@ -302,7 +302,7 @@ RSpec.describe GoogleBooksService do
 
     it "forces https on cover URLs" do
       stub_google_books(
-        params: { q: "intitle:Test+inauthor:Author" },
+        params: { q: 'intitle:"Test"+inauthor:"Author"' },
         body: {
           "items" => [
             volume(title: "Test", pages: 100, cover: "http://books.google.com/thumb.jpg")
