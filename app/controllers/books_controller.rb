@@ -5,6 +5,14 @@ class BooksController < ApplicationController
   def index
     @books = current_user.books.order(updated_at: :desc)
     @books = @books.by_status(params[:status]) if params[:status].present?
+
+    # Books eligible for quick-add to reading list (not completed, not already on list)
+    schedulable_ids = current_user.reading_goals
+                                  .where(status: [:active, :queued])
+                                  .pluck(:book_id)
+    @books_on_list = Set.new(schedulable_ids)
+    available = @books.reject { |b| b.completed? || @books_on_list.include?(b.id) }
+    @book_impacts = ScheduleImpactCalculator.new(current_user).impacts_for(available)
   end
 
   def show

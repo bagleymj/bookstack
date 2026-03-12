@@ -18,6 +18,7 @@ class PipelineController < ApplicationController
                                                                .where(status: [:active, :queued])
                                                                .select(:book_id))
                                    .order(:title)
+    @book_impacts = ScheduleImpactCalculator.new(current_user).impacts_for(@available_books)
 
     # Warn about unowned books starting next week
     next_monday = Date.current.beginning_of_week(:monday) + 7

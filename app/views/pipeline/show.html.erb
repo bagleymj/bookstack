@@ -5,34 +5,6 @@
         Reading List
       </h2>
     </div>
-    <div class="mt-4 flex md:ml-4 md:mt-0">
-      <% if @available_books.any? %>
-        <div class="relative" data-controller="reading-list-add">
-          <button type="button" data-action="click->reading-list-add#toggle" class="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-            </svg>
-            Add Book
-          </button>
-          <div data-reading-list-add-target="dropdown" class="hidden absolute right-0 z-10 mt-2 w-72 rounded-lg bg-white shadow-lg ring-1 ring-black/5">
-            <div class="py-1 max-h-64 overflow-y-auto">
-              <% @available_books.each do |book| %>
-                <button type="button"
-                        data-action="click->reading-list-add#addBook"
-                        data-book-id="<%= book.id %>"
-                        class="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700">
-                  <div class="font-medium truncate"><%= book.title %></div>
-                  <% if book.author.present? %>
-                    <div class="text-xs text-gray-500"><%= book.author %></div>
-                  <% end %>
-                  <div class="text-xs text-gray-400"><%= book.total_pages %> pages &bull; ~<%= book.formatted_estimated_time %></div>
-                </button>
-              <% end %>
-            </div>
-          </div>
-        </div>
-      <% end %>
-    </div>
   </div>
 
   <!-- Unowned books warning -->
@@ -150,6 +122,56 @@
     </div>
   <% end %>
 
+  <!-- Add to Reading List -->
+  <% if @available_books.any? %>
+    <div>
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+        Library
+        <span class="text-gray-400 font-normal">&mdash; click + to schedule</span>
+      </h3>
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <% @available_books.each do |book| %>
+          <div class="rounded-lg bg-white shadow p-4 flex items-center gap-3"
+               data-controller="quick-add" data-quick-add-book-id-value="<%= book.id %>">
+            <% if book.cover_image_url.present? %>
+              <img src="<%= book.cover_image_url %>" alt="" class="w-10 h-14 object-cover rounded shadow-sm flex-shrink-0">
+            <% else %>
+              <div class="w-10 h-14 bg-gray-200 rounded flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                </svg>
+              </div>
+            <% end %>
+            <div class="flex-1 min-w-0">
+              <div class="font-medium text-gray-900 text-sm truncate"><%= book.title %></div>
+              <% if book.author.present? %>
+                <div class="text-xs text-gray-500 truncate"><%= book.author %></div>
+              <% end %>
+              <div class="text-xs text-gray-400 mt-0.5"><%= book.total_pages %> pages</div>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <% delta = @book_impacts[book.id] || 0 %>
+              <% if delta != 0 %>
+                <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
+                  <%= delta > 0 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700' %>">
+                  <%= delta > 0 ? "+#{delta}" : delta %>m
+                </span>
+              <% end %>
+              <button type="button"
+                      data-action="click->quick-add#add"
+                      data-quick-add-target="button"
+                      class="p-1.5 rounded-full text-indigo-600 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+
   <!-- Up Next (draggable) -->
   <div data-controller="reading-list" data-reading-list-url-value="<%= reorder_api_v1_reading_list_index_path %>">
     <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
@@ -231,7 +253,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
         </svg>
         <p class="mt-2 text-sm text-gray-500">No books in your reading list yet.</p>
-        <p class="text-xs text-gray-400 mt-1">Use the "Add Book" button above to queue books for auto-scheduling.</p>
+        <p class="text-xs text-gray-400 mt-1">Add books from your library above to get started.</p>
       </div>
     <% end %>
   </div>
@@ -251,7 +273,7 @@
     </div>
   <% end %>
 
-  <% if @currently_reading.empty? && @up_next.empty? && @completed_goals.empty? %>
+  <% if @currently_reading.empty? && @up_next.empty? && @completed_goals.empty? && @available_books.empty? %>
     <div class="text-center py-12 bg-white rounded-lg shadow">
       <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
