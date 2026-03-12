@@ -1,5 +1,6 @@
-# Calculates the change in derived daily target when adding a book to the reading list.
-# Reuses the scheduler's Phase 2 math without running the full scheduling pipeline.
+# Calculates the change in daily reading load when adding a book to the reading list.
+# Measures actual load impact: how many more (or fewer) minutes per day the user
+# needs to read, amortized over the remaining pace period.
 class ScheduleImpactCalculator
   def initialize(user)
     @user = user
@@ -11,11 +12,11 @@ class ScheduleImpactCalculator
     return {} unless throughput_pace?
 
     measure_actuals!
-    current_target = compute_daily_target(current_pace_window) || 0
+    current_load = compute_daily_load(current_pace_window)
 
     books.each_with_object({}) do |book, result|
-      projected_target = compute_daily_target(pace_window_with(book)) || 0
-      result[book.id] = (projected_target - current_target).round
+      projected_load = compute_daily_load(pace_window_with(book))
+      result[book.id] = (projected_load - current_load).round
     end
   end
 
@@ -36,19 +37,23 @@ class ScheduleImpactCalculator
                              .count
   end
 
-  def compute_daily_target(window)
-    books_remaining = [annual_pace - @actual_completed, 0].max
-    return nil if books_remaining <= 0 || window.empty?
+  # Total reading time in the pace window divided by remaining reading days.
+  # This measures the actual daily load commitment, not the pace-derived target.
+  # When adding a book that doesn't displace another, the load always increases
+  # by book_minutes / reading_days. When the window is full and a book is
+  # displaced, the delta reflects the difference.
+  def compute_daily_load(window)
+    return 0.0 if window.empty?
 
-    avg_minutes = window.sum { |book| full_book_minutes(book) }.to_f / window.size
-    raw_target = (books_remaining * avg_minutes) / @days_remaining
+    total_minutes = window.sum { |book| full_book_minutes(book) }.to_f
+    reading_days = if @user.skip?
+                     @days_remaining * 5.0 / 7
+                   else
+                     @days_remaining.to_f
+                   end
+    return 0.0 if reading_days <= 0
 
-    # Apply weekend adjustment to match what the scheduler shows
-    if @user.skip?
-      raw_target * 7.0 / 5.0
-    else
-      raw_target
-    end
+    total_minutes / reading_days
   end
 
   def current_pace_window

@@ -387,9 +387,9 @@ class ReadingListScheduler
 
   # After all books are placed, check whether the last book in queue order
   # pushed its slot over the daily target. If so, promote it to progressively
-  # longer tiers until the overshoot is resolved or tiers are exhausted.
-  # This only affects the final book — earlier books benefit from subsequent
-  # placements filling remaining capacity, but the last book has nothing after it.
+  # longer tiers until the load drops to or below the target. The last book
+  # should break BELOW the target (as close as possible), never above — there
+  # are no subsequent placements to fill remaining capacity.
   def relax_last_placement!(placements, goals)
     return if placements.empty? || goals.empty?
 
@@ -416,12 +416,6 @@ class ReadingListScheduler
       remove_range_from_profiles(old_placement[:start], old_placement[:end], old_placement[:share])
 
       unless fits_concurrency?(new_end > old_placement[:end] ? (old_placement[:end] + 1) : slot_start, new_end)
-        add_range_to_profiles(old_placement[:start], old_placement[:end], old_placement[:share])
-        next
-      end
-
-      # Don't relax if it would drop load below the daily target
-      if would_undershoot?(old_placement[:start], old_placement[:end], new_share)
         add_range_to_profiles(old_placement[:start], old_placement[:end], old_placement[:share])
         next
       end

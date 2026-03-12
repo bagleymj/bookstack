@@ -643,9 +643,9 @@ RSpec.describe ReadingListScheduler do
       expect(goal.target_completion_date).to be_sunday
     end
 
-    it "does not relax last placement below daily target" do
-      # Place multiple books so the last one might get relaxed.
-      # The last book should not be stretched so far that it undershoots.
+    it "relaxes last placement to at-or-below target rather than above" do
+      # Place multiple books so the last one gets relaxed.
+      # The last book should break below the target rather than staying above.
       5.times { |i| create_queued_book(pages: 250, position: i + 1, title: "Book #{i}") }
       schedule!
 

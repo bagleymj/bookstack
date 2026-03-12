@@ -43,33 +43,43 @@ RSpec.describe ScheduleImpactCalculator do
         end
       end
 
-      it "shows positive delta for a longer/denser book" do
+      it "shows positive delta when adding a book to a below-capacity queue" do
+        book = create(:book, user: user, first_page: 1, last_page: 300, density: :average)
+        result = described_class.new(user).impacts_for([book])
+
+        expect(result[book.id]).to be > 0
+      end
+
+      it "shows larger delta for a longer/denser book" do
         dense_book = create(:book, user: user, first_page: 1, last_page: 800, density: :dense)
         result = described_class.new(user).impacts_for([dense_book])
 
         expect(result[dense_book.id]).to be > 0
       end
-
-      it "shows negative delta for a shorter/lighter book" do
-        light_book = create(:book, user: user, first_page: 1, last_page: 100, density: :light)
-        result = described_class.new(user).impacts_for([light_book])
-
-        expect(result[light_book.id]).to be < 0
-      end
     end
 
-    context "with no books on the reading list and completed backfill" do
+    context "with a full pace window including backfill" do
       before do
-        5.times do
-          create(:book, :completed, user: user, first_page: 1, last_page: 300)
+        # Set low pace so window is easy to fill
+        user.update!(reading_pace_type: "books_per_year", reading_pace_value: 5)
+
+        3.times do |i|
+          b = create(:book, user: user, first_page: 1, last_page: 300, density: :average)
+          create(:reading_goal, user: user, book: b, status: :queued,
+                 position: i + 1, auto_scheduled: true)
+        end
+
+        # Add 2 large completed books as backfill
+        2.times do
+          create(:book, :completed, user: user, first_page: 1, last_page: 800, density: :dense)
         end
       end
 
-      it "computes impact relative to completed book backfill" do
-        big_book = create(:book, user: user, first_page: 1, last_page: 600, density: :average)
-        result = described_class.new(user).impacts_for([big_book])
+      it "shows negative delta when a short book displaces a longer completion" do
+        short_book = create(:book, user: user, first_page: 1, last_page: 100, density: :light)
+        result = described_class.new(user).impacts_for([short_book])
 
-        expect(result[big_book.id]).to be_a(Integer)
+        expect(result[short_book.id]).to be < 0
       end
     end
 
