@@ -234,7 +234,7 @@ RSpec.describe GoogleBooksService do
       expect(editions.first[:isbn]).to eq("0199573204")
     end
 
-    it "filters out editions missing both pages and isbn" do
+    it "includes editions even when missing pages and isbn" do
       stub_google_books(
         params: { q: "intitle:Test+inauthor:Author" },
         body: {
@@ -250,8 +250,7 @@ RSpec.describe GoogleBooksService do
       editions = service.fetch_editions("Test|||Author")
 
       titles = editions.map { |e| e[:title] }
-      expect(titles).to include("Has Both", "Pages Only", "ISBN Only")
-      expect(titles).not_to include("Neither")
+      expect(titles).to include("Has Both", "Pages Only", "ISBN Only", "Neither")
     end
 
     it "ranks editions with more metadata higher" do

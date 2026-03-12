@@ -415,7 +415,8 @@ export default class extends Controller {
       this.resultsTarget.innerHTML = `
         ${this.renderEditionsHeader(work, false)}
         <div class="p-4 text-center text-gray-500">
-          <p>No editions found with sufficient data</p>
+          <p>No editions found</p>
+          <p class="text-xs mt-1">Try entering the details manually below</p>
         </div>
       `
       this.resultsTarget.classList.remove("hidden")

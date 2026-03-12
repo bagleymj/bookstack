@@ -159,9 +159,6 @@ class GoogleBooksService
     isbn = extract_isbn(info)
     pages = info["pageCount"]
 
-    # Filter out editions missing both pages AND isbn
-    return nil if pages.nil? && isbn.nil?
-
     {
       key: item["id"],
       title: title,
