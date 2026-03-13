@@ -25,14 +25,18 @@ The Nix shell provides all dependencies (Ruby, Node, PostgreSQL, etc.) via diren
 # Start development server (runs Rails server + Tailwind CSS watcher)
 bin/dev
 
-# Run all tests
-bundle exec rspec
+# Run all tests (MUST use bin/rspec — direct bundle exec rspec is BLOCKED)
+bin/rspec
 
 # Run a single test file
-bundle exec rspec spec/models/book_spec.rb
+bin/rspec spec/models/book_spec.rb
 
 # Run a specific test by line number
-bundle exec rspec spec/models/book_spec.rb:42
+bin/rspec spec/models/book_spec.rb:42
+
+# WRONG — these will be blocked by the rails_helper guard
+bundle exec rspec             # BLOCKED
+bundle exec rspec spec/...    # BLOCKED
 
 # Database commands (MUST use bin/safe_db for destructive operations)
 bin/safe_db migrate           # auto-backs-up, then runs db:migrate
@@ -100,12 +104,12 @@ before making any changes to scheduling logic.
 
 Uses RSpec with FactoryBot. Factories are in `spec/factories/`. Run specific model specs with:
 ```bash
-bundle exec rspec spec/models/
+bin/rspec spec/models/
 ```
 
 ## Database Safety
 
-**CRITICAL: The dev database has been wiped TWICE by running db commands without backups. Mechanical safeguards are now enforced.**
+**CRITICAL: The dev database has been wiped FIVE times. Mechanical safeguards are now enforced at multiple levels.**
 
 ### Enforced by `bin/rails` guard
 
@@ -125,9 +129,29 @@ bundle exec rails db:migrate  # bypasses guard — NEVER DO THIS
 
 **NEVER bypass the guard** by calling `bundle exec rails` directly, running raw SQL that drops/truncates, or setting `BOOKSTACK_DB_BACKUP_DONE=1` manually.
 
+### Enforced by `bin/rspec` guard
+
+`rails_helper.rb` **blocks** rspec unless `BOOKSTACK_RSPEC_BACKUP_DONE=1` is set. Only `bin/rspec` sets this — after taking an automatic backup. `maintain_test_schema!` has been **removed** because it was the root cause of dev database wipes (it runs `db:test:load_schema` which has repeatedly corrupted the dev database).
+
+```bash
+# CORRECT
+bin/rspec
+bin/rspec spec/models/book_spec.rb
+bin/rspec spec/models/book_spec.rb:42
+
+# WRONG — blocked by rails_helper guard
+bundle exec rspec            # BLOCKED
+bundle exec rspec spec/...   # BLOCKED
+```
+
+If tests fail with schema errors after a migration, manually sync the test schema:
+```bash
+BOOKSTACK_DB_BACKUP_DONE=1 RAILS_ENV=test bin/rails db:schema:load
+```
+
 ### Additional rules
 
-- **NEVER run `RAILS_ENV=test bin/rails db:schema:load`** — it has wiped the dev database before
+- **NEVER run `RAILS_ENV=test bin/rails db:schema:load`** without backing up first
 - Any raw SQL with `DELETE`, `TRUNCATE`, or `DROP` requires `bin/db_backup` first AND user confirmation
 - `destroy_all`, `delete_all` on models requires user confirmation
 - Any migration that drops tables or columns requires user confirmation
@@ -173,7 +197,7 @@ This creates `~/dev/bookstack-<short-description>/` checked out to `claude/<shor
 
 - Do all work inside your worktree directory — it is a full working copy
 - Commit early and often on your branch
-- Run tests from within the worktree: `bundle exec rspec`
+- Run tests from within the worktree: `bin/rspec`
 - Do NOT run `git checkout` — ever. You are on the right branch already.
 
 ### Merging and cleanup (run from the main repo)

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Safe rspec wrapper — auto-backs-up the dev database before every test run.
+#
+# Usage: bin/rspec                    (runs all specs)
+#        bin/rspec spec/models/       (runs model specs)
+#        bin/rspec spec/foo_spec.rb:42 (runs one example)
+#
+# This exists because maintain_test_schema! and other RSpec boot-time
+# operations have wiped the dev database MULTIPLE times. This wrapper
+# guarantees a backup exists before any test code executes.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
+cd "$REPO_ROOT"
+
+echo "==> Auto-backing up dev database before running tests..."
+"$SCRIPT_DIR/db_backup"
+echo ""
+
+echo "==> Running: bundle exec rspec $*"
+export BOOKSTACK_RSPEC_BACKUP_DONE=1
+exec bundle exec rspec "$@"
