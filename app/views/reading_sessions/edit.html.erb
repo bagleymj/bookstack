@@ -1,0 +1,75 @@
+<div class="mx-auto max-w-2xl">
+  <div class="md:flex md:items-center md:justify-between">
+    <div class="min-w-0 flex-1">
+      <h2 class="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight">
+        Edit Reading Session
+      </h2>
+      <p class="mt-1 text-lg text-gray-500"><%= @reading_session.book.title %></p>
+    </div>
+    <div class="mt-4 flex gap-2 md:ml-4 md:mt-0">
+      <%= link_to "Cancel", @reading_session, class: "rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50" %>
+    </div>
+  </div>
+
+  <div class="mt-8 rounded-lg bg-white shadow">
+    <div class="px-4 py-5 sm:p-6">
+      <%= form_with model: @reading_session, class: "space-y-6" do |form| %>
+        <% if @reading_session.errors.any? %>
+          <div class="rounded-md bg-red-50 p-4">
+            <div class="flex">
+              <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" />
+              </svg>
+              <div class="ml-3">
+                <h3 class="text-sm font-medium text-red-800">Please fix the following:</h3>
+                <ul class="mt-2 list-disc pl-5 text-sm text-red-700">
+                  <% @reading_session.errors.full_messages.each do |message| %>
+                    <li><%= message %></li>
+                  <% end %>
+                </ul>
+              </div>
+            </div>
+          </div>
+        <% end %>
+
+        <div class="grid grid-cols-2 gap-6">
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Start Page</label>
+            <div class="mt-1">
+              <%= form.number_field :start_page,
+                  min: @reading_session.book.first_page,
+                  max: @reading_session.book.last_page,
+                  class: "block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-lg" %>
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">End Page</label>
+            <div class="mt-1">
+              <%= form.number_field :end_page,
+                  min: @reading_session.book.first_page,
+                  max: @reading_session.book.last_page,
+                  class: "block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-lg" %>
+            </div>
+            <p class="mt-1 text-xs text-gray-500">Pages <%= @reading_session.book.first_page %> - <%= @reading_session.book.last_page %></p>
+          </div>
+        </div>
+
+        <% unless @reading_session.untracked? %>
+          <div class="rounded-md bg-gray-50 p-4">
+            <p class="text-sm text-gray-600">
+              <span class="font-medium">Duration:</span> <%= @reading_session.formatted_duration %>
+              <span class="text-gray-400 mx-2">&middot;</span>
+              <span class="font-medium">WPM:</span> <%= @reading_session.words_per_minute ? "#{@reading_session.words_per_minute.round}" : "-" %>
+            </p>
+            <p class="mt-1 text-xs text-gray-500">Duration and WPM will be recalculated based on page changes.</p>
+          </div>
+        <% end %>
+
+        <div class="flex justify-end gap-3 pt-4 border-t border-gray-200">
+          <%= link_to "Cancel", @reading_session, class: "rounded-md bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50" %>
+          <%= form.submit "Save Changes", class: "rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 cursor-pointer" %>
+        </div>
+      <% end %>
+    </div>
+  </div>
+</div>

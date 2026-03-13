@@ -54,12 +54,33 @@
           <% end %>
         </dl>
 
-        <!-- Stop + Completion Form -->
+        <!-- Pause / Stop + Completion Form -->
         <div class="mt-8">
-          <div class="flex justify-center" data-active-session-target="stopButton">
+          <!-- Paused indicator -->
+          <div data-active-session-target="pauseBadge" class="hidden mb-4">
+            <div class="flex justify-center">
+              <span class="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800">
+                <svg class="mr-1.5 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                Paused
+              </span>
+            </div>
+          </div>
+
+          <div class="flex justify-center gap-3" data-active-session-target="stopButton">
+            <button type="button"
+                    data-action="active-session#togglePause"
+                    data-active-session-target="pauseButton"
+                    class="inline-flex items-center rounded-md bg-amber-500 px-5 py-3 text-lg font-semibold text-white shadow-sm hover:bg-amber-400 transition-colors">
+              <svg class="-ml-0.5 mr-2 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-active-session-target="pauseIcon">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <span data-active-session-target="pauseText">Pause</span>
+            </button>
             <button type="button"
                     data-action="active-session#stop"
-                    class="inline-flex items-center rounded-md bg-red-600 px-6 py-3 text-lg font-semibold text-white shadow-sm hover:bg-red-500 transition-colors">
+                    class="inline-flex items-center rounded-md bg-red-600 px-5 py-3 text-lg font-semibold text-white shadow-sm hover:bg-red-500 transition-colors">
               <svg class="-ml-0.5 mr-2 h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
                 <rect x="6" y="6" width="12" height="12" rx="1"/>
               </svg>
@@ -143,6 +164,12 @@
 
     <!-- Quick Actions -->
     <div class="mt-6 flex justify-center gap-4">
+      <%= link_to edit_reading_session_path(@reading_session), class: "inline-flex items-center rounded-md bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50" do %>
+        <svg class="-ml-0.5 mr-1.5 h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+        </svg>
+        Edit Session
+      <% end %>
       <%= button_to start_book_reading_sessions_path(@reading_session.book), method: :post, class: "inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500" do %>
         <svg class="-ml-0.5 mr-1.5 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>

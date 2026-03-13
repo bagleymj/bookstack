@@ -81,10 +81,19 @@ class ReadingSessionsController < ApplicationController
   end
 
   def edit
+    redirect_to @reading_session, alert: "Cannot edit an in-progress session." if @reading_session.in_progress?
   end
 
   def update
+    old_end_page = @reading_session.end_page
+
     if @reading_session.update(reading_session_params)
+      # If end_page changed on a completed session, update book progress and quotas
+      if @reading_session.completed? && @reading_session.end_page != old_end_page
+        @reading_session.book.update_progress!(@reading_session.end_page)
+        DensityAnalyzer.new(@reading_session.book).analyze!
+      end
+
       redirect_to @reading_session, notice: "Reading session updated."
     else
       render :edit, status: :unprocessable_entity
