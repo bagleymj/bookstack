@@ -48,7 +48,9 @@ Rails.application.routes.draw do
     end
 
     resource :pipeline, only: [:show], controller: "pipeline"
-    resource :profile, only: [:show, :update]
+    resource :profile, only: [:show, :update] do
+      post :reset_pace
+    end
     get "reading_list", to: redirect("/pipeline")
 
     # Existing web API endpoints (session auth)
@@ -104,7 +106,9 @@ Rails.application.routes.draw do
 
       resources :daily_quotas, only: [:update], controller: "daily_quotas"
 
-      resource :profile, only: [:show, :update], controller: "profiles"
+      resource :profile, only: [:show, :update], controller: "profiles" do
+        post :reset_pace
+      end
       resource :stats, only: [:show], controller: "stats"
     end
   end

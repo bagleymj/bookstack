@@ -77,4 +77,45 @@ RSpec.describe "API V1 Profile", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
     end
   end
+
+  describe "POST /api/v1/profile/reset_pace" do
+    before do
+      user.update!(
+        reading_pace_type: "books_per_year",
+        reading_pace_value: 50,
+        reading_pace_set_on: 100.days.ago.to_date
+      )
+    end
+
+    it "resets reading_pace_set_on to today" do
+      post "/api/v1/profile/reset_pace", headers: headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(user.reload.reading_pace_set_on).to eq(Date.current)
+    end
+
+    it "preserves pace type and value" do
+      post "/api/v1/profile/reset_pace", headers: headers, as: :json
+
+      user.reload
+      expect(user.reading_pace_type).to eq("books_per_year")
+      expect(user.reading_pace_value).to eq(50)
+    end
+
+    it "destroys queued auto-scheduled reading goals" do
+      book = create(:book, user: user, status: :unread)
+      create(:reading_goal, user: user, book: book, status: :queued, auto_scheduled: true, position: 1)
+
+      expect {
+        post "/api/v1/profile/reset_pace", headers: headers, as: :json
+      }.to change { user.reading_goals.where(status: :queued, auto_scheduled: true).count }.by(-1)
+    end
+
+    it "returns updated profile" do
+      post "/api/v1/profile/reset_pace", headers: headers, as: :json
+
+      expect(json_response["profile"]["reading_pace_type"]).to eq("books_per_year")
+      expect(json_response["profile"]["reading_pace_value"]).to eq(50)
+    end
+  end
 end

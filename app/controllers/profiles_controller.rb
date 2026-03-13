@@ -4,6 +4,17 @@ class ProfilesController < ApplicationController
   def show
   end
 
+  def reset_pace
+    current_user.reading_goals.where(status: :queued, auto_scheduled: true).destroy_all
+    current_user.update!(reading_pace_set_on: Date.current)
+
+    if current_user.reading_pace_type.present?
+      ReadingListScheduler.new(current_user).schedule!
+    end
+
+    redirect_to profile_path, notice: "Pace reset. Your epoch starts fresh from today."
+  end
+
   def update
     scheduling_fields = %w[concurrency_limit weekend_reading_minutes weekend_mode reading_pace_type reading_pace_value]
     old_values = current_user.attributes.slice(*scheduling_fields)
