@@ -1169,4 +1169,133 @@ RSpec.describe ReadingListScheduler do
       end
     end
   end
+
+  # ─── Epoch Renewal ──────────────────────────────────────────────
+
+  describe "epoch renewal" do
+    describe "#measure_actuals! (via metrics)" do
+      it "stays in the first epoch when less than 365 days have passed" do
+        user.update!(reading_pace_set_on: 30.days.ago.to_date)
+        metrics = ReadingListScheduler.new(user).metrics
+        expect(metrics[:carried_deficit]).to eq(0)
+        expect(metrics[:pace_target]).to eq(50)
+      end
+
+      it "advances epoch and carries deficit when behind after one year" do
+        user.update!(reading_pace_set_on: 400.days.ago.to_date)
+
+        # Completed 45 books in the first epoch (5 behind)
+        45.times do |i|
+          create(:book, user: user, status: :completed,
+                 last_page: 100, current_page: 100,
+                 completed_at: (400 - i * 7).days.ago)
+        end
+
+        metrics = ReadingListScheduler.new(user).metrics
+        expect(metrics[:carried_deficit]).to eq(5)
+        expect(metrics[:pace_target]).to eq(55)
+        expect(metrics[:annual_pace]).to eq(50)
+      end
+
+      it "advances epoch and carries surplus when ahead after one year" do
+        user.update!(reading_pace_set_on: 400.days.ago.to_date)
+
+        # Completed 55 books in the first epoch (5 ahead)
+        55.times do |i|
+          create(:book, user: user, status: :completed,
+                 last_page: 100, current_page: 100,
+                 completed_at: (400 - i * 6).days.ago)
+        end
+
+        metrics = ReadingListScheduler.new(user).metrics
+        expect(metrics[:carried_deficit]).to eq(-5)
+        expect(metrics[:pace_target]).to eq(45)
+      end
+
+      it "accumulates deficit across multiple expired epochs" do
+        user.update!(reading_pace_set_on: 800.days.ago.to_date)
+
+        # Epoch 1 (800-435 days ago): 45 completed → deficit 5
+        45.times do |i|
+          create(:book, user: user, status: :completed,
+                 last_page: 100, current_page: 100,
+                 completed_at: (800 - i * 7).days.ago)
+        end
+
+        # Epoch 2 (435-70 days ago): 48 completed → deficit 2
+        48.times do |i|
+          create(:book, user: user, status: :completed,
+                 last_page: 100, current_page: 100,
+                 completed_at: (435 - i * 7).days.ago)
+        end
+
+        metrics = ReadingListScheduler.new(user).metrics
+        # Total carried: 5 + 2 = 7
+        expect(metrics[:carried_deficit]).to eq(7)
+        expect(metrics[:pace_target]).to eq(57)
+      end
+
+      it "floors epoch_target at 0 when surplus exceeds base pace" do
+        user.update!(reading_pace_set_on: 400.days.ago.to_date)
+
+        # Completed 110 books in the first epoch (60 ahead)
+        110.times do |i|
+          create(:book, user: user, status: :completed,
+                 last_page: 100, current_page: 100,
+                 completed_at: (400 - i * 3).days.ago)
+        end
+
+        metrics = ReadingListScheduler.new(user).metrics
+        expect(metrics[:pace_target]).to eq(0)
+        expect(metrics[:carried_deficit]).to eq(-60)
+      end
+
+      it "does not modify reading_pace_set_on" do
+        original_date = 400.days.ago.to_date
+        user.update!(reading_pace_set_on: original_date)
+
+        ReadingListScheduler.new(user).metrics
+
+        expect(user.reload.reading_pace_set_on).to eq(original_date)
+      end
+
+      it "computes within-epoch deficit correctly" do
+        # Set pace start to 100 days ago, no epoch rollover
+        user.update!(reading_pace_set_on: 100.days.ago.to_date)
+
+        # Should have completed ~13.7 books by now (50 * 100/365)
+        10.times do |i|
+          create(:book, user: user, status: :completed,
+                 last_page: 100, current_page: 100,
+                 completed_at: (100 - i * 9).days.ago)
+        end
+
+        metrics = ReadingListScheduler.new(user).metrics
+        # Expected: 50 * 100/365 ≈ 13.7, actual: 10, deficit ≈ 3.7
+        expect(metrics[:deficit]).to be_within(0.5).of(3.7)
+      end
+    end
+
+    describe "#schedule! with epoch renewal" do
+      it "uses epoch_target for daily target computation" do
+        user.update!(reading_pace_set_on: 400.days.ago.to_date)
+
+        # 45 books completed in first epoch → carry 5 deficit
+        45.times do |i|
+          create(:book, user: user, status: :completed,
+                 last_page: 100, current_page: 100,
+                 completed_at: (400 - i * 7).days.ago)
+        end
+
+        create_queued_book(pages: 300, position: 1)
+
+        # Should schedule without error and use epoch_target of 55
+        expect { schedule! }.not_to raise_error
+
+        goal = user.reading_goals.active.first
+        expect(goal).to be_present
+        expect(goal.target_completion_date).to be_present
+      end
+    end
+  end
 end

@@ -21,7 +21,7 @@ class ReadingListScheduler
 
     measure_actuals!
     daily_target = compute_daily_target
-    target = annual_pace.round
+    target = @epoch_target
 
     pace_window_end = @pace_start + 365
     scheduled_completions = @user.reading_goals
@@ -39,6 +39,8 @@ class ReadingListScheduler
       derived_target: effective_daily_target(daily_target).round,
       projected_completions: projected,
       pace_target: target,
+      annual_pace: annual_pace.round,
+      carried_deficit: @carried_deficit,
       queue_depth: queued_count,
       queue_warning: queue_warning(queued_count, target, projected),
       concurrency_hint: concurrency_hint(daily_target, target),
@@ -95,24 +97,45 @@ class ReadingListScheduler
   # ─── Phase 1 ────────────────────────────────────────────────────
 
   def measure_actuals!
-    @pace_start = @user.reading_pace_set_on || Date.current.beginning_of_year
+    original_start = @user.reading_pace_set_on || Date.current.beginning_of_year
+    epoch_start = original_start
+    carried = 0
+
+    # Advance through completed epochs, accumulating deficit/surplus
+    while (Date.current - epoch_start).to_i >= 365
+      completed_in_epoch = count_completed_between(epoch_start, epoch_start + 364)
+      carried += annual_pace.round - completed_in_epoch
+      epoch_start += 365
+    end
+
+    @pace_start = epoch_start
+    @carried_deficit = carried
+    @epoch_target = [annual_pace.round + @carried_deficit, 0].max
     @days_elapsed = [(Date.current - @pace_start).to_i, 1].max
-    @days_remaining = [365 - (Date.current - @pace_start).to_i, 1].max
+    @days_remaining = [365 - @days_elapsed, 1].max
     @actual_completed = count_completed_since(@pace_start)
-    @deficit = (annual_pace * @days_elapsed / 365.0) - @actual_completed
+    @deficit = (@epoch_target * @days_elapsed / 365.0) - @actual_completed
   end
 
-  def count_completed_since(date)
+  def count_completed_since(start_date)
     @user.books
          .where(status: :completed)
-         .where("completed_at >= ?", date.beginning_of_day)
+         .where("completed_at >= ?", start_date.beginning_of_day)
+         .count
+  end
+
+  def count_completed_between(start_date, end_date)
+    @user.books
+         .where(status: :completed)
+         .where("completed_at >= ?", start_date.beginning_of_day)
+         .where("completed_at < ?", (end_date + 1).beginning_of_day)
          .count
   end
 
   # ─── Phase 2 ────────────────────────────────────────────────────
 
   def compute_daily_target
-    books_remaining = [annual_pace - @actual_completed, 0].max
+    books_remaining = [@epoch_target - @actual_completed, 0].max
     return 0 if books_remaining <= 0
 
     window = build_pace_window([annual_pace.round, 1].max)
@@ -637,7 +660,7 @@ class ReadingListScheduler
   # ─── Phase 4 ────────────────────────────────────────────────────
 
   def verify_throughput!
-    target = annual_pace.round
+    target = @epoch_target
     tolerance = [2, (target * 0.05).ceil].max
 
     MAX_ADJUSTMENT_ITERATIONS.times do
