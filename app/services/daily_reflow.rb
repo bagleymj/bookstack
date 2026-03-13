@@ -1,10 +1,11 @@
 class DailyReflow
   def initialize(user)
     @user = user
+    @summary = []
   end
 
   def reflow_if_stale!
-    return unless needs_reflow?
+    return [] unless needs_reflow?
     reflow!
   end
 
@@ -14,6 +15,9 @@ class DailyReflow
 
   def reflow!
     goals = active_goals.to_a
+
+    # Snapshot quotas before changes so we can describe what shifted
+    snapshots = snapshot_today_quotas(goals)
 
     goals.each { |goal| mark_missed_quotas(goal) }
 
@@ -25,6 +29,11 @@ class DailyReflow
     end
 
     @user.update_column(:quotas_generated_on, Date.current)
+
+    # Build human-readable summary by comparing before/after
+    build_summary(goals, snapshots)
+
+    @summary
   end
 
   private
@@ -37,15 +46,21 @@ class DailyReflow
   end
 
   def mark_missed_quotas(goal)
-    DailyQuota.where(reading_goal_id: goal.id)
-              .where("date < ?", Date.current)
-              .where(status: [:pending, :adjusted])
-              .update_all(status: DailyQuota.statuses[:missed])
+    missed_count = DailyQuota.where(reading_goal_id: goal.id)
+                             .where("date < ?", Date.current)
+                             .where(status: [:pending, :adjusted])
+
+    count = missed_count.count
+    if count > 0
+      missed_count.update_all(status: DailyQuota.statuses[:missed])
+      @summary << {
+        type: :missed,
+        book: goal.book.title,
+        days: count
+      }
+    end
   end
 
-  # Redistribute remaining pages across remaining days in the current tier.
-  # Only adjusts future quotas — past quotas are left as-is (completed or missed).
-  # If the user has already read today, today's quota is protected.
   def redistribute_remaining(goal)
     remaining_pages = goal.book.remaining_pages
     return if remaining_pages <= 0
@@ -59,7 +74,6 @@ class DailyReflow
     return if future_quotas.empty?
 
     num_days = future_quotas.count
-    # Account for today's quota pages if today is protected
     if cutoff > Date.current
       todays_quota = DailyQuota.find_by(reading_goal_id: goal.id, date: Date.current)
       remaining_pages -= todays_quota.target_pages if todays_quota
@@ -93,5 +107,40 @@ class DailyReflow
   def heijunka_mode?
     %w[books_per_year books_per_month books_per_week].include?(@user.reading_pace_type) &&
       @user.reading_pace_value&.positive?
+  end
+
+  def snapshot_today_quotas(goals)
+    snapshots = {}
+    goals.each do |goal|
+      quota = DailyQuota.find_by(reading_goal_id: goal.id, date: Date.current)
+      next unless quota
+      snapshots[goal.id] = { target_pages: quota.target_pages, book: goal.book.title }
+    end
+    snapshots
+  end
+
+  def build_summary(goals, snapshots)
+    goals.each do |goal|
+      old = snapshots[goal.id]
+      next unless old
+
+      quota = DailyQuota.find_by(reading_goal_id: goal.id, date: Date.current)
+      next unless quota
+
+      new_target = quota.target_pages
+      old_target = old[:target_pages]
+      diff = new_target - old_target
+
+      next if diff == 0
+
+      @summary << {
+        type: :adjusted,
+        book: old[:book],
+        old_pages: old_target,
+        new_pages: new_target,
+        direction: diff > 0 ? :up : :down,
+        diff: diff.abs
+      }
+    end
   end
 end

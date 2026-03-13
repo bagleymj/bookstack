@@ -16,6 +16,44 @@
     </div>
   </div>
 
+  <!-- Reflow Summary -->
+  <% if @reflow_summary.present? %>
+    <div class="rounded-lg bg-blue-50 border border-blue-200 p-4">
+      <div class="flex">
+        <div class="flex-shrink-0">
+          <svg class="h-5 w-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <div class="ml-3 flex-1">
+          <h3 class="text-sm font-medium text-blue-800">Schedule updated this morning</h3>
+          <ul class="mt-2 text-sm text-blue-700 space-y-1">
+            <% @reflow_summary.each do |item| %>
+              <% if item[:type] == :missed %>
+                <li>
+                  <span class="font-medium"><%= item[:book] %></span> &mdash;
+                  <%= item[:days] %> missed <%= item[:days] == 1 ? 'day' : 'days' %> redistributed across remaining schedule
+                </li>
+              <% elsif item[:type] == :adjusted %>
+                <li>
+                  <span class="font-medium"><%= item[:book] %></span> &mdash;
+                  today's target
+                  <% if item[:direction] == :up %>
+                    increased from <%= item[:old_pages] %> to <%= item[:new_pages] %> pages
+                    <span class="text-blue-500">(+<%= item[:diff] %>)</span>
+                  <% else %>
+                    decreased from <%= item[:old_pages] %> to <%= item[:new_pages] %> pages
+                    <span class="text-blue-500">(-<%= item[:diff] %>)</span>
+                  <% end %>
+                </li>
+              <% end %>
+            <% end %>
+          </ul>
+        </div>
+      </div>
+    </div>
+  <% end %>
+
   <!-- Reading Pace -->
   <% unless @reading_pace_progress %>
     <div class="rounded-lg border-2 border-dashed border-gray-300 p-6">

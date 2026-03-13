@@ -8,7 +8,7 @@ class ApplicationController < ActionController::Base
   def lazy_daily_reflow
     return unless user_signed_in?
     return if devise_controller?
-    DailyReflow.new(current_user).reflow_if_stale!
+    @reflow_summary = DailyReflow.new(current_user).reflow_if_stale!
   end
 
   def redirect_to_onboarding

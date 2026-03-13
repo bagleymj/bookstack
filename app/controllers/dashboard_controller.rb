@@ -2,6 +2,7 @@ class DashboardController < ApplicationController
   before_action :authenticate_user!
 
   def index
+    # @reflow_summary is set by ApplicationController#lazy_daily_reflow
     @books_in_progress = current_user.books.in_progress.includes(:reading_goals)
     @recent_sessions = current_user.reading_sessions.completed.recent.limit(5).includes(:book)
     @active_goals = current_user.reading_goals.active.includes(:book, :daily_quotas)
