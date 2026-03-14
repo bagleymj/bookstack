@@ -32,6 +32,11 @@ class ReadingListScheduler
     projected = @actual_completed + scheduled_completions
 
     queued_count = @user.reading_goals.where(status: :queued, auto_scheduled: true).count
+    total_queued = @user.reading_goals
+      .where(auto_scheduled: true)
+      .where.not(position: nil)
+      .where(status: [:queued, :active])
+      .count
 
     {
       pace_status: pace_status_label(target),
@@ -44,7 +49,10 @@ class ReadingListScheduler
       queue_depth: queued_count,
       queue_warning: queue_warning(queued_count, target, projected),
       concurrency_hint: concurrency_hint(daily_target, target),
-      ahead_suggestion: ahead_suggestion
+      ahead_suggestion: ahead_suggestion,
+      epoch_books_scheduled: current_epoch_goals.size,
+      epoch_books_target: @epoch_target,
+      epoch_count: (total_queued.to_f / annual_pace.round).ceil
     }
   end
 
@@ -138,35 +146,25 @@ class ReadingListScheduler
     books_remaining = [@epoch_target - @actual_completed, 0].max
     return 0 if books_remaining <= 0
 
-    window = build_pace_window([annual_pace.round, 1].max)
-    return 0 if window.empty?
+    epoch_books = current_epoch_goals.map(&:book)
+    return 0 if epoch_books.empty?
 
-    avg_minutes = window.sum { |book| full_book_minutes(book) }.to_f / window.size
+    avg_minutes = epoch_books.sum { |book| full_book_minutes(book) }.to_f / epoch_books.size
     (books_remaining * avg_minutes) / @days_remaining
   end
 
-  def build_pace_window(window_size)
-    list_books = @user.reading_goals
-                      .where(auto_scheduled: true)
-                      .where.not(position: nil)
-                      .where(status: [:queued, :active])
-                      .includes(:book)
-                      .order(:position)
-                      .limit(window_size)
-                      .map(&:book)
-
-    return list_books if list_books.size >= window_size
-
-    remaining_slots = window_size - list_books.size
-    exclude_ids = list_books.map(&:id)
-    completed = @user.books
-                     .where(status: :completed)
-                     .where.not(id: exclude_ids)
-                     .order(completed_at: :desc)
-                     .limit(remaining_slots)
-                     .to_a
-
-    list_books + completed
+  # Returns the reading goals that belong to the current epoch.
+  # The epoch is defined by position: the first @epoch_target
+  # active/queued auto-scheduled goals ordered by position.
+  def current_epoch_goals
+    @current_epoch_goals ||= @user.reading_goals
+      .where(auto_scheduled: true)
+      .where.not(position: nil)
+      .where(status: [:queued, :active])
+      .includes(:book)
+      .order(:position)
+      .limit(@epoch_target)
+      .to_a
   end
 
   def full_book_minutes(book)
@@ -874,13 +872,7 @@ class ReadingListScheduler
   end
 
   def gather_schedulable_goals
-    goals = @user.reading_goals
-                 .where(status: [:queued, :active])
-                 .where(auto_scheduled: true)
-                 .where.not(position: nil)
-                 .includes(:book)
-                 .order(:position)
-                 .reject { |g| locked_goal_ids.include?(g.id) }
+    goals = current_epoch_goals.reject { |g| locked_goal_ids.include?(g.id) }
 
     # Track which goals are stale (active with sessions, but not this week)
     @stale_goal_ids = goals.select { |g| g.active? && g.has_reading_sessions? }.map(&:id).to_set
@@ -953,7 +945,8 @@ class ReadingListScheduler
   def default_metrics
     { pace_status: nil, deficit: 0, derived_target: 0,
       projected_completions: 0, pace_target: 0, queue_depth: 0, queue_warning: nil,
-      concurrency_hint: nil, ahead_suggestion: nil }
+      concurrency_hint: nil, ahead_suggestion: nil,
+      epoch_books_scheduled: 0, epoch_books_target: 0, epoch_count: 0 }
   end
 
   def pace_status_label(target)
@@ -977,10 +970,10 @@ class ReadingListScheduler
     limit = effective_concurrency_limit
     return nil unless limit
 
-    window = build_pace_window([target, 1].max)
-    return nil if window.empty?
+    epoch_books = current_epoch_goals.map(&:book)
+    return nil if epoch_books.empty?
 
-    avg_book_minutes = window.sum { |book| full_book_minutes(book) }.to_f / window.size
+    avg_book_minutes = epoch_books.sum { |book| full_book_minutes(book) }.to_f / epoch_books.size
     takt_days = 365.0 / target
     avg_book_days = avg_book_minutes / daily_target
     min_concurrent = (avg_book_days / takt_days).ceil

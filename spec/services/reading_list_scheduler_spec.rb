@@ -1298,4 +1298,85 @@ RSpec.describe ReadingListScheduler do
       end
     end
   end
+
+  describe "epoch scoping" do
+    let(:user) do
+      create(:user,
+        reading_pace_type: "books_per_year",
+        reading_pace_value: 5,
+        reading_pace_set_on: Date.current,
+        default_reading_speed_wpm: 250,
+        max_concurrent_books: 3,
+        weekend_mode: :same)
+    end
+
+    it "only schedules books within the current epoch" do
+      # 5 books per year pace — epoch = first 5 books
+      7.times { |i| create_queued_book(pages: 300, position: i + 1) }
+
+      schedule!
+
+      active_goals = user.reading_goals.where(status: :active)
+      queued_goals = user.reading_goals.where(status: :queued)
+
+      # Only the first 5 (epoch) should be scheduled
+      expect(active_goals.count).to eq(5)
+      # Books 6 and 7 stay queued
+      expect(queued_goals.count).to eq(2)
+    end
+
+    it "computes daily target from epoch books only" do
+      # Epoch 1: 5 short books. Epoch 2: 2 long books.
+      5.times { |i| create_queued_book(pages: 100, position: i + 1, title: "Short #{i}") }
+      2.times { |i| create_queued_book(pages: 800, position: i + 6, title: "Long #{i}") }
+
+      scheduler = ReadingListScheduler.new(user)
+      metrics = scheduler.metrics
+
+      # Daily target should be based on the 5 short books' average (100 pages),
+      # not inflated by the 800-page books in epoch 2
+      expect(metrics[:derived_target]).to be > 0
+      expect(metrics[:epoch_books_scheduled]).to eq(5)
+      expect(metrics[:epoch_books_target]).to eq(5)
+
+      # Verify the long books didn't inflate the target.
+      # With 100-page books at 250 WPM: ~100 min each. 5 books * 100 min / 365 days ≈ 1.4 min/day
+      # If 800-page books were included: avg ~343 pages, much higher target
+      expect(metrics[:derived_target]).to be < 5
+    end
+
+    it "does not schedule books beyond the epoch even with long horizon" do
+      5.times { |i| create_queued_book(pages: 300, position: i + 1, title: "Epoch 1 ##{i}") }
+      3.times { |i| create_queued_book(pages: 300, position: i + 6, title: "Epoch 2 ##{i}") }
+
+      schedule!
+
+      epoch_2_goals = user.reading_goals.where(status: [:active, :queued])
+                          .where("position > ?", 5)
+
+      # Epoch 2 books should remain queued
+      expect(epoch_2_goals.pluck(:status).uniq).to eq(["queued"])
+    end
+
+    it "includes epoch metadata in metrics" do
+      3.times { |i| create_queued_book(pages: 300, position: i + 1) }
+
+      metrics = ReadingListScheduler.new(user).metrics
+
+      expect(metrics).to have_key(:epoch_books_scheduled)
+      expect(metrics).to have_key(:epoch_books_target)
+      expect(metrics).to have_key(:epoch_count)
+      expect(metrics[:epoch_books_scheduled]).to eq(3)
+      expect(metrics[:epoch_books_target]).to eq(5)
+      expect(metrics[:epoch_count]).to eq(1)
+    end
+
+    it "reports epoch_count based on total queued books" do
+      12.times { |i| create_queued_book(pages: 300, position: i + 1) }
+
+      metrics = ReadingListScheduler.new(user).metrics
+
+      expect(metrics[:epoch_count]).to eq(3) # 12 books / 5 per epoch = 3
+    end
+  end
 end

@@ -77,27 +77,14 @@ class ScheduleImpactCalculator
   end
 
   def build_pace_window(size)
-    list_books = @user.reading_goals
-                      .where(auto_scheduled: true)
-                      .where.not(position: nil)
-                      .where(status: [:queued, :active])
-                      .includes(:book)
-                      .order(:position)
-                      .limit(size)
-                      .map(&:book)
-
-    return list_books if list_books.size >= size
-
-    remaining_slots = size - list_books.size
-    exclude_ids = list_books.map(&:id)
-    completed = @user.books
-                     .where(status: :completed)
-                     .where.not(id: exclude_ids)
-                     .order(completed_at: :desc)
-                     .limit(remaining_slots)
-                     .to_a
-
-    list_books + completed
+    @user.reading_goals
+         .where(auto_scheduled: true)
+         .where.not(position: nil)
+         .where(status: [:queued, :active])
+         .includes(:book)
+         .order(:position)
+         .limit(size)
+         .map(&:book)
   end
 
   def full_book_minutes(book)
