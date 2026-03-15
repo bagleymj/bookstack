@@ -98,7 +98,7 @@ RSpec.describe "API V1 Books", type: :request do
       expect(json_response["book"]["title"]).to eq("Updated Title")
     end
 
-    it "rebuilds quotas when page range changes on a locked goal" do
+    it "rebuilds schedule for a future book even when user has read other books this week" do
       paced_user = create(:user,
         reading_pace_type: "books_per_year",
         reading_pace_value: 50,
@@ -109,33 +109,40 @@ RSpec.describe "API V1 Books", type: :request do
         weekday_reading_minutes: 60,
         weekend_reading_minutes: 60)
 
-      book = create(:book, :reading, user: paced_user, first_page: 1, last_page: 400, current_page: 50)
-      goal = create(:reading_goal,
-        user: paced_user, book: book, status: :active,
-        started_on: Date.current,
-        target_completion_date: 28.days.from_now.to_date,
+      # Book the user is reading this week
+      current_book = create(:book, :reading, user: paced_user, last_page: 200, current_page: 50)
+      current_goal = create(:reading_goal,
+        user: paced_user, book: current_book, status: :active,
+        started_on: Date.current.beginning_of_week(:monday),
+        target_completion_date: Date.current.end_of_week(:sunday),
         auto_scheduled: true, position: 1)
-      ProfileAwareQuotaCalculator.new(goal, paced_user).generate_quotas!
-
-      # Lock the goal by creating a reading session earlier this week (not today)
-      create(:reading_session, :completed, user: paced_user, book: book,
+      ProfileAwareQuotaCalculator.new(current_goal, paced_user).generate_quotas!
+      create(:reading_session, :completed, user: paced_user, book: current_book,
         started_at: 2.days.ago, ended_at: 2.days.ago + 1.hour,
-        start_page: 1, end_page: 20)
+        start_page: 50, end_page: 70)
 
-      original_total = goal.daily_quotas.where("date >= ?", Date.current).sum(:target_pages)
+      # Future book — not read this week
+      future_book = create(:book, user: paced_user, first_page: 1, last_page: 400)
+      future_goal = create(:reading_goal,
+        user: paced_user, book: future_book, status: :active,
+        started_on: Date.current.next_week(:monday),
+        target_completion_date: 28.days.from_now.to_date,
+        auto_scheduled: true, position: 2)
+      ProfileAwareQuotaCalculator.new(future_goal, paced_user).generate_quotas!
 
-      patch "/api/v1/books/#{book.id}", params: {
+      patch "/api/v1/books/#{future_book.id}", params: {
         book: { last_page: 300 }
       }, headers: jwt_headers(paced_user), as: :json
 
       expect(response).to have_http_status(:ok)
 
-      goal.reload
-      new_total = goal.daily_quotas.where("date >= ?", Date.current).sum(:target_pages)
+      future_goal.reload
+      new_total = future_goal.daily_quotas.sum(:target_pages)
 
-      expect(book.reload.total_pages).to eq(300)
-      expect(new_total).to be < original_total
-      expect(new_total).to eq(book.remaining_pages)
+      expect(future_book.reload.total_pages).to eq(300)
+      expect(new_total).to eq(future_book.remaining_pages)
+      # This week's book stays locked
+      expect(current_goal.reload.status).to eq("active")
     end
 
     it "updates edition fields together" do

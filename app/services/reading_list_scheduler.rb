@@ -830,18 +830,26 @@ class ReadingListScheduler
 
   def locked_goals
     @locked_goals ||= begin
-      active_goals = @user.reading_goals
-                          .active
-                          .where.not(target_completion_date: nil)
-                          .includes(:book)
+      return [] unless user_has_sessions_this_week?
 
-      # If the user has read ANY book this week, lock ALL active goals.
-      # The current week is a committed work cell — no swapping mid-week.
-      if user_has_sessions_this_week?
-        active_goals.to_a
-      else
-        []
-      end
+      # Only lock goals for books the user has actually read this week.
+      # Future books are freely schedulable even if the user has been
+      # reading other books this week.
+      week_start = Date.current.beginning_of_week(:monday).beginning_of_day
+      book_ids_read_this_week = ReadingSession
+        .where(user: @user)
+        .where.not(ended_at: nil)
+        .where("started_at >= ?", week_start)
+        .select(:book_id)
+        .distinct
+        .pluck(:book_id)
+
+      @user.reading_goals
+           .active
+           .where.not(target_completion_date: nil)
+           .where(book_id: book_ids_read_this_week)
+           .includes(:book)
+           .to_a
     end
   end
 

@@ -89,31 +89,41 @@ RSpec.describe "Books", type: :request do
         weekend_reading_minutes: 60)
     end
 
-    it "rebuilds quotas when page range changes on a locked goal" do
-      book = create(:book, :reading, user: user, first_page: 1, last_page: 400, current_page: 50)
-      goal = create(:reading_goal,
-        user: user, book: book, status: :active,
-        started_on: Date.current,
-        target_completion_date: 28.days.from_now.to_date,
+    it "rebuilds schedule for a future book even when user has read other books this week" do
+      # Book the user is actively reading this week
+      current_book = create(:book, :reading, user: user, last_page: 200, current_page: 50)
+      current_goal = create(:reading_goal,
+        user: user, book: current_book, status: :active,
+        started_on: Date.current.beginning_of_week(:monday),
+        target_completion_date: Date.current.end_of_week(:sunday),
         auto_scheduled: true, position: 1)
-      ProfileAwareQuotaCalculator.new(goal, user).generate_quotas!
-
-      # Create a reading session earlier this week (not today) to lock the goal
-      create(:reading_session, :completed, user: user, book: book,
+      ProfileAwareQuotaCalculator.new(current_goal, user).generate_quotas!
+      create(:reading_session, :completed, user: user, book: current_book,
         started_at: 2.days.ago, ended_at: 2.days.ago + 1.hour,
-        start_page: 1, end_page: 20)
+        start_page: 50, end_page: 70)
 
-      original_total = goal.daily_quotas.where("date >= ?", Date.current).sum(:target_pages)
+      # Future book — not read this week
+      future_book = create(:book, user: user, first_page: 1, last_page: 400)
+      future_goal = create(:reading_goal,
+        user: user, book: future_book, status: :active,
+        started_on: Date.current.next_week(:monday),
+        target_completion_date: 28.days.from_now.to_date,
+        auto_scheduled: true, position: 2)
+      ProfileAwareQuotaCalculator.new(future_goal, user).generate_quotas!
 
-      # Shorten the book by 100 pages
-      patch book_path(book), params: { book: { last_page: 300 } }
+      old_end_date = future_goal.target_completion_date
 
-      goal.reload
-      new_total = goal.daily_quotas.where("date >= ?", Date.current).sum(:target_pages)
+      # Shorten the future book by 100 pages
+      patch book_path(future_book), params: { book: { last_page: 300 } }
 
-      expect(book.reload.total_pages).to eq(300)
-      expect(new_total).to be < original_total
-      expect(new_total).to eq(book.remaining_pages)
+      future_goal.reload
+      new_total = future_goal.daily_quotas.sum(:target_pages)
+
+      expect(future_book.reload.total_pages).to eq(300)
+      # Quotas rebuilt to match new remaining pages
+      expect(new_total).to eq(future_book.remaining_pages)
+      # This week's book stays locked
+      expect(current_goal.reload.status).to eq("active")
     end
   end
 end

@@ -107,17 +107,7 @@ class BooksController < ApplicationController
   def reschedule_if_on_pipeline!
     return unless @book.reading_goals.where(auto_scheduled: true).where.not(position: nil).exists?
 
-    handled_ids = ReadingListScheduler.new(current_user).schedule!
-
-    # Rebuild quotas for any active goals the scheduler skipped
-    # (e.g., locked goals whose book data changed but didn't need a tier adjustment)
-    @book.reading_goals.active.each do |goal|
-      next if handled_ids.include?(goal.id)
-      cutoff = goal.quota_modification_cutoff
-      goal.daily_quotas.where("date >= ?", cutoff).delete_all
-      goal.daily_quotas.reload
-      ProfileAwareQuotaCalculator.new(goal, current_user).generate_quotas!(from_date: cutoff)
-    end
+    ReadingListScheduler.new(current_user).schedule!
   end
 
   def record_edition_page_range(book)

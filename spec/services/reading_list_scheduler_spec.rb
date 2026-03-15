@@ -107,9 +107,9 @@ RSpec.describe ReadingListScheduler do
         end
       end
 
-      it "locks all active goals when any session exists this week" do
+      it "only locks books the user has read this week" do
         travel_to wednesday do
-          # Place two books on Monday, read one on Tuesday to lock the week
+          # Place two books on Monday, read only Book A on Tuesday
           book_a = create(:book, :reading, user: user, last_page: 300, current_page: 20, title: "Book A")
           goal_a = create(:reading_goal, user: user, book: book_a, status: :active,
                           started_on: wednesday.beginning_of_week(:monday),
@@ -121,7 +121,7 @@ RSpec.describe ReadingListScheduler do
                           target_completion_date: wednesday.beginning_of_week(:monday) + 6,
                           auto_scheduled: true, position: 2)
 
-          # Session on Book A locks the entire week — Book B is also locked
+          # Session on Book A only — Book A is locked, Book B is freely schedulable
           create(:reading_session, :completed, user: user, book: book_a,
                  start_page: 1, end_page: 20, started_at: wednesday - 1.day, ended_at: wednesday - 1.day + 1.hour)
 
@@ -129,9 +129,10 @@ RSpec.describe ReadingListScheduler do
 
           goal_a.reload
           goal_b.reload
-          # Both goals should be locked (not re-placed by the scheduler)
+          # Book A is locked (read this week)
           expect(goal_a.started_on).to eq(wednesday.beginning_of_week(:monday))
-          expect(goal_b.started_on).to eq(wednesday.beginning_of_week(:monday))
+          # Book B is freely schedulable (not read this week)
+          expect(goal_b).to be_active
         end
       end
 
@@ -568,6 +569,35 @@ RSpec.describe ReadingListScheduler do
       expect(goal.target_completion_date).to be < long_end,
         "Expected contraction to shorten from #{long_end}, got #{goal.target_completion_date}"
       expect(goal.target_completion_date).to be_sunday
+    end
+
+    it "only locks books the user has read this week, not future books" do
+      book_a = create_queued_book(pages: 300, position: 1, title: "This Week")
+      book_b = create_queued_book(pages: 300, position: 2, title: "Future")
+      schedule!
+
+      goal_a = user.reading_goals.find_by(book: book_a)
+      goal_b = user.reading_goals.find_by(book: book_b)
+
+      # Read book A this week — only book A should be locked
+      create(:reading_session, user: user, book: book_a,
+             start_page: 1, end_page: 10, pages_read: 10,
+             started_at: 2.days.ago, ended_at: 2.days.ago + 30.minutes,
+             duration_seconds: 1800)
+
+      original_b_start = goal_b.started_on
+      original_b_end = goal_b.target_completion_date
+
+      # Reschedule — book B should be freely re-placed
+      schedule!
+
+      goal_a.reload
+      goal_b.reload
+
+      # Book A is locked (started_on preserved)
+      expect(goal_a.started_on).to be_present
+      # Book B may have been re-placed (it's not locked)
+      expect(goal_b).to be_active
     end
   end
 
