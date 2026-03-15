@@ -74,4 +74,46 @@ RSpec.describe "Books", type: :request do
       end
     end
   end
+
+  describe "PATCH /books/:id (page range change)" do
+    let(:user) do
+      create(:user,
+        onboarding_completed_at: Time.current,
+        reading_pace_type: "books_per_year",
+        reading_pace_value: 50,
+        reading_pace_set_on: Date.current.beginning_of_year,
+        default_reading_speed_wpm: 250,
+        max_concurrent_books: 3,
+        weekend_mode: :same,
+        weekday_reading_minutes: 60,
+        weekend_reading_minutes: 60)
+    end
+
+    it "rebuilds quotas when page range changes on a locked goal" do
+      book = create(:book, :reading, user: user, first_page: 1, last_page: 400, current_page: 50)
+      goal = create(:reading_goal,
+        user: user, book: book, status: :active,
+        started_on: Date.current,
+        target_completion_date: 28.days.from_now.to_date,
+        auto_scheduled: true, position: 1)
+      ProfileAwareQuotaCalculator.new(goal, user).generate_quotas!
+
+      # Create a reading session earlier this week (not today) to lock the goal
+      create(:reading_session, :completed, user: user, book: book,
+        started_at: 2.days.ago, ended_at: 2.days.ago + 1.hour,
+        start_page: 1, end_page: 20)
+
+      original_total = goal.daily_quotas.where("date >= ?", Date.current).sum(:target_pages)
+
+      # Shorten the book by 100 pages
+      patch book_path(book), params: { book: { last_page: 300 } }
+
+      goal.reload
+      new_total = goal.daily_quotas.where("date >= ?", Date.current).sum(:target_pages)
+
+      expect(book.reload.total_pages).to eq(300)
+      expect(new_total).to be < original_total
+      expect(new_total).to eq(book.remaining_pages)
+    end
+  end
 end
