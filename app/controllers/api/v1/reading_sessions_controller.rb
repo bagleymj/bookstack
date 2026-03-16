@@ -134,10 +134,9 @@ module Api
         end
       end
 
-      def reschedule_if_queued!(book)
-        if book.reading_goals.where(status: :queued, auto_scheduled: true).exists?
-          ReadingListScheduler.new(current_user).schedule!
-        end
+      def reschedule_if_queued!(_book)
+        # No-op: reading sessions don't trigger rescheduling.
+        # The daily reflow picks up changed page counts the next morning.
       end
     end
   end

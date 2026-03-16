@@ -563,18 +563,24 @@ class ReadingListScheduler
     book_minutes = estimate_remaining_minutes(goal.book)
     old_share = compute_weekday_share(book_minutes, old_start, old_end)
 
-    # Remove old load
+    new_end = calendar_end(goal.started_on, tier)
+
+    # Remove old load to evaluate new range cleanly
     remove_range_from_profiles(old_start, old_end, old_share)
 
-    # Apply new end date
-    new_end = calendar_end(goal.started_on, tier)
+    # Check concurrency in the extended range
+    extended_start = old_end + 1
+    unless fits_concurrency?(extended_start, new_end)
+      # Can't extend — restore old load and skip
+      add_range_to_profiles(old_start, old_end, old_share)
+      return
+    end
+
     goal.update!(target_completion_date: new_end)
 
-    # Add new load
     new_share = compute_weekday_share(book_minutes, old_start, new_end)
     add_range_to_profiles(old_start, new_end, new_share)
 
-    # Regenerate quotas from today
     regenerate_quotas_from_today!(goal)
   end
 
