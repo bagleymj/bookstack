@@ -207,6 +207,49 @@ RSpec.describe ReadingListScheduler do
       expect(scheduler.deficit).to be > 0
     end
 
+    it "holds daily target steady over a skipped weekend" do
+      skip_user = create(:user,
+        reading_pace_type: "books_per_year",
+        reading_pace_value: 50,
+        reading_pace_set_on: Date.current.beginning_of_year,
+        default_reading_speed_wpm: 250,
+        max_concurrent_books: 3,
+        weekend_mode: :skip,
+        weekday_reading_minutes: 60,
+        weekend_reading_minutes: 0)
+
+      friday = Date.current.beginning_of_week(:monday) + 4
+      friday += 7 unless friday > Date.current  # ensure it's in the future
+
+      book = create(:book, user: skip_user, last_page: 300, title: "Stable")
+      create(:reading_goal, user: skip_user, book: book, status: :queued,
+             started_on: nil, target_completion_date: nil,
+             auto_scheduled: true, position: 1)
+
+      # Saturday: Friday (a reading day) has passed, target may have ticked up
+      saturday_target = travel_to(friday + 1) do
+        s = ReadingListScheduler.new(skip_user)
+        s.schedule!
+        s.daily_target
+      end
+
+      sunday_target = travel_to(friday + 2) do
+        s = ReadingListScheduler.new(skip_user)
+        s.schedule!
+        s.daily_target
+      end
+
+      monday_target = travel_to(friday + 3) do
+        s = ReadingListScheduler.new(skip_user)
+        s.schedule!
+        s.daily_target
+      end
+
+      # Saturday → Sunday → Monday: no reading days pass, target unchanged
+      expect(sunday_target).to eq(saturday_target)
+      expect(monday_target).to eq(saturday_target)
+    end
+
     it "computes target from rolling window of queued + completed books" do
       # Queue a mix of short and long books
       create_queued_book(pages: 150, position: 1, title: "Short")

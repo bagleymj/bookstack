@@ -119,10 +119,15 @@ class ReadingListScheduler
     @pace_start = epoch_start
     @carried_deficit = carried
     @epoch_target = [annual_pace.round + @carried_deficit, 0].max
-    @days_elapsed = [(Date.current - @pace_start).to_i, 1].max
-    @days_remaining = [365 - @days_elapsed, 1].max
+
+    epoch_end = @pace_start + 364
+    yesterday = Date.current - 1
+    reading_days_elapsed = yesterday >= @pace_start ? count_reading_days(@pace_start, yesterday) : 0
+    @days_remaining = [count_reading_days(Date.current, epoch_end), 1].max
+    total_reading_days = [count_reading_days(@pace_start, epoch_end), 1].max
+
     @actual_completed = count_completed_since(@pace_start)
-    @deficit = (@epoch_target * @days_elapsed / 365.0) - @actual_completed
+    @deficit = (@epoch_target * reading_days_elapsed.to_f / total_reading_days) - @actual_completed
   end
 
   def count_completed_since(start_date)
@@ -174,12 +179,13 @@ class ReadingListScheduler
   end
 
   def compute_weekend_targets
-    weekly_total = @daily_target * 7
+    # @daily_target is already minutes-per-reading-day (weekends excluded
+    # from @days_remaining when the user skips them), so no scaling needed.
     if @user.skip?
-      @weekday_target = weekly_total / 5.0
+      @weekday_target = @daily_target
       @weekend_target = 0.0
     else
-      @weekday_target = @weekend_target = weekly_total / 7.0
+      @weekday_target = @weekend_target = @daily_target
     end
   end
 
@@ -943,11 +949,10 @@ class ReadingListScheduler
 
   # ─── Metrics Helpers ────────────────────────────────────────────
 
-  # Show the target the user actually experiences on a reading day,
-  # not the raw average that includes zero-target weekends.
-  def effective_daily_target(avg_target)
-    return avg_target unless avg_target&.positive?
-    @user.skip? ? avg_target * 7.0 / 5.0 : avg_target
+  # The daily target is already per-reading-day (weekends excluded from
+  # days_remaining when the user skips them), so no scaling needed.
+  def effective_daily_target(daily_target)
+    daily_target
   end
 
   def default_metrics
@@ -982,7 +987,8 @@ class ReadingListScheduler
     return nil if epoch_books.empty?
 
     avg_book_minutes = epoch_books.sum { |book| full_book_minutes(book) }.to_f / epoch_books.size
-    takt_days = 365.0 / target
+    epoch_reading_days = count_reading_days(@pace_start, @pace_start + 364)
+    takt_days = epoch_reading_days.to_f / target
     avg_book_days = avg_book_minutes / daily_target
     min_concurrent = (avg_book_days / takt_days).ceil
 
