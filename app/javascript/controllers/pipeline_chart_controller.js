@@ -130,8 +130,11 @@ export default class extends Controller {
           minutes = getActualMinutes(g, dateStr)
         } else if (isToday) {
           todayProgress = g.today_actual_minutes || 0
-          const remaining = g.today_remaining_minutes || 0
-          minutes = todayProgress + remaining
+          // Total height stays at the planned daily share so today's column
+          // matches future columns. The dark progress overlay shows how much
+          // of that planned time has been completed.
+          minutes = Math.max(g.minutes_per_day, todayProgress)
+          todayProgress = Math.min(todayProgress, minutes)
         } else {
           minutes = g.minutes_per_day
         }
