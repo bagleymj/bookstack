@@ -406,17 +406,13 @@ class ReadingListScheduler
     placements << { goal: goal, placement: placement, tier: placement[:tier], book_minutes: book_minutes }
   end
 
-  # After all books are placed, check whether the last book in queue order
-  # pushed its slot over the daily target. If so, promote it to progressively
-  # longer tiers until the load drops to or below the target. The last book
-  # should break BELOW the target (as close as possible), never above — there
-  # are no subsequent placements to fill remaining capacity.
-  def relax_last_placement!(placements, goals)
-    return if placements.empty? || goals.empty?
+  # The last book placed on the pipeline should break UNDER the target —
+  # there are no subsequent placements to fill remaining capacity. If it
+  # overshoots, stretch to the shortest tier that brings load at or below.
+  def relax_last_placement!(placements, _goals)
+    return if placements.empty?
 
-    last_goal = goals.last
-    entry = placements.find { |p| p[:goal].id == last_goal.id }
-    return unless entry
+    entry = placements.last
 
     slot_start = entry[:placement][:start]
     target = target_for_date(slot_start)
@@ -563,24 +559,18 @@ class ReadingListScheduler
     book_minutes = estimate_remaining_minutes(goal.book)
     old_share = compute_weekday_share(book_minutes, old_start, old_end)
 
-    new_end = calendar_end(goal.started_on, tier)
-
-    # Remove old load to evaluate new range cleanly
+    # Remove old load
     remove_range_from_profiles(old_start, old_end, old_share)
 
-    # Check concurrency in the extended range
-    extended_start = old_end + 1
-    unless fits_concurrency?(extended_start, new_end)
-      # Can't extend — restore old load and skip
-      add_range_to_profiles(old_start, old_end, old_share)
-      return
-    end
-
+    # Apply new end date — concurrency is handled by fill_placements downstream
+    new_end = calendar_end(goal.started_on, tier)
     goal.update!(target_completion_date: new_end)
 
+    # Add new load
     new_share = compute_weekday_share(book_minutes, old_start, new_end)
     add_range_to_profiles(old_start, new_end, new_share)
 
+    # Regenerate quotas from today
     regenerate_quotas_from_today!(goal)
   end
 
