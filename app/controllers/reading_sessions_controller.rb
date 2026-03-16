@@ -156,8 +156,12 @@ class ReadingSessionsController < ApplicationController
     end
   end
 
-  def reschedule_if_queued!(_book)
-    # No-op: reading sessions don't trigger rescheduling.
-    # The daily reflow picks up changed page counts the next morning.
+  def reschedule_if_queued!(book)
+    # Ad-hoc sessions (against queued books) trigger immediate reschedule
+    # so the reduced page count is reflected in future placement.
+    # Planned sessions (against active/committed books) do not.
+    if book.reading_goals.where(status: :queued, auto_scheduled: true).exists?
+      ReadingListScheduler.new(current_user).schedule!
+    end
   end
 end

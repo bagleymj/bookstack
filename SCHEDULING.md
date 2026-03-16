@@ -345,8 +345,10 @@ These actions call `schedule!` immediately (not waiting for daily reflow):
 - Pace target or reading preferences changed
 - Goal manually rescheduled (pipeline drag)
 - Book page range changed
+- Ad-hoc reading session against a queued book
 
-Reading sessions, book completions, and book abandonments do **not**
+Planned reading sessions (against active/committed books), book
+completions, and book abandonments do **not**
 trigger immediate reschedule — the daily reflow picks them up the next
 morning.
 
