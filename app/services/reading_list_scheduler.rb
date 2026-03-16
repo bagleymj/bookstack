@@ -7,7 +7,6 @@ class ReadingListScheduler
   }.freeze
   MAX_ADJUSTMENT_ITERATIONS = 5
   PLACEMENT_HORIZON_WEEKS = 104
-  CEILING_TOLERANCE = 15  # minutes above target before penalizing overshoot
   MIN_DAILY_SHARE = 5     # minutes — don't flatten a book below this per day
 
   attr_reader :daily_target, :deficit
@@ -198,51 +197,89 @@ class ReadingListScheduler
   # The first slot starts today (mid-week ramp-in); subsequent slots
   # start on Mondays. Tier end dates always land on Sundays.
 
+  # ─── Phase 3: Greedy Bin Filling ───────────────────────────────
+  #
+  # For each slot (today, then Mondays), place books one at a time in
+  # queue order. Each book gets the tier that brings load closest above
+  # the daily target. When a slot reaches the target, advance to the
+  # next slot. The last book is relaxed to break under the target.
+
   def fill_placements(goals)
     return [] if goals.empty?
 
-    share_index = build_share_index(goals)
-    unscheduled = goals.map(&:id).to_set
     placements = []
+    queue = goals.dup
 
     each_placement_start do |slot_start|
-      break if unscheduled.empty?
-
-      # Skip if spillover from prior multi-week placements already fills this slot
+      break if queue.empty?
       next if slot_at_or_above_target?(slot_start)
 
-      # Find the best combination of books to start at this slot
-      combo = best_combination_for(share_index, goals, unscheduled, slot_start)
-      next if combo.empty?
+      while queue.any? && !slot_at_or_above_target?(slot_start)
+        goal = next_eligible_goal(queue, slot_start)
+        break unless goal
 
-      combo.each do |entry|
-        record_placement!(placements, entry[:goal], entry[:placement], entry[:book_minutes])
-        unscheduled.delete(entry[:goal].id)
+        book_minutes = estimate_remaining_minutes(goal.book)
+        tier = closest_above_tier(book_minutes, slot_start)
+        break unless tier
+
+        placement = compute_share_for(book_minutes, slot_start, tier)
+        break unless placement
+
+        record_placement!(placements, goal, placement, book_minutes)
+        queue.delete(goal)
       end
     end
 
-    # Stretch the last book if it caused overshoot
+    # Last book: if it overshoots, stretch to get under target
     relax_last_placement!(placements, goals)
 
-    # Fallback: any books still unscheduled get default placement
-    goals.each do |goal|
-      next unless unscheduled.include?(goal.id)
+    # Fallback: any books still unplaced get default placement
+    queue.each do |goal|
       book_minutes = estimate_remaining_minutes(goal.book)
       placement = default_placement(book_minutes)
       record_placement!(placements, goal, placement, book_minutes)
-      unscheduled.delete(goal.id)
     end
 
     placements
   end
 
-  def build_share_index(goals)
-    index = {}
-    goals.each do |goal|
-      book_minutes = estimate_remaining_minutes(goal.book)
-      index[goal.id] = { goal: goal, book_minutes: book_minutes }
+  # Pick the tier that gets load closest above target.
+  # If no tier reaches target, pick the shortest (maximizes contribution).
+  def closest_above_tier(book_minutes, slot_start)
+    current_load = @load_profile[slot_start]
+    target = target_for_date(slot_start)
+
+    best_above = nil
+    best_above_total = Float::INFINITY
+    shortest_viable = nil
+
+    TIERS.each do |tier|
+      placement = compute_share_for(book_minutes, slot_start, tier)
+      next unless placement
+      next unless fits_concurrency?(placement[:start], placement[:end])
+
+      share = share_for_date(placement[:share], slot_start)
+      next if share < MIN_DAILY_SHARE
+
+      shortest_viable ||= tier
+      total = current_load + share
+
+      if total >= target && total < best_above_total
+        best_above = tier
+        best_above_total = total
+      end
     end
-    index
+
+    best_above || shortest_viable
+  end
+
+  def next_eligible_goal(queue, slot_start)
+    queue.find do |goal|
+      next false if current_week_slot?(slot_start) && !goal.book.owned?
+      next false if current_week_slot?(slot_start) && !Date.current.monday? && user_has_sessions_this_week? && !@stale_goal_ids.include?(goal.id)
+      next false unless available_concurrency_slots(slot_start) > 0
+      true
+    end
   end
 
   def compute_share_for(book_minutes, slot_start, tier)
@@ -258,142 +295,10 @@ class ReadingListScheduler
     @load_profile[slot_start] >= target
   end
 
-  # Find the combination of (anchor + 0..N companions) × tiers that
-  # overshoots the daily target by the least. The anchor is the next
-  # unscheduled book in queue order. If no combination reaches the
-  # target, pick the one that gets closest.
-  def best_combination_for(share_index, goals, unscheduled, slot_start)
-    target = target_for_date(slot_start)
-    current_load = @load_profile[slot_start]
-    open_slots = available_concurrency_slots(slot_start)
-    return [] if open_slots <= 0
-
-    # Build candidate placements: each unscheduled book × each tier
-    candidates = build_candidates(share_index, goals, unscheduled, slot_start)
-    return [] if candidates.empty?
-
-    # The anchor is the first unscheduled book in queue order
-    anchor_id = goals.find { |g| unscheduled.include?(g.id) }&.id
-    return [] unless anchor_id
-
-    anchor_options = candidates.select { |c| c[:goal_id] == anchor_id }
-    return [] if anchor_options.empty?
-
-    companion_options = candidates.reject { |c| c[:goal_id] == anchor_id }
-    max_companions = [open_slots - 1, companion_options.size].min
-
-    best_combo = nil
-    best_score = nil  # [over_target?, distance] — prefer over-target, then min distance
-
-    # Try each tier for the anchor
-    anchor_options.each do |anchor|
-      # Anchor alone
-      evaluate_combination([anchor], current_load, target, best_score) do |score|
-        best_score = score
-        best_combo = [anchor]
-      end
-
-      next if max_companions <= 0
-
-      # Anchor + 1 companion
-      companion_options.each do |c1|
-        next if dates_overlap_exceeds_slots?(anchor, c1, open_slots)
-
-        evaluate_combination([anchor, c1], current_load, target, best_score) do |score|
-          best_score = score
-          best_combo = [anchor, c1]
-        end
-
-        next if max_companions <= 1
-
-        # Anchor + 2 companions
-        companion_options.each do |c2|
-          next if c2[:goal_id] <= c1[:goal_id]  # avoid duplicate pairs
-          next if c2[:goal_id] == c1[:goal_id]   # same book can't appear twice
-          next if dates_overlap_exceeds_slots?(anchor, c1, c2, open_slots)
-
-          evaluate_combination([anchor, c1, c2], current_load, target, best_score) do |score|
-            best_score = score
-            best_combo = [anchor, c1, c2]
-          end
-        end
-      end
-    end
-
-    return [] unless best_combo
-
-    best_combo.map do |c|
-      { goal: share_index[c[:goal_id]][:goal],
-        placement: c[:placement],
-        book_minutes: c[:book_minutes] }
-    end
-  end
-
-  def build_candidates(share_index, goals, unscheduled, slot_start)
-    candidates = []
-    goals.each do |goal|
-      next unless unscheduled.include?(goal.id)
-      next if current_week_slot?(slot_start) && !goal.book.owned?
-      next if current_week_slot?(slot_start) && !Date.current.monday? && user_has_sessions_this_week? && !@stale_goal_ids.include?(goal.id)
-      entry = share_index[goal.id]
-
-      TIERS.each do |tier|
-        placement = compute_share_for(entry[:book_minutes], slot_start, tier)
-        next unless placement
-        next unless fits_concurrency?(placement[:start], placement[:end])
-
-        slot_share = share_for_date(placement[:share], slot_start)
-        next if slot_share < MIN_DAILY_SHARE
-
-        candidates << {
-          goal_id: goal.id,
-          placement: placement,
-          book_minutes: entry[:book_minutes],
-          slot_share: slot_share
-        }
-      end
-    end
-    candidates
-  end
-
-  # Score: [priority_bucket, overshoot, max_tier_weeks, combo_size]
-  #
-  # Two-bucket scoring:
-  #   Bucket 0: "close" — at/above target OR just under (within CEILING_TOLERANCE)
-  #   Bucket 1: "far under" — more than CEILING_TOLERANCE below target
-  #
-  # Within each bucket, blend distance-from-target with schedule compactness.
-  # Adding max_tier (weeks) to gap.abs (minutes) penalizes long tiers that
-  # create extended low-load tails, while naturally preferring close-to-target
-  # combos when the gap is large (short tiers for big books overshoot hugely).
-  def evaluate_combination(combo, current_load, target, current_best)
-    total_share = combo.sum { |c| c[:slot_share] }
-    projected = current_load + total_share
-    gap = projected - target
-
-    bucket = gap >= -CEILING_TOLERANCE ? 0 : 1
-
-    max_tier = combo.map { |c| TIER_WEEKS[c[:placement][:tier]] }.max
-
-    score = [bucket, gap.abs + max_tier, combo.size]
-
-    if current_best.nil? || (score <=> current_best) < 0
-      yield score
-    end
-  end
-
   def available_concurrency_slots(slot_start)
     limit = effective_concurrency_limit
     return TIERS.size unless limit  # effectively unlimited
     [limit - @concurrent_count[slot_start], 0].max
-  end
-
-  # Check that placing these candidates together doesn't exceed concurrency
-  # on any reading day they share. Quick check: the worst case is on the
-  # slot start (all start the same day), plus we check individual placements.
-  def dates_overlap_exceeds_slots?(*candidates, open_slots)
-    return false if open_slots >= candidates.size
-    candidates.size > open_slots
   end
 
   def fits_concurrency?(start_date, end_date)
@@ -412,11 +317,9 @@ class ReadingListScheduler
     placements << { goal: goal, placement: placement, tier: placement[:tier], book_minutes: book_minutes }
   end
 
-  # After all books are placed, check whether the last book in queue order
-  # pushed its slot over the daily target. If so, promote it to progressively
-  # longer tiers until the load drops to or below the target. The last book
-  # should break BELOW the target (as close as possible), never above — there
-  # are no subsequent placements to fill remaining capacity.
+  # The last book should break UNDER the target — there are no subsequent
+  # placements to fill remaining capacity. Stretch to the shortest tier
+  # that brings load at or below target.
   def relax_last_placement!(placements, goals)
     return if placements.empty? || goals.empty?
 
@@ -438,7 +341,6 @@ class ReadingListScheduler
       new_share = compute_weekday_share(entry[:book_minutes], slot_start, new_end)
       next if new_share <= 0
 
-      # Remove old range, check concurrency, apply new range
       old_placement = entry[:placement]
       remove_range_from_profiles(old_placement[:start], old_placement[:end], old_placement[:share])
 
@@ -662,25 +564,13 @@ class ReadingListScheduler
   end
 
   # ─── Phase 4 ────────────────────────────────────────────────────
+  #
+  # Throughput verification is informational — the greedy bin-filler
+  # places books to hit the daily target, and the pace is maintained
+  # as long as the queue is deep enough. No post-hoc tier adjustments.
 
   def verify_throughput!
-    target = @epoch_target
-    tolerance = [2, (target * 0.05).ceil].max
-
-    MAX_ADJUSTMENT_ITERATIONS.times do
-      projected = count_projected_completions
-      break if projected.between?(target - tolerance, target + tolerance)
-
-      if projected < target - tolerance
-        break unless try_shorten_longest_tier!
-      else
-        break unless try_lengthen_shortest_tier!
-      end
-
-      # Stop if the adjustment didn't change projected completions
-      # (e.g., all books already finish within the pace window)
-      break if count_projected_completions == projected
-    end
+    # no-op: the greedy fill + relax_last_placement! is sufficient
   end
 
   def count_projected_completions
@@ -695,126 +585,6 @@ class ReadingListScheduler
     end
 
     @actual_completed + locked_count + placed_count
-  end
-
-  def try_shorten_longest_tier!
-    adjustable = @placements
-      .reject { |p| locked_goal_ids.include?(p[:goal].id) }
-      .sort_by { |p| -TIER_WEEKS[p[:tier]] }
-
-    pace_window_end = @pace_start + 365
-
-    adjustable.each do |entry|
-      tier_idx = TIERS.index(entry[:tier])
-      next if tier_idx.nil? || tier_idx == 0
-
-      # Skip if the book already finishes within the pace window —
-      # shortening won't increase projected completions
-      goal = entry[:goal]
-      next if goal.target_completion_date <= pace_window_end
-
-      shorter_tier = TIERS[tier_idx - 1]
-      new_end = calendar_end(goal.started_on, shorter_tier)
-      new_share = compute_weekday_share(entry[:book_minutes], goal.started_on, new_end)
-      next if new_share <= 0
-
-      # Remove old placement to evaluate the new one cleanly
-      remove_range_from_profiles(goal.started_on, goal.target_completion_date, entry[:placement][:share])
-
-      unless fits_concurrency_for_adjustment?(goal.started_on, new_end, entry)
-        add_range_to_profiles(goal.started_on, goal.target_completion_date, entry[:placement][:share])
-        next
-      end
-
-      # Don't shorten if it would exceed the ceiling (preserve leveling)
-      if would_overshoot?(goal.started_on, new_end, new_share)
-        add_range_to_profiles(goal.started_on, goal.target_completion_date, entry[:placement][:share])
-        next
-      end
-
-      goal.update!(target_completion_date: new_end)
-      new_placement = { start: goal.started_on, end: new_end, share: new_share, tier: shorter_tier }
-      add_range_to_profiles(goal.started_on, new_end, new_share)
-
-      entry[:tier] = shorter_tier
-      entry[:placement] = new_placement
-      return true
-    end
-
-    false
-  end
-
-  def try_lengthen_shortest_tier!
-    adjustable = @placements
-      .reject { |p| locked_goal_ids.include?(p[:goal].id) }
-      .sort_by { |p| TIER_WEEKS[p[:tier]] }
-
-    adjustable.each do |entry|
-      tier_idx = TIERS.index(entry[:tier])
-      next if tier_idx.nil? || tier_idx >= TIERS.length - 1
-
-      longer_tier = TIERS[tier_idx + 1]
-      goal = entry[:goal]
-      new_end = calendar_end(goal.started_on, longer_tier)
-      new_share = compute_weekday_share(entry[:book_minutes], goal.started_on, new_end)
-      next if new_share <= 0
-
-      remove_range_from_profiles(goal.started_on, goal.target_completion_date, entry[:placement][:share])
-
-      # Don't lengthen if it would drop load below the daily target (preserve leveling)
-      if would_undershoot?(goal.started_on, goal.target_completion_date, new_share)
-        add_range_to_profiles(goal.started_on, goal.target_completion_date, entry[:placement][:share])
-        next
-      end
-
-      goal.update!(target_completion_date: new_end)
-      new_placement = { start: goal.started_on, end: new_end, share: new_share, tier: longer_tier }
-      add_range_to_profiles(goal.started_on, new_end, new_share)
-
-      entry[:tier] = longer_tier
-      entry[:placement] = new_placement
-      return true
-    end
-
-    false
-  end
-
-  def would_overshoot?(start_date, end_date, daily_share)
-    (start_date..end_date).each do |date|
-      next unless reading_day?(date)
-      target = target_for_date(date)
-      next if target <= 0
-      projected = @load_profile[date] + share_for_date(daily_share, date)
-      return true if projected > target + CEILING_TOLERANCE
-    end
-    false
-  end
-
-  # Mirror of would_overshoot? — called after old range is removed from
-  # profiles. Returns true if adding new_share would leave any day in the
-  # range below the daily target (floor check).
-  def would_undershoot?(start_date, end_date, new_share)
-    (start_date..end_date).each do |date|
-      next unless reading_day?(date)
-      next if date < Date.current
-      target = target_for_date(date)
-      next if target <= 0
-      projected = @load_profile[date] + share_for_date(new_share, date)
-      return true if projected < target
-    end
-    false
-  end
-
-  # Concurrency check that excludes the entry being adjusted (it's temporarily removed)
-  def fits_concurrency_for_adjustment?(start_date, end_date, excluded_entry)
-    limit = effective_concurrency_limit
-    return true unless limit
-    (start_date..end_date).each do |date|
-      next unless reading_day?(date)
-      # The excluded entry was already removed from profiles, so current count is accurate
-      return false if @concurrent_count[date] >= limit
-    end
-    true
   end
 
   # ─── Phase 5 ────────────────────────────────────────────────────
