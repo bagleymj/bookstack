@@ -129,12 +129,12 @@ export default class extends Controller {
         if (isPast) {
           minutes = getActualMinutes(g, dateStr)
         } else if (isToday) {
-          todayProgress = g.today_actual_minutes || 0
-          // Total height stays at the planned daily share so today's column
-          // matches future columns. The dark progress overlay shows how much
-          // of that planned time has been completed.
-          minutes = Math.max(g.minutes_per_day, todayProgress)
-          todayProgress = Math.min(todayProgress, minutes)
+          // Total height is the planned daily share so today's column matches
+          // future columns. The dark progress overlay is sized by quota
+          // completion fraction, not session duration estimates.
+          const quotaFraction = g.today_quota_progress || 0
+          minutes = g.minutes_per_day
+          todayProgress = quotaFraction * minutes
         } else {
           minutes = g.minutes_per_day
         }

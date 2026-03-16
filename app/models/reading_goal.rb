@@ -87,6 +87,25 @@ class ReadingGoal < ApplicationRecord
     (words / wpm).ceil
   end
 
+  # Matches the scheduler's share calculation: remaining_minutes / reading_days.
+  # Used by the pipeline chart so block heights match the scheduler's load profile.
+  def scheduler_daily_share
+    return calculated_minutes_per_day unless started_on && target_completion_date
+
+    start = [started_on, Date.current].max
+    wpm = book.actual_wpm || (user.effective_reading_speed * book.density_modifier)
+    return calculated_minutes_per_day if wpm.zero?
+
+    remaining_min = book.remaining_words.to_f / wpm
+    reading_days = if user.skip?
+      (start..target_completion_date).count { |d| !d.on_weekend? }
+    else
+      (target_completion_date - start).to_i + 1
+    end
+
+    reading_days > 0 ? (remaining_min / reading_days).round(1) : calculated_minutes_per_day
+  end
+
   def today_quota
     daily_quotas.where.not(status: :missed).find_by(date: Date.current)
   end
@@ -263,7 +282,7 @@ class ReadingGoal < ApplicationRecord
     session_boundaries = reading_session_boundaries
 
     # Use the earlier of started_on or earliest session date as the visual
-    # start so that pre-postponement reading still appears in the pipeline
+    # start so that pre-schedule reading still appears in the pipeline
     visual_start = started_on
     if session_boundaries[:earliest] && session_boundaries[:earliest] < started_on
       visual_start = session_boundaries[:earliest]
@@ -282,7 +301,7 @@ class ReadingGoal < ApplicationRecord
       total_pages: book.total_pages,
       estimated_hours: book.estimated_reading_time_hours,
       estimated_minutes: book.effective_reading_time_minutes,
-      minutes_per_day: calculated_minutes_per_day,
+      minutes_per_day: scheduler_daily_share,
       duration_days: goal_reading_days,
       days_remaining: reading_days_remaining,
       calendar_days: (started_on..target_completion_date).count,
@@ -293,6 +312,7 @@ class ReadingGoal < ApplicationRecord
       actual_minutes_by_date: actual_reading_minutes_by_date,
       today_actual_minutes: today_reading_minutes,
       today_remaining_minutes: today_remaining_estimate,
+      today_quota_progress: today_quota_fraction,
       has_sessions: session_boundaries[:has_sessions],
       earliest_session_date: session_boundaries[:earliest]&.to_s,
       latest_session_date: session_boundaries[:latest]&.to_s,
@@ -384,6 +404,15 @@ class ReadingGoal < ApplicationRecord
     quota = today_quota
     return 0 unless quota
     quota.estimated_minutes_remaining
+  end
+
+  # Returns fraction of today's quota completed (0.0 to 1.0+).
+  # Used by the pipeline chart to size the progress overlay relative
+  # to the planned daily share, avoiding WPM estimation mismatches.
+  def today_quota_fraction
+    quota = today_quota
+    return 0.0 unless quota && quota.target_pages > 0
+    quota.actual_pages.to_f / quota.target_pages
   end
 
   # Returns hash of date string -> minutes read for past days up to the goal's end date.

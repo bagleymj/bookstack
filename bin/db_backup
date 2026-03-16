@@ -15,7 +15,7 @@ pg_dump -h localhost bookstack_development > "$BACKUP_FILE"
 echo "Backup created: $BACKUP_FILE"
 echo "Size: $(du -h "$BACKUP_FILE" | cut -f1)"
 
-# Keep only last 10 backups
+# Keep only last 50 backups
 cd "$BACKUP_DIR"
-ls -t *.sql 2>/dev/null | tail -n +11 | xargs -r rm --
-echo "Cleanup complete. Keeping last 10 backups."
+ls -t *.sql 2>/dev/null | tail -n +51 | xargs -r rm --
+echo "Cleanup complete. Keeping last 50 backups."
