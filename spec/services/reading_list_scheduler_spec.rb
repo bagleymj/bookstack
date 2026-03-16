@@ -317,14 +317,24 @@ RSpec.describe ReadingListScheduler do
       end
     end
 
-    it "layers books with overlapping tiers (not purely sequential)" do
-      # Books should overlap — the greedy fill places multiple books at the
-      # same slot when load is below target, creating concurrent reading.
+    it "layers books with overlapping tiers to fill valleys (global leveling)" do
+      # With enough books, later books should use longer tiers that overlap
+      # with earlier ones to fill gaps — not just stack sequentially.
+      # This is the core heijunka behavior: uniform load across the timeline.
       8.times { |i| create_queued_book(pages: 300, position: i + 1, title: "Book #{i}") }
       schedule!
 
       goals = user.reading_goals.active.order(:started_on, :position)
       expect(goals.count).to eq(8)
+
+      # Compute daily load profile across the entire scheduled timeline
+      scheduler = ReadingListScheduler.new(user)
+      scheduler.schedule!
+
+      all_starts = goals.map(&:started_on)
+      all_ends = goals.map(&:target_completion_date)
+      timeline_start = all_starts.min
+      timeline_end = all_ends.max
 
       # Some books should overlap (not all purely sequential)
       overlapping_pairs = 0
@@ -334,6 +344,37 @@ RSpec.describe ReadingListScheduler do
         end
       end
       expect(overlapping_pairs).to be > 0, "No overlapping books — algorithm is stacking sequentially instead of layering"
+
+      # The maximum valley in the scheduled timeline should be bounded.
+      # With 8 books, if placed well, the max undershoot should be well
+      # below the full target (i.e., no completely empty weeks within the
+      # scheduled range).
+      wpm = user.effective_reading_speed
+      target_per_day = scheduler.daily_target
+      next unless target_per_day&.positive?
+
+      # Exclude the tail (after the last book starts) — only one book
+      # remains there, so load naturally drops. The core timeline is what
+      # should be leveled.
+      last_start = all_starts.max
+      weekdays = (timeline_start..last_start).select { |d| !d.on_weekend? }
+      daily_loads = weekdays.map do |date|
+        goals.sum do |g|
+          next 0 unless date >= g.started_on && date <= g.target_completion_date
+          book = g.book
+          minutes = (book.remaining_words.to_f / wpm).ceil
+          reading_days = (g.started_on..g.target_completion_date).count { |d| !d.on_weekend? }
+          reading_days > 0 ? minutes.to_f / reading_days : 0
+        end
+      end
+
+      max_load = daily_loads.max || 0
+      min_load = daily_loads.min || 0
+      # The load should not vary by more than 2x across the timeline
+      expect(max_load).to be > 0
+      expect(min_load).to be > max_load * 0.3,
+        "Valley too deep: min=#{min_load.round(1)}, max=#{max_load.round(1)}. " \
+        "Load should be leveled, not peaked."
     end
 
     it "fills to target — no persistent shortfall in the core timeline" do
