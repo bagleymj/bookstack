@@ -97,9 +97,15 @@ New books enter the pipeline on **Mondays only**. Tier durations are
 measured in whole weeks from that Monday. End dates always land on Sundays.
 This provides predictable weekly rhythms.
 
-The one exception: mid-week ramp-in. If the scheduler runs for the first
-time mid-week (e.g. user sets up their pace on a Wednesday), the first
-placement starts today and ends on the current week's Sunday. All
+Once committed books exist for the current week, **no new books enter
+mid-week**. The user packed specific books — the system doesn't surprise
+them with new ones. If a book finishes mid-week and frees capacity, the
+system suggests ad-hoc reading of the next queued book rather than
+auto-scheduling it. New books wait for the next Monday.
+
+The one exception: **mid-week ramp-in**. If the scheduler runs mid-week
+with no committed books (e.g. new user, first setup on a Wednesday), the
+first placement starts today and ends on the current week's Sunday. All
 subsequent placements start on Mondays.
 
 ### Book commitment (started_on <= today)

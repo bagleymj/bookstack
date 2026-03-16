@@ -761,10 +761,10 @@ RSpec.describe ReadingListScheduler do
       end
     end
 
-    it "can place new books mid-week to fill capacity" do
+    it "does not add new books mid-week when committed books exist" do
       wednesday = monday + 2
       travel_to wednesday do
-        # Committed goal from Monday — its load is in the profile
+        # Committed goal from Monday
         existing = create(:book, :reading, user: user, last_page: 300, current_page: 50, title: "Existing")
         create(:reading_goal, user: user, book: existing, status: :active,
                started_on: monday, target_completion_date: monday + 6,
@@ -775,12 +775,12 @@ RSpec.describe ReadingListScheduler do
 
         goal = user.reading_goals.find_by(book: Book.find_by(title: "New Mid-Week"))
         expect(goal).to be_active
-        # New book may start this week (mid-week ramp-in) or next Monday
-        # depending on whether the slot has capacity
+        expect(goal.started_on).to be >= monday + 7,
+          "New book should wait for next Monday, not enter mid-week (started #{goal.started_on})"
       end
     end
 
-    it "allows mid-week ramp-in for first placement" do
+    it "allows mid-week ramp-in when no committed books exist" do
       wednesday = monday + 2
       travel_to wednesday do
         create_queued_book(pages: 300, position: 1, title: "Fresh Start")
