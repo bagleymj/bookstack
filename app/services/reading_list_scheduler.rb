@@ -7,7 +7,6 @@ class ReadingListScheduler
   }.freeze
   MAX_ADJUSTMENT_ITERATIONS = 5
   PLACEMENT_HORIZON_WEEKS = 104
-  CEILING_TOLERANCE = 15  # minutes above target before penalizing overshoot
   MIN_DAILY_SHARE = 5     # minutes — don't flatten a book below this per day
   WARNING_DAILY_LIMIT = 300  # 5 hours — warn user pace is unsustainable
   HARD_DAILY_LIMIT = 1440   # 24 hours — refuse to schedule
@@ -53,6 +52,7 @@ class ReadingListScheduler
       target_warning: target_warning(daily_target),
       concurrency_hint: concurrency_hint(daily_target, target),
       ahead_suggestion: ahead_suggestion,
+      unplaceable_books: @unplaceable_books || [],
       epoch_books_scheduled: current_epoch_goals.size,
       epoch_books_target: @epoch_target,
       epoch_count: (total_queued.to_f / annual_pace.round).ceil
@@ -74,7 +74,6 @@ class ReadingListScheduler
     # Phase 3: Slot-by-slot bin filling (first slot may be mid-week)
     @load_profile = Hash.new(0.0)
     @concurrent_count = Hash.new(0)
-    @timeline_end = nil
     @graduated_ids = Set.new
 
     locked_goals.each { |goal| add_goal_to_profiles(goal) }
@@ -228,13 +227,26 @@ class ReadingListScheduler
     # Stretch the last book if it caused overshoot
     relax_last_placement!(placements, goals)
 
-    # Fallback: any books still unscheduled get default placement
+    # Books that couldn't be placed via combination search get the shortest
+    # tier as a fallback (e.g., very short books below MIN_DAILY_SHARE).
+    # Books that can't be placed at all remain unscheduled with a warning.
+    @unplaceable_books = []
     goals.each do |goal|
       next unless unscheduled.include?(goal.id)
       book_minutes = estimate_remaining_minutes(goal.book)
-      placement = default_placement(book_minutes)
-      record_placement!(placements, goal, placement, book_minutes)
-      unscheduled.delete(goal.id)
+      placed = false
+
+      each_placement_start do |slot_start|
+        placement = compute_share_for(book_minutes, slot_start, TIERS.first)
+        next unless placement
+        next unless fits_concurrency?(placement[:start], placement[:end])
+        record_placement!(placements, goal, placement, book_minutes)
+        unscheduled.delete(goal.id)
+        placed = true
+        break
+      end
+
+      @unplaceable_books << goal.book.title unless placed
     end
 
     placements
@@ -338,7 +350,7 @@ class ReadingListScheduler
     goals.each do |goal|
       next unless unscheduled.include?(goal.id)
       next if current_week_slot?(slot_start) && !goal.book.owned?
-      next if current_week_slot?(slot_start) && !Date.current.monday? && locked_goals.any?
+      next if current_week_slot?(slot_start) && !Date.current.monday? && has_existing_schedule?
       entry = share_index[goal.id]
 
       TIERS.each do |tier|
@@ -346,7 +358,7 @@ class ReadingListScheduler
         next unless placement
         next unless fits_concurrency?(placement[:start], placement[:end])
 
-        slot_share = share_for_date(placement[:share], slot_start)
+        slot_share = placement[:share]
         next if slot_share < MIN_DAILY_SHARE
 
         candidates << {
@@ -457,9 +469,6 @@ class ReadingListScheduler
     reading_days > 0 ? book_minutes.to_f / reading_days : 0
   end
 
-  def share_for_date(share, _date)
-    share
-  end
 
   # Yields today first (mid-week ramp-in), then subsequent Mondays.
   # When today IS Monday, yields today and then Monday+7, Monday+14, etc.
@@ -495,26 +504,17 @@ class ReadingListScheduler
   def add_range_to_profiles(start_date, end_date, daily_share)
     (start_date..end_date).each do |date|
       next unless reading_day?(date)
-      @load_profile[date] += share_for_date(daily_share, date)
+      @load_profile[date] += daily_share
       @concurrent_count[date] += 1
     end
-    @timeline_end = [@timeline_end, end_date].compact.max if @timeline_end != false
   end
 
   def remove_range_from_profiles(start_date, end_date, daily_share)
     (start_date..end_date).each do |date|
       next unless reading_day?(date)
-      @load_profile[date] -= share_for_date(daily_share, date)
+      @load_profile[date] -= daily_share
       @concurrent_count[date] -= 1
     end
-  end
-
-  def default_placement(book_minutes)
-    start = Date.current
-    tier = TIERS.last
-    end_date = calendar_end(start, tier)
-    share = compute_weekday_share(book_minutes, start, end_date)
-    { start: start, end: end_date, share: share, tier: tier }
   end
 
   # ─── Phase 3a: Locked Goal Graduation ──────────────────────────
@@ -630,7 +630,7 @@ class ReadingListScheduler
         next false unless reading_day?(date)
         target = target_for_date(date)
         next false if target <= 0
-        @load_profile[date] - share_for_date(old_share, date) + share_for_date(new_share, date) > target
+        @load_profile[date] - old_share + new_share > target
       end
       # This tier is valid if it doesn't overshoot — pick the longest valid one
       best_tier = tier unless overshoots
@@ -778,8 +778,8 @@ class ReadingListScheduler
       next unless reading_day?(date)
       target = target_for_date(date)
       next if target <= 0
-      projected = @load_profile[date] + share_for_date(daily_share, date)
-      return true if projected > target + CEILING_TOLERANCE
+      projected = @load_profile[date] + daily_share
+      return true if projected > target
     end
     false
   end
@@ -793,7 +793,7 @@ class ReadingListScheduler
       next if date < Date.current
       target = target_for_date(date)
       next if target <= 0
-      projected = @load_profile[date] + share_for_date(new_share, date)
+      projected = @load_profile[date] + new_share
       return true if projected < target
     end
     false
@@ -851,6 +851,14 @@ class ReadingListScheduler
       .where(user: @user)
       .where.not(ended_at: nil)
       .where("started_at >= ?", Date.current.beginning_of_day)
+      .exists?
+  end
+
+  # True if the user has any active auto-scheduled goals (the schedule
+  # is established). False on first-ever run or after a pace reset.
+  def has_existing_schedule?
+    @has_existing_schedule ||= @user.reading_goals
+      .where(auto_scheduled: true, status: :active)
       .exists?
   end
 
@@ -933,7 +941,7 @@ class ReadingListScheduler
     { pace_status: nil, deficit: 0, derived_target: 0,
       projected_completions: 0, pace_target: 0, queue_depth: 0, queue_warning: nil,
       target_warning: nil, concurrency_hint: nil, ahead_suggestion: nil,
-      epoch_books_scheduled: 0, epoch_books_target: 0, epoch_count: 0 }
+      unplaceable_books: [], epoch_books_scheduled: 0, epoch_books_target: 0, epoch_count: 0 }
   end
 
   def pace_status_label(target)
