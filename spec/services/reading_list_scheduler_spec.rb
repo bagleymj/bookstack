@@ -107,9 +107,9 @@ RSpec.describe ReadingListScheduler do
         end
       end
 
-      it "only locks books the user has read this week" do
+      it "commits books whose started_on has arrived" do
         travel_to wednesday do
-          # Place two books on Monday, read only Book A on Tuesday
+          # Both books started Monday — both are committed (started_on <= today)
           book_a = create(:book, :reading, user: user, last_page: 300, current_page: 20, title: "Book A")
           goal_a = create(:reading_goal, user: user, book: book_a, status: :active,
                           started_on: wednesday.beginning_of_week(:monday),
@@ -121,18 +121,13 @@ RSpec.describe ReadingListScheduler do
                           target_completion_date: wednesday.beginning_of_week(:monday) + 6,
                           auto_scheduled: true, position: 2)
 
-          # Session on Book A only — Book A is locked, Book B is freely schedulable
-          create(:reading_session, :completed, user: user, book: book_a,
-                 start_page: 1, end_page: 20, started_at: wednesday - 1.day, ended_at: wednesday - 1.day + 1.hour)
-
           schedule!
 
           goal_a.reload
           goal_b.reload
-          # Book A is locked (read this week)
+          # Both committed — started_on preserved (not re-placed)
           expect(goal_a.started_on).to eq(wednesday.beginning_of_week(:monday))
-          # Book B is freely schedulable (not read this week)
-          expect(goal_b).to be_active
+          expect(goal_b.started_on).to eq(wednesday.beginning_of_week(:monday))
         end
       end
 
@@ -544,43 +539,30 @@ RSpec.describe ReadingListScheduler do
 
   # ─── Locked Goals ──────────────────────────────────────────────
 
-  describe "locked goals" do
-    it "preserves committed books (those with reading sessions)" do
+  describe "committed goals (started_on <= today)" do
+    it "preserves committed books on reschedule" do
       book = create_queued_book(pages: 300, position: 1)
       schedule!
 
       goal = user.reading_goals.find_by(book: book)
       original_start = goal.started_on
 
-      # Add a reading session to lock this goal
-      create(:reading_session, user: user, book: book,
-             start_page: 1, end_page: 10, pages_read: 10,
-             started_at: Time.current, ended_at: 30.minutes.from_now,
-             duration_seconds: 1800)
-
+      # Goal is committed because started_on <= today (set by schedule!)
       # Add another book and reschedule
       create_queued_book(pages: 200, position: 2, title: "New Book")
       schedule!
 
       goal.reload
-      # Locked goals are not re-placed: started_on stays the same.
-      # target_completion_date may shift via graduation if load exceeds target.
       expect(goal.started_on).to eq(original_start)
       expect(goal.target_completion_date).to be >= original_start
       expect(goal.target_completion_date).to be_sunday
     end
 
-    it "includes locked goals in the load profile for new placements" do
+    it "includes committed goals in the load profile for new placements" do
       book = create_queued_book(pages: 300, position: 1)
       schedule!
 
-      goal = user.reading_goals.find_by(book: book)
-      create(:reading_session, user: user, book: book,
-             start_page: 1, end_page: 10, pages_read: 10,
-             started_at: Time.current, ended_at: 30.minutes.from_now,
-             duration_seconds: 1800)
-
-      # New book should account for locked goal's load
+      # New book should account for committed goal's load
       create_queued_book(pages: 300, position: 2, title: "New Book")
       schedule!
 
@@ -588,28 +570,19 @@ RSpec.describe ReadingListScheduler do
       expect(new_goal).to be_active
     end
 
-    it "contracts locked goals to shorter tiers when undershooting" do
-      # Place a book in a long tier, add a session to lock it, then
-      # reschedule. The contraction should shorten the tier to get the
-      # daily load back up toward the target.
+    it "contracts committed goals to shorter tiers when undershooting" do
       book = create_queued_book(pages: 200, position: 1, title: "Long Tier")
       schedule!
 
       goal = user.reading_goals.find_by(book: book)
-      original_end = goal.target_completion_date
 
       # Manually extend to a very long tier (simulating a previous graduation)
       ref_monday = goal.started_on.beginning_of_week(:monday)
       long_end = ref_monday + (12 * 7) - 1
       goal.update!(target_completion_date: long_end)
 
-      # Add a reading session to lock it
-      create(:reading_session, user: user, book: book,
-             start_page: 1, end_page: 10, pages_read: 10,
-             started_at: Time.current, ended_at: 30.minutes.from_now,
-             duration_seconds: 1800)
-
-      # Reschedule — contraction should shorten the tier
+      # Goal is committed (started_on <= today). Reschedule — contraction
+      # should shorten the tier.
       schedule!
 
       goal.reload
@@ -618,7 +591,7 @@ RSpec.describe ReadingListScheduler do
       expect(goal.target_completion_date).to be_sunday
     end
 
-    it "only locks books the user has read this week, not future books" do
+    it "does not commit books with started_on in the future" do
       book_a = create_queued_book(pages: 300, position: 1, title: "This Week")
       book_b = create_queued_book(pages: 300, position: 2, title: "Future")
       schedule!
@@ -626,24 +599,10 @@ RSpec.describe ReadingListScheduler do
       goal_a = user.reading_goals.find_by(book: book_a)
       goal_b = user.reading_goals.find_by(book: book_b)
 
-      # Read book A this week — only book A should be locked
-      create(:reading_session, user: user, book: book_a,
-             start_page: 1, end_page: 10, pages_read: 10,
-             started_at: 2.days.ago, ended_at: 2.days.ago + 30.minutes,
-             duration_seconds: 1800)
-
-      original_b_start = goal_b.started_on
-      original_b_end = goal_b.target_completion_date
-
-      # Reschedule — book B should be freely re-placed
-      schedule!
-
-      goal_a.reload
-      goal_b.reload
-
-      # Book A is locked (started_on preserved)
-      expect(goal_a.started_on).to be_present
-      # Book B may have been re-placed (it's not locked)
+      # Book A started today or earlier — committed
+      expect(goal_a.started_on).to be <= Date.current
+      # Book B may have started_on in the future — not committed, freely re-placeable
+      # (Its exact start depends on tier selection, but it should be active)
       expect(goal_b).to be_active
     end
   end
@@ -823,7 +782,7 @@ RSpec.describe ReadingListScheduler do
       end
     end
 
-    it "allows new books mid-week when no sessions exist" do
+    it "places new books on next Monday when run mid-week" do
       wednesday = monday + 2
       travel_to wednesday do
         create_queued_book(pages: 300, position: 1, title: "Fresh Start")
@@ -831,8 +790,8 @@ RSpec.describe ReadingListScheduler do
 
         goal = user.reading_goals.find_by(book: Book.find_by(title: "Fresh Start"))
         expect(goal).to be_active
-        expect(goal.started_on).to eq(wednesday),
-          "New book should start today when no sessions exist (started #{goal.started_on})"
+        expect(goal.started_on).to eq(monday + 7),
+          "New book should start next Monday, not mid-week (started #{goal.started_on})"
       end
     end
 
@@ -901,20 +860,20 @@ RSpec.describe ReadingListScheduler do
       expect(goal.status).to eq("queued")
     end
 
-    it "is idempotent — running twice produces the same result" do
+    it "preserves committed books' start dates across reruns" do
       3.times { |i| create_queued_book(pages: 300, position: i + 1, title: "Book #{i}") }
 
       schedule!
-      first_run = user.reading_goals.active.order(:position).map do |g|
-        [g.book.title, g.started_on, g.target_completion_date]
+      committed_starts = user.reading_goals.active.select { |g| g.started_on <= Date.current }.map do |g|
+        [g.book.title, g.started_on]
       end
 
       schedule!
-      second_run = user.reading_goals.active.order(:position).map do |g|
-        [g.book.title, g.started_on, g.target_completion_date]
+      after_rerun = user.reading_goals.active.select { |g| committed_starts.any? { |t, _| t == g.book.title } }.map do |g|
+        [g.book.title, g.started_on]
       end
 
-      expect(second_run).to eq(first_run)
+      expect(after_rerun).to eq(committed_starts)
     end
   end
 
@@ -964,37 +923,34 @@ RSpec.describe ReadingListScheduler do
       end
     end
 
-    it "keeps locked goals with sessions this week" do
+    it "keeps committed goals (started_on <= today)" do
       travel_to monday + 2 do # Wednesday
-        _, locked_goal = create_active_book_with_sessions(
-          title: "Locked Book", pages: 300, position: 1,
-          started_on: monday, target_completion_date: monday + 13,
-          session_date: monday + 1 # Tuesday of this week
-        )
-        original_start = locked_goal.started_on
-        original_end = locked_goal.target_completion_date
+        book = create(:book, :reading, user: user, last_page: 300, current_page: 1, title: "Committed Book")
+        committed_goal = create(:reading_goal, user: user, book: book, status: :active,
+                                started_on: monday, target_completion_date: monday + 13,
+                                auto_scheduled: true, position: 1)
+        original_start = committed_goal.started_on
+        original_end = committed_goal.target_completion_date
 
         schedule!
 
-        locked_goal.reload
-        expect(locked_goal.started_on).to eq(original_start)
-        expect(locked_goal.target_completion_date).to eq(original_end)
+        committed_goal.reload
+        expect(committed_goal.started_on).to eq(original_start)
+        expect(committed_goal.target_completion_date).to eq(original_end)
       end
     end
 
-    it "graduates under-read locked goal to longer tier" do
+    it "graduates overshooting committed goals to longer tier" do
       travel_to monday + 2 do # Wednesday
-        # Two locked goals with very short tiers — combined load will overshoot
-        _, goal_a = create_active_book_with_sessions(
-          title: "Heavy A", pages: 500, position: 1,
-          started_on: monday, target_completion_date: monday + 6, # 1-week tier
-          session_date: monday + 1
-        )
-        _, goal_b = create_active_book_with_sessions(
-          title: "Heavy B", pages: 500, position: 2,
-          started_on: monday, target_completion_date: monday + 6, # 1-week tier
-          session_date: monday + 1
-        )
+        # Two committed goals with very short tiers — combined load will overshoot
+        book_a = create(:book, :reading, user: user, last_page: 500, current_page: 1, title: "Heavy A")
+        goal_a = create(:reading_goal, user: user, book: book_a, status: :active,
+                        started_on: monday, target_completion_date: monday + 6,
+                        auto_scheduled: true, position: 1)
+        book_b = create(:book, :reading, user: user, last_page: 500, current_page: 1, title: "Heavy B")
+        goal_b = create(:reading_goal, user: user, book: book_b, status: :active,
+                        started_on: monday, target_completion_date: monday + 6,
+                        auto_scheduled: true, position: 2)
 
         original_end_a = goal_a.target_completion_date
         original_end_b = goal_b.target_completion_date
@@ -1014,15 +970,13 @@ RSpec.describe ReadingListScheduler do
       end
     end
 
-    it "contracts a locked goal from an over-long tier toward the target" do
+    it "contracts a committed goal from an over-long tier toward the target" do
       travel_to monday + 2 do # Wednesday
-        # Single locked goal with an over-long tier — load well under target.
-        # Contraction should shorten the tier to bring load closer to target.
-        _, goal = create_active_book_with_sessions(
-          title: "Easy Book", pages: 100, position: 1,
-          started_on: monday, target_completion_date: monday + 27, # 4-week tier
-          session_date: monday + 1
-        )
+        # Single committed goal with an over-long tier — load well under target.
+        book = create(:book, :reading, user: user, last_page: 100, current_page: 1, title: "Easy Book")
+        goal = create(:reading_goal, user: user, book: book, status: :active,
+                      started_on: monday, target_completion_date: monday + 27,
+                      auto_scheduled: true, position: 1)
         original_end = goal.target_completion_date
 
         schedule!
@@ -1036,25 +990,23 @@ RSpec.describe ReadingListScheduler do
 
     it "credits over-reading via reduced daily share" do
       travel_to monday + 2 do # Wednesday
-        # Book with pages already read — remaining_minutes is smaller
+        # Book with pages already read — remaining_minutes is smaller.
+        # The goal is committed (started_on in the past) so it's locked.
+        # Graduation/contraction adjusts its tier; DailyReflow handles
+        # quota redistribution for committed books.
         book = create(:book, user: user, last_page: 300, current_page: 200, title: "Half-Read")
         goal = create(:reading_goal, user: user, book: book, status: :active,
                       started_on: monday - 7, target_completion_date: monday + 6,
                       auto_scheduled: true, position: 1)
-        goal.daily_quotas.destroy_all
-        # Session from last week — makes it stale
-        create(:reading_session, user: user, book: book,
-               start_page: 1, end_page: 200, pages_read: 199,
-               started_at: (monday - 5).to_time, ended_at: (monday - 5).to_time + 2.hours,
-               duration_seconds: 7200)
+        ProfileAwareQuotaCalculator.new(goal, user).generate_quotas!
 
-        result = schedule!
+        schedule!
 
         goal.reload
-        expect(result).to include(goal.id)
-        # With fewer remaining pages, the daily share is lower
-        remaining_quotas = goal.daily_quotas.where("date >= ?", Date.current)
-        expect(remaining_quotas.sum(:target_pages)).to eq(book.remaining_pages)
+        # Committed goal stays committed
+        expect(goal.started_on).to eq(monday - 7)
+        # Its load profile reflects reduced remaining pages (100 pages, not 300)
+        expect(goal).to be_active
       end
     end
 

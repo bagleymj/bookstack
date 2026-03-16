@@ -6,15 +6,20 @@ honor these constraints.
 
 ## What This System Is
 
-You want to read 50 books this year. You have a list of books, in order.
-You open the app and it tells you what to read today — the same total time
-every day, predictable, sustainable. You pack books for a trip on Friday
-and they're the same books Monday morning.
+The scheduler implements **heijunka** (production leveling) for reading.
+The pipeline is a conveyor belt. Books enter as packages of varying size
+(reading time). Each package is placed in a **tier** — a fixed-duration
+slot that determines how long it rides the belt. Multiple packages ride
+concurrently. The belt moves at a constant speed (the daily reading
+target), and the scheduler's job is to keep the belt uniformly loaded.
+
+**The promise to the user:** You want to read 50 books this year. You have
+a list of books, in order. You open the app and it tells you what to read
+today — the same total time every day, predictable, sustainable. You pack
+books for a trip on Friday and they're the same books Monday morning.
 
 The schedule only changes when something real changes: you finish a book,
 you add a book, your reading speed data updates, or a reading day passes.
-Not because the calendar rolled from Sunday to Monday. Not because you
-didn't read yesterday. Not because of anything invisible.
 
 The system's job is to turn a pace target into daily assignments. The user
 controls the inputs (pace, book list, concurrency limit). The system
@@ -409,7 +414,4 @@ arbitrary-duration placements.
 - relax_last_placement (last-book safety valve)
 
 ### Not yet implemented
-- **started_on-based commitment**: code still uses session-based locking
-  with Monday week boundary reset. Needs to be changed to
-  `started_on <= Date.current`.
 - **Postponement**: user action to uncommit a book and return it to queue.

@@ -334,7 +334,7 @@ class ReadingListScheduler
     goals.each do |goal|
       next unless unscheduled.include?(goal.id)
       next if current_week_slot?(slot_start) && !goal.book.owned?
-      next if current_week_slot?(slot_start) && !Date.current.monday? && user_has_sessions_this_week? && !@stale_goal_ids.include?(goal.id)
+      next if current_week_slot?(slot_start) && !Date.current.monday?
       entry = share_index[goal.id]
 
       TIERS.each do |tier|
@@ -828,29 +828,16 @@ class ReadingListScheduler
 
   # ─── Timeline & Goals ──────────────────────────────────────────
 
+  # A goal is committed once its started_on date has arrived.
+  # Committed goals are not re-placed — only their end dates may flex
+  # via graduation/contraction.
   def locked_goals
-    @locked_goals ||= begin
-      return [] unless user_has_sessions_this_week?
-
-      # Only lock goals for books the user has actually read this week.
-      # Future books are freely schedulable even if the user has been
-      # reading other books this week.
-      week_start = Date.current.beginning_of_week(:monday).beginning_of_day
-      book_ids_read_this_week = ReadingSession
-        .where(user: @user)
-        .where.not(ended_at: nil)
-        .where("started_at >= ?", week_start)
-        .select(:book_id)
-        .distinct
-        .pluck(:book_id)
-
-      @user.reading_goals
-           .active
-           .where.not(target_completion_date: nil)
-           .where(book_id: book_ids_read_this_week)
-           .includes(:book)
-           .to_a
-    end
+    @locked_goals ||= @user.reading_goals
+      .active
+      .where.not(target_completion_date: nil)
+      .where("started_on <= ?", Date.current)
+      .includes(:book)
+      .to_a
   end
 
   # If the user has already read today, don't touch today's quotas.
@@ -867,14 +854,6 @@ class ReadingListScheduler
       .exists?
   end
 
-  def user_has_sessions_this_week?
-    @user_has_sessions_this_week ||= ReadingSession
-      .where(user: @user)
-      .where.not(ended_at: nil)
-      .where("started_at >= ?", Date.current.beginning_of_week(:monday).beginning_of_day)
-      .exists?
-  end
-
   def locked_goal_ids
     @locked_goal_ids ||= locked_goals.map(&:id).to_set
   end
@@ -882,7 +861,8 @@ class ReadingListScheduler
   def gather_schedulable_goals
     goals = current_epoch_goals.reject { |g| locked_goal_ids.include?(g.id) }
 
-    # Track which goals are stale (active with sessions, but not this week)
+    # Track stale goals (active with prior sessions but not committed).
+    # Rare with started_on-based commitment, but preserves started_on if present.
     @stale_goal_ids = goals.select { |g| g.active? && g.has_reading_sessions? }.map(&:id).to_set
 
     goals
