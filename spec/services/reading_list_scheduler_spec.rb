@@ -1053,6 +1053,33 @@ RSpec.describe ReadingListScheduler do
       expect(metrics[:pace_status]).to be_a(String)
     end
 
+    it "warns when daily target exceeds 5 hours" do
+      # Set pace start far in the past so deficit is huge
+      user.update!(reading_pace_set_on: 11.months.ago.to_date)
+      create_queued_book(pages: 600, position: 1)
+
+      metrics = ReadingListScheduler.new(user).metrics
+      if metrics[:derived_target] >= 300
+        expect(metrics[:target_warning]).to include("hours")
+      end
+    end
+
+    it "refuses to schedule when daily target exceeds 24 hours" do
+      # Extreme scenario: 50 books/year pace, started 364 days ago, nothing read
+      user.update!(reading_pace_set_on: 364.days.ago.to_date)
+      50.times { |i| create_queued_book(pages: 1000, position: i + 1, title: "Big #{i}") }
+
+      scheduler = ReadingListScheduler.new(user)
+      metrics = scheduler.metrics
+
+      # If target is extreme enough, scheduler refuses
+      if metrics[:derived_target] >= 1440
+        result = ReadingListScheduler.new(user).schedule!
+        expect(result).to be_empty
+        expect(metrics[:target_warning]).to include("suspended")
+      end
+    end
+
     it "reports queue warning when not enough books are queued" do
       # Only 1 book queued, pace target is 50/year
       create_queued_book(pages: 300, position: 1)

@@ -9,6 +9,8 @@ class ReadingListScheduler
   PLACEMENT_HORIZON_WEEKS = 104
   CEILING_TOLERANCE = 15  # minutes above target before penalizing overshoot
   MIN_DAILY_SHARE = 5     # minutes — don't flatten a book below this per day
+  WARNING_DAILY_LIMIT = 300  # 5 hours — warn user pace is unsustainable
+  HARD_DAILY_LIMIT = 1440   # 24 hours — refuse to schedule
 
   attr_reader :daily_target, :deficit
 
@@ -48,6 +50,7 @@ class ReadingListScheduler
       carried_deficit: @carried_deficit,
       queue_depth: queued_count,
       queue_warning: queue_warning(queued_count, target, projected),
+      target_warning: target_warning(daily_target),
       concurrency_hint: concurrency_hint(daily_target, target),
       ahead_suggestion: ahead_suggestion,
       epoch_books_scheduled: current_epoch_goals.size,
@@ -65,6 +68,7 @@ class ReadingListScheduler
     # Phase 2: Compute derived daily target
     @daily_target = compute_daily_target
     return Set.new if @daily_target <= 0
+    return Set.new if @daily_target >= HARD_DAILY_LIMIT
     compute_weekend_targets
 
     # Phase 3: Slot-by-slot bin filling (first slot may be mid-week)
@@ -928,7 +932,7 @@ class ReadingListScheduler
   def default_metrics
     { pace_status: nil, deficit: 0, derived_target: 0,
       projected_completions: 0, pace_target: 0, queue_depth: 0, queue_warning: nil,
-      concurrency_hint: nil, ahead_suggestion: nil,
+      target_warning: nil, concurrency_hint: nil, ahead_suggestion: nil,
       epoch_books_scheduled: 0, epoch_books_target: 0, epoch_count: 0 }
   end
 
@@ -946,6 +950,17 @@ class ReadingListScheduler
     shortfall = target - projected
     return nil if shortfall <= 0
     "Add #{shortfall}+ books to maintain your pace"
+  end
+
+  def target_warning(daily_target)
+    return nil unless daily_target&.positive?
+    if daily_target >= HARD_DAILY_LIMIT
+      "Your pace requires #{daily_target.round} min/day (#{(daily_target / 60).round}+ hours) — " \
+        "scheduling is suspended. Reset your pace or reduce your book list."
+    elsif daily_target >= WARNING_DAILY_LIMIT
+      "Your pace requires #{daily_target.round} min/day (#{(daily_target / 60).round(1)} hours). " \
+        "Consider reducing your pace target."
+    end
   end
 
   def concurrency_hint(daily_target, target)
