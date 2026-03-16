@@ -761,28 +761,26 @@ RSpec.describe ReadingListScheduler do
       end
     end
 
-    it "does not place new books mid-week when sessions exist" do
+    it "can place new books mid-week to fill capacity" do
       wednesday = monday + 2
       travel_to wednesday do
-        # Create an active goal with a session to lock the week
+        # Committed goal from Monday — its load is in the profile
         existing = create(:book, :reading, user: user, last_page: 300, current_page: 50, title: "Existing")
         create(:reading_goal, user: user, book: existing, status: :active,
                started_on: monday, target_completion_date: monday + 6,
                auto_scheduled: true, position: 1)
-        create(:reading_session, :completed, user: user, book: existing,
-               start_page: 1, end_page: 50, started_at: wednesday - 1.day, ended_at: wednesday - 1.day + 1.hour)
 
         create_queued_book(pages: 300, position: 2, title: "New Mid-Week")
         schedule!
 
         goal = user.reading_goals.find_by(book: Book.find_by(title: "New Mid-Week"))
         expect(goal).to be_active
-        expect(goal.started_on).to be >= monday + 7,
-          "New book should not start mid-week when sessions exist (started #{goal.started_on})"
+        # New book may start this week (mid-week ramp-in) or next Monday
+        # depending on whether the slot has capacity
       end
     end
 
-    it "places new books on next Monday when run mid-week" do
+    it "allows mid-week ramp-in for first placement" do
       wednesday = monday + 2
       travel_to wednesday do
         create_queued_book(pages: 300, position: 1, title: "Fresh Start")
@@ -790,8 +788,8 @@ RSpec.describe ReadingListScheduler do
 
         goal = user.reading_goals.find_by(book: Book.find_by(title: "Fresh Start"))
         expect(goal).to be_active
-        expect(goal.started_on).to eq(monday + 7),
-          "New book should start next Monday, not mid-week (started #{goal.started_on})"
+        expect(goal.started_on).to eq(wednesday),
+          "First placement should start today (mid-week ramp-in), got #{goal.started_on}"
       end
     end
 

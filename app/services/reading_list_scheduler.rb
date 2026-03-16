@@ -334,7 +334,6 @@ class ReadingListScheduler
     goals.each do |goal|
       next unless unscheduled.include?(goal.id)
       next if current_week_slot?(slot_start) && !goal.book.owned?
-      next if current_week_slot?(slot_start) && !Date.current.monday?
       entry = share_index[goal.id]
 
       TIERS.each do |tier|
