@@ -1,0 +1,111 @@
+<div class="space-y-6">
+  <div class="md:flex md:items-center md:justify-between">
+    <div class="min-w-0 flex-1">
+      <h2 class="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight">Import Complete</h2>
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+    <div class="rounded-lg bg-green-50 p-4">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <svg class="h-8 w-8 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <div class="ml-3">
+          <p class="text-2xl font-bold text-green-800"><%= @result.imported.size %></p>
+          <p class="text-sm text-green-600">Imported</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="rounded-lg bg-yellow-50 p-4">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <svg class="h-8 w-8 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+          </svg>
+        </div>
+        <div class="ml-3">
+          <p class="text-2xl font-bold text-yellow-800"><%= @result.skipped.size %></p>
+          <p class="text-sm text-yellow-600">Skipped (duplicates)</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="rounded-lg bg-red-50 p-4">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <svg class="h-8 w-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <div class="ml-3">
+          <p class="text-2xl font-bold text-red-800"><%= @result.errors.size %></p>
+          <p class="text-sm text-red-600">Errors</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Imported books -->
+  <% if @result.imported.any? %>
+    <div class="rounded-lg bg-white shadow">
+      <div class="px-4 py-3 border-b border-gray-200">
+        <h3 class="text-sm font-semibold text-gray-900">Successfully imported</h3>
+      </div>
+      <ul class="divide-y divide-gray-200">
+        <% @result.imported.each do |book| %>
+          <li class="px-4 py-3 flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium text-gray-900"><%= book.title %></p>
+              <p class="text-xs text-gray-500"><%= book.author %> &middot; <%= book.total_pages %> pages</p>
+            </div>
+            <%= link_to "View", book, class: "text-xs font-medium text-indigo-600 hover:text-indigo-500" %>
+          </li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <!-- Skipped books -->
+  <% if @result.skipped.any? %>
+    <div class="rounded-lg bg-white shadow">
+      <div class="px-4 py-3 border-b border-gray-200">
+        <h3 class="text-sm font-semibold text-gray-900">Skipped</h3>
+      </div>
+      <ul class="divide-y divide-gray-200">
+        <% @result.skipped.each do |entry| %>
+          <li class="px-4 py-3">
+            <p class="text-sm font-medium text-gray-900"><%= entry[:title] %></p>
+            <p class="text-xs text-yellow-600"><%= entry[:reason] %></p>
+          </li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <!-- Errors -->
+  <% if @result.errors.any? %>
+    <div class="rounded-lg bg-white shadow">
+      <div class="px-4 py-3 border-b border-gray-200">
+        <h3 class="text-sm font-semibold text-gray-900">Errors</h3>
+      </div>
+      <ul class="divide-y divide-gray-200">
+        <% @result.errors.each do |entry| %>
+          <li class="px-4 py-3">
+            <p class="text-sm font-medium text-gray-900"><%= entry[:title] %></p>
+            <p class="text-xs text-red-600"><%= entry[:reason] %></p>
+          </li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="flex items-center gap-4">
+    <%= link_to "Import More", goodreads_path, class: "inline-flex items-center rounded-md bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50" %>
+    <%= link_to "View Books", books_path, class: "inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500" %>
+  </div>
+</div>

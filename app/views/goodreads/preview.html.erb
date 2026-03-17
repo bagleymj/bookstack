@@ -1,0 +1,105 @@
+<div class="space-y-6" data-controller="import-filter">
+  <div class="md:flex md:items-center md:justify-between">
+    <div class="min-w-0 flex-1">
+      <h2 class="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight">Import Preview</h2>
+      <p class="mt-1 text-sm text-gray-500">
+        Found <strong><%= @entries.size %></strong> books in your Goodreads export.
+        Select the ones you want to import.
+      </p>
+    </div>
+    <div class="mt-4 flex md:ml-4 md:mt-0">
+      <%= link_to "Back", goodreads_path, class: "inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50" %>
+    </div>
+  </div>
+
+  <%= form_tag import_goodreads_path, method: :post, id: "import-form" do %>
+    <!-- Shelf filter and select controls -->
+    <div class="rounded-lg bg-white p-4 shadow mb-4">
+      <div class="flex flex-wrap items-center gap-4">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-sm font-medium text-gray-700">Filter by shelf:</span>
+          <button type="button" data-action="click->import-filter#filterAll"
+                  class="rounded-full px-3 py-1 text-xs font-medium bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
+                  data-import-filter-target="filterBtn" data-shelf="all">
+            All (<%= @entries.size %>)
+          </button>
+          <% @shelves.each do |shelf| %>
+            <% count = @entries.count { |e| e[:exclusive_shelf] == shelf } %>
+            <button type="button" data-action="click->import-filter#filterShelf"
+                    class="rounded-full px-3 py-1 text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    data-import-filter-target="filterBtn" data-shelf="<%= shelf %>">
+              <%= shelf %> (<%= count %>)
+            </button>
+          <% end %>
+        </div>
+
+        <div class="ml-auto flex items-center gap-3">
+          <button type="button" data-action="click->import-filter#selectVisible"
+                  class="text-xs font-medium text-indigo-600 hover:text-indigo-500">
+            Select all visible
+          </button>
+          <button type="button" data-action="click->import-filter#deselectAll"
+                  class="text-xs font-medium text-gray-500 hover:text-gray-700">
+            Deselect all
+          </button>
+          <span class="text-sm text-gray-500" data-import-filter-target="selectedCount">0 selected</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Book list -->
+    <div class="space-y-2">
+      <% @entries.each do |entry| %>
+        <% already_exists = entry[:isbn].present? && @existing_isbns.include?(entry[:isbn]) %>
+        <% checked = !already_exists %>
+        <div class="rounded-lg bg-white p-4 shadow-sm flex items-center gap-4"
+             data-shelf="<%= entry[:exclusive_shelf] %>"
+             data-import-filter-target="row">
+          <div class="flex-shrink-0">
+            <input type="checkbox"
+                   class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                   data-import-filter-target="checkbox"
+                   data-action="change->import-filter#updateCount"
+                   <%= "checked" if checked %>
+                   <%= "disabled" if already_exists %>>
+          </div>
+
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <h4 class="text-sm font-medium text-gray-900 truncate"><%= entry[:title] %></h4>
+              <% if already_exists %>
+                <span class="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
+                  Already in library
+                </span>
+              <% end %>
+            </div>
+            <p class="text-xs text-gray-500">
+              <%= entry[:author] %>
+              <% if entry[:isbn].present? %> &middot; ISBN: <%= entry[:isbn] %><% end %>
+              <% if entry[:last_page].present? %> &middot; <%= entry[:last_page] %> pages<% end %>
+            </p>
+          </div>
+
+          <div class="flex-shrink-0">
+            <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium
+              <%= shelf_badge_class(entry[:exclusive_shelf]) %>">
+              <%= entry[:exclusive_shelf] %>
+            </span>
+          </div>
+
+          <!-- Hidden fields — disabled when unchecked so they don't submit -->
+          <input type="hidden" name="books[][title]" value="<%= entry[:title] %>" data-import-filter-target="field" <%= "disabled" unless checked %>>
+          <input type="hidden" name="books[][author]" value="<%= entry[:author] %>" data-import-filter-target="field" <%= "disabled" unless checked %>>
+          <input type="hidden" name="books[][isbn]" value="<%= entry[:isbn] %>" data-import-filter-target="field" <%= "disabled" unless checked %>>
+          <input type="hidden" name="books[][last_page]" value="<%= entry[:last_page] %>" data-import-filter-target="field" <%= "disabled" unless checked %>>
+          <input type="hidden" name="books[][status]" value="<%= entry[:status] %>" data-import-filter-target="field" <%= "disabled" unless checked %>>
+        </div>
+      <% end %>
+    </div>
+
+    <div class="mt-6 flex items-center justify-between">
+      <%= link_to "Cancel", goodreads_path, class: "text-sm font-medium text-gray-600 hover:text-gray-500" %>
+      <%= submit_tag "Import Selected Books", class: "inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 cursor-pointer" %>
+    </div>
+  <% end %>
+</div>

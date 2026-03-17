@@ -53,6 +53,13 @@ Rails.application.routes.draw do
     end
     get "reading_list", to: redirect("/pipeline")
 
+    # Goodreads import/export
+    resource :goodreads, only: [:show], controller: "goodreads" do
+      post :preview
+      post :import
+      get :export
+    end
+
     # Existing web API endpoints (session auth)
     namespace :api do
       namespace :v1 do
