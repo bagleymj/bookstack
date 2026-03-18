@@ -356,6 +356,7 @@ class ReadingListScheduler
       next if current_week_slot?(slot_start) && !Date.current.monday? && has_existing_schedule?
       next if series_predecessor_blocks?(goal.book, slot_start)
       entry = share_index[goal.id]
+      limit_tiers = has_queued_series_successor?(goal.book)
 
       TIERS.each do |tier|
         placement = compute_share_for(entry[:book_minutes], slot_start, tier)
@@ -371,6 +372,10 @@ class ReadingListScheduler
           book_minutes: entry[:book_minutes],
           slot_share: slot_share
         }
+
+        # Series books with queued successors: only offer the shortest
+        # viable tier so the chain moves forward quickly
+        break if limit_tiers
       end
     end
     candidates
@@ -976,6 +981,29 @@ class ReadingListScheduler
     return true unless pred_end
     # Predecessor ends on or after slot_start — can't start yet
     pred_end >= slot_start
+  end
+
+  # Returns true if this book has a later book in the same series
+  # that's queued in the reading list. When true, the scheduler limits
+  # this book to the shortest viable tier to keep the chain moving.
+  def has_queued_series_successor?(book)
+    return false unless book.in_series?
+    @queued_series_successors ||= begin
+      series_books = @user.books.where.not(series_name: nil).where.not(series_position: nil)
+      queued_book_ids = @user.reading_goals.where(status: [:queued, :active])
+                             .where.not(position: nil).pluck(:book_id).to_set
+      result = Set.new
+      series_books.each do |b|
+        if queued_book_ids.include?(b.id)
+          # Mark all predecessors in the same series as having a queued successor
+          @user.books.where(series_name: b.series_name)
+               .where("series_position < ?", b.series_position)
+               .pluck(:id).each { |id| result << id }
+        end
+      end
+      result
+    end
+    @queued_series_successors.include?(book.id)
   end
 
   # ─── Metrics Helpers ────────────────────────────────────────────
