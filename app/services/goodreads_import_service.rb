@@ -46,7 +46,9 @@ class GoodreadsImportService
         last_page: entry[:last_page].presence&.to_i || 300,
         status: entry[:status] || :unread,
         density: :average,
-        owned: false
+        owned: false,
+        series_name: entry[:series_name].presence,
+        series_position: entry[:series_position].presence&.to_i
       )
 
       if book.save
@@ -63,8 +65,10 @@ class GoodreadsImportService
   private
 
   def parse_row(row)
-    title = row["Title"]&.strip
-    return nil if title.blank?
+    raw_title = row["Title"]&.strip
+    return nil if raw_title.blank?
+
+    title, series_name, series_position = extract_series(raw_title)
 
     last_page = row["Number of Pages"]&.strip&.to_i
     last_page = nil if last_page&.zero?
@@ -86,8 +90,24 @@ class GoodreadsImportService
       date_read: row["Date Read"]&.strip,
       date_added: row["Date Added"]&.strip,
       bookshelves: row["Bookshelves"]&.strip,
+      series_name: series_name,
+      series_position: series_position,
       cover_image_url: nil
     }
+  end
+
+  # Goodreads titles often include series info: "Title (Series Name, #N)"
+  # Returns [clean_title, series_name, series_position]
+  def extract_series(raw_title)
+    # Match patterns like "(Series Name, #3)" or "(Series Name, Book 3)"
+    if raw_title =~ /\A(.+?)\s*\(([^,]+),\s*#?(?:Book\s*)?(\d+)\)\s*\z/i
+      title = $1.strip
+      series_name = $2.strip
+      series_position = $3.to_i
+      [title, series_name, series_position]
+    else
+      [raw_title, nil, nil]
+    end
   end
 
   # Goodreads wraps ISBNs in ="VALUE" to prevent Excel number coercion

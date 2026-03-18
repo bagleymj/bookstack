@@ -75,6 +75,7 @@ class ReadingListScheduler
     @load_profile = Hash.new(0.0)
     @concurrent_count = Hash.new(0)
     @graduated_ids = Set.new
+    @series_end_dates = build_series_end_dates
 
     locked_goals.each { |goal| add_goal_to_profiles(goal) }
 
@@ -237,6 +238,7 @@ class ReadingListScheduler
       placed = false
 
       each_placement_start do |slot_start|
+        next if series_predecessor_blocks?(goal.book, slot_start)
         placement = compute_share_for(book_minutes, slot_start, TIERS.first)
         next unless placement
         next unless fits_concurrency?(placement[:start], placement[:end])
@@ -351,6 +353,7 @@ class ReadingListScheduler
       next unless unscheduled.include?(goal.id)
       next if current_week_slot?(slot_start) && !goal.book.owned?
       next if current_week_slot?(slot_start) && !Date.current.monday? && has_existing_schedule?
+      next if series_predecessor_blocks?(goal.book, slot_start)
       entry = share_index[goal.id]
 
       TIERS.each do |tier|
@@ -419,6 +422,7 @@ class ReadingListScheduler
   def record_placement!(placements, goal, placement, book_minutes)
     apply_placement!(goal, placement)
     add_range_to_profiles(placement[:start], placement[:end], placement[:share])
+    track_series_end_date(goal.book, placement[:end])
     placements << { goal: goal, placement: placement, tier: placement[:tier], book_minutes: book_minutes }
   end
 
@@ -927,6 +931,50 @@ class ReadingListScheduler
 
   def effective_concurrency_limit
     @user.concurrency_limit || @user.max_concurrent_books
+  end
+
+  # ─── Series Ordering ─────────────────────────────────────────
+  #
+  # Tracks the end date of each series book so that the next book
+  # in the series can only start after the predecessor finishes.
+
+  # Build initial map from completed and locked books.
+  def build_series_end_dates
+    dates = {}
+
+    # Completed books — predecessor is done, successor can start anytime
+    @user.books.where(status: :completed)
+         .where.not(series_name: nil)
+         .pluck(:series_name, :series_position, :completed_at)
+         .each do |name, pos, completed_at|
+      next unless name && pos && completed_at
+      dates[[name, pos]] = completed_at.to_date
+    end
+
+    # Locked active goals — predecessor finishes at target_completion_date
+    locked_goals.each do |goal|
+      book = goal.book
+      next unless book.in_series?
+      dates[[book.series_name, book.series_position]] = goal.target_completion_date
+    end
+
+    dates
+  end
+
+  def track_series_end_date(book, end_date)
+    return unless book.in_series?
+    @series_end_dates[[book.series_name, book.series_position]] = end_date
+  end
+
+  # Returns true if this book has a series predecessor that hasn't
+  # ended before slot_start.
+  def series_predecessor_blocks?(book, slot_start)
+    return false unless book.in_series? && book.series_position > 1
+    pred_end = @series_end_dates[[book.series_name, book.series_position - 1]]
+    # No tracked predecessor — it hasn't been placed/completed yet, so block
+    return true unless pred_end
+    # Predecessor ends on or after slot_start — can't start yet
+    pred_end >= slot_start
   end
 
   # ─── Metrics Helpers ────────────────────────────────────────────

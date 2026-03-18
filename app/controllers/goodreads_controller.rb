@@ -44,7 +44,7 @@ class GoodreadsController < ApplicationController
     return [] if raw_books.blank?
 
     raw_books.select { |bp| bp.respond_to?(:permit) }.map do |bp|
-      bp.permit(:title, :author, :isbn, :last_page, :status).to_h.symbolize_keys
+      bp.permit(:title, :author, :isbn, :last_page, :status, :series_name, :series_position).to_h.symbolize_keys
     end
   end
 

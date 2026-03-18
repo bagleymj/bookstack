@@ -43,6 +43,17 @@ class Book < ApplicationRecord
   scope :by_status, ->(status) { where(status: status) }
   scope :owned, -> { where(owned: true) }
   scope :unowned, -> { where(owned: false) }
+  scope :in_series, ->(name) { where(series_name: name).order(:series_position) }
+
+  def in_series?
+    series_name.present? && series_position.present?
+  end
+
+  # Returns the predecessor book in the same series (same user), or nil.
+  def series_predecessor
+    return nil unless in_series? && series_position > 1
+    user.books.where(series_name: series_name, series_position: series_position - 1).first
+  end
 
   # Callbacks
   before_validation :set_defaults

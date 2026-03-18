@@ -196,6 +196,16 @@
           <%= form.label :cover_image_url, "Cover image URL (optional)", class: "block text-sm font-medium text-gray-700" %>
           <%= form.url_field :cover_image_url, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm", placeholder: "https://..." %>
         </div>
+
+        <div>
+          <%= form.label :series_name, "Series (optional)", class: "block text-sm font-medium text-gray-700" %>
+          <%= form.text_field :series_name, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm", placeholder: "e.g. Lord of the Rings" %>
+        </div>
+
+        <div>
+          <%= form.label :series_position, "Book # in series", class: "block text-sm font-medium text-gray-700" %>
+          <%= form.number_field :series_position, min: 1, class: "mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm", placeholder: "e.g. 1" %>
+        </div>
       </div>
     </div>
   </div>

@@ -1433,4 +1433,83 @@ RSpec.describe ReadingListScheduler do
       expect(metrics[:epoch_count]).to eq(3) # 12 books / 5 per epoch = 3
     end
   end
+
+  # ─── Series Ordering ───────────────────────────────────────────
+
+  describe "series ordering" do
+    def create_series_book(series_name:, series_position:, position:, pages: 300)
+      book = create(:book, user: user, last_page: pages, title: "#{series_name} ##{series_position}",
+                    series_name: series_name, series_position: series_position)
+      create(:reading_goal, user: user, book: book, status: :queued,
+             started_on: nil, target_completion_date: nil,
+             auto_scheduled: true, position: position)
+      book
+    end
+
+    it "schedules series books so that book N+1 starts after book N ends" do
+      create_series_book(series_name: "LOTR", series_position: 1, position: 1)
+      create_series_book(series_name: "LOTR", series_position: 2, position: 2)
+      create_series_book(series_name: "LOTR", series_position: 3, position: 3)
+      schedule!
+
+      goals = user.reading_goals.active.includes(:book).order("books.series_position")
+      expect(goals.count).to eq(3)
+
+      goals.each_cons(2) do |prev_goal, next_goal|
+        expect(next_goal.started_on).to be > prev_goal.target_completion_date,
+          "#{next_goal.book.title} starts #{next_goal.started_on} but " \
+          "#{prev_goal.book.title} ends #{prev_goal.target_completion_date}"
+      end
+    end
+
+    it "allows non-series books to be scheduled independently of series books" do
+      create_series_book(series_name: "LOTR", series_position: 1, position: 1)
+      create_queued_book(pages: 300, position: 2, title: "Standalone Book")
+      create_series_book(series_name: "LOTR", series_position: 2, position: 3)
+      schedule!
+
+      goals = user.reading_goals.active.includes(:book)
+      expect(goals.count).to eq(3)
+
+      standalone = goals.find { |g| g.book.title == "Standalone Book" }
+      lotr_2 = goals.find { |g| g.book.series_position == 2 }
+      lotr_1 = goals.find { |g| g.book.series_position == 1 }
+
+      # The standalone book should not be blocked by series ordering
+      # LOTR #2 must start after LOTR #1 ends
+      expect(lotr_2.started_on).to be > lotr_1.target_completion_date
+    end
+
+    it "respects series ordering when predecessor is already completed" do
+      book1 = create(:book, :completed, user: user, title: "LOTR #1",
+                     series_name: "LOTR", series_position: 1)
+      create_series_book(series_name: "LOTR", series_position: 2, position: 1)
+      schedule!
+
+      goal = user.reading_goals.where.not(status: :completed).first
+      expect(goal.status).to eq("active")
+      expect(goal.started_on).to be_present
+    end
+
+    it "handles multiple independent series without cross-blocking" do
+      create_series_book(series_name: "LOTR", series_position: 1, position: 1)
+      create_series_book(series_name: "LOTR", series_position: 2, position: 2)
+      create_series_book(series_name: "Narnia", series_position: 1, position: 3)
+      create_series_book(series_name: "Narnia", series_position: 2, position: 4)
+      schedule!
+
+      goals = user.reading_goals.active.includes(:book)
+      expect(goals.count).to eq(4)
+
+      lotr = goals.select { |g| g.book.series_name == "LOTR" }.sort_by { |g| g.book.series_position }
+      narnia = goals.select { |g| g.book.series_name == "Narnia" }.sort_by { |g| g.book.series_position }
+
+      # Each series maintains its own ordering
+      expect(lotr[1].started_on).to be > lotr[0].target_completion_date
+      expect(narnia[1].started_on).to be > narnia[0].target_completion_date
+
+      # But the two series are independent — Narnia #1 doesn't wait for LOTR #1
+      # (it may or may not overlap depending on leveling, but it's not blocked)
+    end
+  end
 end

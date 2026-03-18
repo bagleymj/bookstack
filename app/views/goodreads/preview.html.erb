@@ -75,6 +75,7 @@
             </div>
             <p class="text-xs text-gray-500">
               <%= entry[:author] %>
+              <% if entry[:series_name].present? %> &middot; <span class="text-indigo-600"><%= entry[:series_name] %> #<%= entry[:series_position] %></span><% end %>
               <% if entry[:isbn].present? %> &middot; ISBN: <%= entry[:isbn] %><% end %>
               <% if entry[:last_page].present? %> &middot; <%= entry[:last_page] %> pages<% end %>
             </p>
@@ -93,6 +94,8 @@
           <input type="hidden" name="books[][isbn]" value="<%= entry[:isbn] %>" data-import-filter-target="field" <%= "disabled" unless checked %>>
           <input type="hidden" name="books[][last_page]" value="<%= entry[:last_page] %>" data-import-filter-target="field" <%= "disabled" unless checked %>>
           <input type="hidden" name="books[][status]" value="<%= entry[:status] %>" data-import-filter-target="field" <%= "disabled" unless checked %>>
+          <input type="hidden" name="books[][series_name]" value="<%= entry[:series_name] %>" data-import-filter-target="field" <%= "disabled" unless checked %>>
+          <input type="hidden" name="books[][series_position]" value="<%= entry[:series_position] %>" data-import-filter-target="field" <%= "disabled" unless checked %>>
         </div>
       <% end %>
     </div>

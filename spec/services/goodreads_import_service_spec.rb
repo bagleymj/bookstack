@@ -65,6 +65,29 @@ RSpec.describe GoodreadsImportService do
       expect(entries).to be_empty
     end
 
+    it "extracts series name and position from Goodreads title format" do
+      csv = <<~CSV
+        Book Id,Title,Author,Author l-f,Additional Authors,ISBN,ISBN13,My Rating,Average Rating,Publisher,Binding,Number of Pages,Year Published,Original Publication Year,Date Read,Date Added,Bookshelves,Bookshelves with positions,Exclusive Shelf,My Review,Spoiler,Private Notes,Read Count,Recommended For,Recommended By,Owned Copies,Original Purchase Date,Original Purchase Location,Condition,Condition Description,BCID
+        1,"The Hitchhiker's Guide to the Galaxy (Hitchhiker's Guide to the Galaxy, #1)",Douglas Adams,"Adams, Douglas",,,,0,4.22,,,216,1979,,,,,to-read,,,,0,,,,,,,,
+      CSV
+
+      entries = service.parse(csv)
+      expect(entries.first[:title]).to eq("The Hitchhiker's Guide to the Galaxy")
+      expect(entries.first[:series_name]).to eq("Hitchhiker's Guide to the Galaxy")
+      expect(entries.first[:series_position]).to eq(1)
+    end
+
+    it "returns nil series for non-series titles" do
+      csv = <<~CSV
+        Book Id,Title,Author,Author l-f,Additional Authors,ISBN,ISBN13,My Rating,Average Rating,Publisher,Binding,Number of Pages,Year Published,Original Publication Year,Date Read,Date Added,Bookshelves,Bookshelves with positions,Exclusive Shelf,My Review,Spoiler,Private Notes,Read Count,Recommended For,Recommended By,Owned Copies,Original Purchase Date,Original Purchase Location,Condition,Condition Description,BCID
+        1,Meditations,Marcus Aurelius,"Aurelius, Marcus",,,,0,4.25,,,,,,,,,,to-read,,,,0,,,,,,,,
+      CSV
+
+      entries = service.parse(csv)
+      expect(entries.first[:series_name]).to be_nil
+      expect(entries.first[:series_position]).to be_nil
+    end
+
     it "handles missing page count gracefully" do
       csv = <<~CSV
         Book Id,Title,Author,Author l-f,Additional Authors,ISBN,ISBN13,My Rating,Average Rating,Publisher,Binding,Number of Pages,Year Published,Original Publication Year,Date Read,Date Added,Bookshelves,Bookshelves with positions,Exclusive Shelf,My Review,Spoiler,Private Notes,Read Count,Recommended For,Recommended By,Owned Copies,Original Purchase Date,Original Purchase Location,Condition,Condition Description,BCID
@@ -95,6 +118,18 @@ RSpec.describe GoodreadsImportService do
       expect(book.first_page).to eq(1)
       expect(book.unread?).to be true
       expect(book.owned?).to be false
+    end
+
+    it "saves series fields when importing" do
+      entries = [
+        { title: "Fellowship", author: "Tolkien", isbn: nil, last_page: 400, status: :unread,
+          series_name: "Lord of the Rings", series_position: 1 }
+      ]
+
+      result = service.import(entries)
+      book = result.imported.first
+      expect(book.series_name).to eq("Lord of the Rings")
+      expect(book.series_position).to eq(1)
     end
 
     it "skips books whose ISBN already exists in the user's library" do
