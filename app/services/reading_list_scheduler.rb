@@ -290,50 +290,51 @@ class ReadingListScheduler
     candidates = build_candidates(share_index, goals, unscheduled, slot_start)
     return [] if candidates.empty?
 
-    # The anchor is the first unscheduled book in queue order that has candidates
-    # (a series-blocked book won't appear in candidates, so skip to the next one)
-    candidate_goal_ids = candidates.map { |c| c[:goal_id] }.to_set
-    anchor_id = goals.find { |g| unscheduled.include?(g.id) && candidate_goal_ids.include?(g.id) }&.id
-    return [] unless anchor_id
-
-    anchor_options = candidates.select { |c| c[:goal_id] == anchor_id }
-
-    companion_options = candidates.reject { |c| c[:goal_id] == anchor_id }
-    max_companions = [open_slots - 1, companion_options.size].min
+    # Group candidates by goal for anchor iteration
+    candidate_goal_ids = candidates.map { |c| c[:goal_id] }.uniq
 
     best_combo = nil
     best_score = nil  # [over_target?, distance] — prefer over-target, then min distance
 
-    # Try each tier for the anchor
-    anchor_options.each do |anchor|
-      # Anchor alone
-      evaluate_combination([anchor], current_load, target, best_score) do |score|
-        best_score = score
-        best_combo = [anchor]
-      end
+    # Try each candidate book as anchor (not just the first in queue).
+    # This lets a larger book anchor the slot when a small queue-first
+    # book would cause a dip — the small book can still be placed as a
+    # companion or at a later slot.
+    candidate_goal_ids.each do |anchor_id|
+      anchor_options = candidates.select { |c| c[:goal_id] == anchor_id }
+      companion_options = candidates.reject { |c| c[:goal_id] == anchor_id }
+      max_companions = [open_slots - 1, companion_options.size].min
 
-      next if max_companions <= 0
-
-      # Anchor + 1 companion
-      companion_options.each do |c1|
-        next if dates_overlap_exceeds_slots?(anchor, c1, open_slots)
-
-        evaluate_combination([anchor, c1], current_load, target, best_score) do |score|
+      anchor_options.each do |anchor|
+        # Anchor alone
+        evaluate_combination([anchor], current_load, target, best_score) do |score|
           best_score = score
-          best_combo = [anchor, c1]
+          best_combo = [anchor]
         end
 
-        next if max_companions <= 1
+        next if max_companions <= 0
 
-        # Anchor + 2 companions
-        companion_options.each do |c2|
-          next if c2[:goal_id] <= c1[:goal_id]  # avoid duplicate pairs
-          next if c2[:goal_id] == c1[:goal_id]   # same book can't appear twice
-          next if dates_overlap_exceeds_slots?(anchor, c1, c2, open_slots)
+        # Anchor + 1 companion
+        companion_options.each do |c1|
+          next if dates_overlap_exceeds_slots?(anchor, c1, open_slots)
 
-          evaluate_combination([anchor, c1, c2], current_load, target, best_score) do |score|
+          evaluate_combination([anchor, c1], current_load, target, best_score) do |score|
             best_score = score
-            best_combo = [anchor, c1, c2]
+            best_combo = [anchor, c1]
+          end
+
+          next if max_companions <= 1
+
+          # Anchor + 2 companions
+          companion_options.each do |c2|
+            next if c2[:goal_id] <= c1[:goal_id]  # avoid duplicate pairs
+            next if c2[:goal_id] == c1[:goal_id]   # same book can't appear twice
+            next if dates_overlap_exceeds_slots?(anchor, c1, c2, open_slots)
+
+            evaluate_combination([anchor, c1, c2], current_load, target, best_score) do |score|
+              best_score = score
+              best_combo = [anchor, c1, c2]
+            end
           end
         end
       end
@@ -356,7 +357,6 @@ class ReadingListScheduler
       next if current_week_slot?(slot_start) && !Date.current.monday? && has_existing_schedule?
       next if series_predecessor_blocks?(goal.book, slot_start)
       entry = share_index[goal.id]
-      limit_tiers = has_queued_series_successor?(goal.book)
 
       TIERS.each do |tier|
         placement = compute_share_for(entry[:book_minutes], slot_start, tier)
@@ -372,10 +372,6 @@ class ReadingListScheduler
           book_minutes: entry[:book_minutes],
           slot_share: slot_share
         }
-
-        # Series books with queued successors: only offer the shortest
-        # viable tier so the chain moves forward quickly
-        break if limit_tiers
       end
     end
     candidates
@@ -981,29 +977,6 @@ class ReadingListScheduler
     return true unless pred_end
     # Predecessor ends on or after slot_start — can't start yet
     pred_end >= slot_start
-  end
-
-  # Returns true if this book has a later book in the same series
-  # that's queued in the reading list. When true, the scheduler limits
-  # this book to the shortest viable tier to keep the chain moving.
-  def has_queued_series_successor?(book)
-    return false unless book.in_series?
-    @queued_series_successors ||= begin
-      series_books = @user.books.where.not(series_name: nil).where.not(series_position: nil)
-      queued_book_ids = @user.reading_goals.where(status: [:queued, :active])
-                             .where.not(position: nil).pluck(:book_id).to_set
-      result = Set.new
-      series_books.each do |b|
-        if queued_book_ids.include?(b.id)
-          # Mark all predecessors in the same series as having a queued successor
-          @user.books.where(series_name: b.series_name)
-               .where("series_position < ?", b.series_position)
-               .pluck(:id).each { |id| result << id }
-        end
-      end
-      result
-    end
-    @queued_series_successors.include?(book.id)
   end
 
   # ─── Metrics Helpers ────────────────────────────────────────────

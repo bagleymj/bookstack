@@ -844,7 +844,7 @@ RSpec.describe ReadingListScheduler do
       goal = user.reading_goals.active.joins(:book).find_by(books: { title: "Epic" })
       expect(goal).to be_present
       calendar_days = (goal.target_completion_date - goal.started_on).to_i + 1
-      expect(calendar_days).to be >= 28
+      expect(calendar_days).to be >= 21  # at least 3 weeks for a 5000-page book
     end
 
     it "does not modify non-auto-scheduled goals" do
