@@ -290,12 +290,13 @@ class ReadingListScheduler
     candidates = build_candidates(share_index, goals, unscheduled, slot_start)
     return [] if candidates.empty?
 
-    # The anchor is the first unscheduled book in queue order
-    anchor_id = goals.find { |g| unscheduled.include?(g.id) }&.id
+    # The anchor is the first unscheduled book in queue order that has candidates
+    # (a series-blocked book won't appear in candidates, so skip to the next one)
+    candidate_goal_ids = candidates.map { |c| c[:goal_id] }.to_set
+    anchor_id = goals.find { |g| unscheduled.include?(g.id) && candidate_goal_ids.include?(g.id) }&.id
     return [] unless anchor_id
 
     anchor_options = candidates.select { |c| c[:goal_id] == anchor_id }
-    return [] if anchor_options.empty?
 
     companion_options = candidates.reject { |c| c[:goal_id] == anchor_id }
     max_companions = [open_slots - 1, companion_options.size].min
