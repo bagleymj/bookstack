@@ -902,11 +902,13 @@ RSpec.describe ReadingListScheduler do
 
     it "re-places stale goals from today" do
       travel_to monday + 2 do # Wednesday
-        # Goal with session last week only — stale
+        # Goal with session last week — committed and undershooting.
+        # The long tier means its daily share is below the daily target,
+        # so contraction should shorten it (adding it to handled_ids).
         last_monday = monday - 7
         _, stale_goal = create_active_book_with_sessions(
           title: "Stale Book", pages: 300, position: 1,
-          started_on: last_monday, target_completion_date: last_monday + 13,
+          started_on: last_monday, target_completion_date: last_monday + 27,
           session_date: last_monday + 1 # Tuesday of last week
         )
         original_start = stale_goal.started_on
@@ -928,13 +930,14 @@ RSpec.describe ReadingListScheduler do
                                 started_on: monday, target_completion_date: monday + 13,
                                 auto_scheduled: true, position: 1)
         original_start = committed_goal.started_on
-        original_end = committed_goal.target_completion_date
 
         schedule!
 
         committed_goal.reload
+        # started_on is preserved — committed goals are never re-placed from scratch.
+        # target_completion_date may flex via contraction/graduation to meet the daily target.
         expect(committed_goal.started_on).to eq(original_start)
-        expect(committed_goal.target_completion_date).to eq(original_end)
+        expect(committed_goal.status).to eq("active")
       end
     end
 
@@ -983,6 +986,39 @@ RSpec.describe ReadingListScheduler do
         expect(goal.target_completion_date).to be < original_end,
           "Expected contraction from #{original_end}, got #{goal.target_completion_date}"
         expect(goal.target_completion_date).to be_sunday
+      end
+    end
+
+    it "contracts to closest-above when all shorter tiers overshoot" do
+      travel_to monday do
+        # Three locked goals at concurrency limit. The long-tier goal
+        # keeps total load under target. All shorter tiers for the long
+        # goal overshoot, but the scheduler should still pick the tier
+        # that exceeds the target by the least (closest-above).
+        short_a = create(:book, :reading, user: user, last_page: 250, current_page: 1, title: "Short A")
+        goal_a = create(:reading_goal, user: user, book: short_a, status: :active,
+                        started_on: monday, target_completion_date: monday + 20,
+                        auto_scheduled: true, position: 1)
+
+        short_b = create(:book, :reading, user: user, last_page: 250, current_page: 1, title: "Short B")
+        goal_b = create(:reading_goal, user: user, book: short_b, status: :active,
+                        started_on: monday, target_completion_date: monday + 20,
+                        auto_scheduled: true, position: 2)
+
+        long_book = create(:book, :reading, user: user, last_page: 600, current_page: 1, title: "Long Book")
+        long_goal = create(:reading_goal, user: user, book: long_book, status: :active,
+                           started_on: monday, target_completion_date: monday + 83,
+                           auto_scheduled: true, position: 3)
+        original_long_end = long_goal.target_completion_date
+
+        result = schedule!
+
+        long_goal.reload
+        # The long goal should be contracted — its tier should shorten
+        # to bring total load closer to or above the daily target.
+        expect(long_goal.target_completion_date).to be < original_long_end,
+          "Expected long goal to be contracted from #{original_long_end}"
+        expect(result).to include(long_goal.id)
       end
     end
 

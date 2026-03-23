@@ -531,12 +531,8 @@ class ReadingListScheduler
 
   def adjust_locked_goals!
     MAX_ADJUSTMENT_ITERATIONS.times do
-      overshooting = (Date.current..(Date.current + 6)).any? do |date|
-        next false unless reading_day?(date)
-        target = target_for_date(date)
-        target > 0 && @load_profile[date] > target
-      end
-      break unless overshooting
+      max_overshoot = near_term_max_overshoot
+      break unless max_overshoot > 0
 
       # Find the locked goal with the highest daily share
       heaviest = locked_goals.max_by do |goal|
@@ -548,9 +544,48 @@ class ReadingListScheduler
       graduation_tier = find_graduation_tier(heaviest)
       break unless graduation_tier
 
+      # Don't graduate if the resulting undershoot would be worse than
+      # the current overshoot — that just trades one imbalance for a
+      # larger one, and contraction would reverse it next (oscillation).
+      old_start = [heaviest.started_on, Date.current].max
+      current_end = heaviest.target_completion_date
+      book_minutes = estimate_remaining_minutes(heaviest.book)
+      old_share = compute_weekday_share(book_minutes, old_start, current_end)
+      new_end = calendar_end(heaviest.started_on, graduation_tier)
+      new_share = compute_weekday_share(book_minutes, old_start, new_end)
+
+      max_undershoot_after = (Date.current..(Date.current + 6)).filter_map { |date|
+        next unless reading_day?(date)
+        target = target_for_date(date)
+        next unless target&.positive?
+        # Simulate what graduation does: remove old_share from current range,
+        # add new_share to the (possibly extended) new range.
+        projected = if date >= old_start && date <= current_end
+                      @load_profile[date] - old_share + new_share
+                    elsif date > current_end && date <= new_end
+                      @load_profile[date] + new_share
+                    else
+                      @load_profile[date]
+                    end
+        undershoot = target - projected
+        undershoot > 0 ? undershoot : nil
+      }.max || 0
+
+      break if max_undershoot_after > max_overshoot
+
       graduate_goal!(heaviest, graduation_tier)
       @graduated_ids << heaviest.id
     end
+  end
+
+  def near_term_max_overshoot
+    (Date.current..(Date.current + 6)).filter_map { |date|
+      next unless reading_day?(date)
+      target = target_for_date(date)
+      next unless target&.positive?
+      overshoot = @load_profile[date] - target
+      overshoot > 0 ? overshoot : nil
+    }.max || 0
   end
 
   def find_graduation_tier(goal)
@@ -600,8 +635,10 @@ class ReadingListScheduler
       end
       break unless undershooting
 
-      # Find the locked goal with the lowest daily share (lightest contributor)
-      lightest = locked_goals.min_by do |goal|
+      # Find the locked goal with the lowest daily share (lightest contributor).
+      # Skip goals just graduated — contracting them back would oscillate.
+      contractable = locked_goals.reject { |g| @graduated_ids.include?(g.id) }
+      lightest = contractable.min_by do |goal|
         book_minutes = estimate_remaining_minutes(goal.book)
         compute_weekday_share(book_minutes, [goal.started_on, Date.current].max, goal.target_completion_date)
       end
@@ -619,10 +656,21 @@ class ReadingListScheduler
     old_start = [goal.started_on, Date.current].max
     current_end = goal.target_completion_date
     book_minutes = estimate_remaining_minutes(goal.book)
+    old_share = compute_weekday_share(book_minutes, old_start, current_end)
 
-    # Walk tiers from shortest to longest, find the longest one that still
-    # keeps load at or above the daily target (closest-above)
+    # Find the shorter tier whose resulting load is closest to the daily
+    # target from above. Overshoot is expected and acceptable (Invariant 2).
+    # Scoring mirrors evaluate_combination: prefer at-or-above (bucket 0),
+    # fall back to closest-below (bucket 1) when no tier can reach target.
+    #
+    # Only evaluate impact on the near term (next 7 days). Days beyond
+    # that will be filled by fill_placements with new books — scoring the
+    # entire tier range would penalize longer tiers for a gap that other
+    # placements will close.
+    check_end = Date.current + 6
     best_tier = nil
+    best_score = nil  # [bucket, sort_key]
+
     TIERS.each do |tier|
       tier_end = calendar_end(goal.started_on, tier)
       next if tier_end >= current_end  # not shorter
@@ -630,17 +678,31 @@ class ReadingListScheduler
       new_share = compute_weekday_share(book_minutes, old_start, tier_end)
       next if new_share <= 0
 
-      # Check that shortening doesn't overshoot the target
-      old_share = compute_weekday_share(book_minutes, old_start, current_end)
-      overshoots = (old_start..tier_end).any? do |date|
-        next false unless reading_day?(date)
+      eval_end = [tier_end, check_end].min
+      min_deviation = Float::INFINITY
+      max_overshoot = 0
+      (old_start..eval_end).each do |date|
+        next unless reading_day?(date)
         target = target_for_date(date)
-        next false if target <= 0
-        @load_profile[date] - old_share + new_share > target
+        next if target <= 0
+        deviation = @load_profile[date] - old_share + new_share - target
+        min_deviation = deviation if deviation < min_deviation
+        max_overshoot = deviation if deviation > max_overshoot
       end
-      # This tier is valid if it doesn't overshoot — pick the longest valid one
-      best_tier = tier unless overshoots
+      next if min_deviation == Float::INFINITY  # no reading days
+
+      score = if min_deviation >= 0
+                [0, max_overshoot]    # all days at/above — smallest overshoot wins
+              else
+                [1, -min_deviation]   # some days under — least undershoot wins
+              end
+
+      if best_score.nil? || (score <=> best_score) < 0
+        best_score = score
+        best_tier = tier
+      end
     end
+
     best_tier
   end
 
