@@ -417,7 +417,7 @@ arbitrary-duration placements.
 - Phase 4: Verify throughput
 - Phase 5: Generate quotas
 - Daily reflow (lazy, once per day)
-- Graduation and contraction of committed goals
+- Graduation of committed goals (no contraction — getting ahead is rewarded)
 - Weekend skip/same modes
 - Concurrency limit
 - relax_last_placement (last-book safety valve)

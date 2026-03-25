@@ -7,7 +7,7 @@ class ReadingListScheduler
   }.freeze
   MAX_ADJUSTMENT_ITERATIONS = 5
   PLACEMENT_HORIZON_WEEKS = 104
-  MIN_DAILY_SHARE = 5     # minutes — don't flatten a book below this per day
+  MIN_DAILY_SHARE = 10    # minutes — don't flatten a book below this per day
   WARNING_DAILY_LIMIT = 300  # 5 hours — warn user pace is unsustainable
   HARD_DAILY_LIMIT = 1440   # 24 hours — refuse to schedule
 
@@ -79,9 +79,8 @@ class ReadingListScheduler
 
     locked_goals.each { |goal| add_goal_to_profiles(goal) }
 
-    # Phase 3a: Adjust locked goals — graduate if overshooting, contract if undershooting
+    # Phase 3a: Adjust locked goals — graduate if overshooting
     adjust_locked_goals!
-    contract_locked_goals!
 
     # Phase 3b: Place stale + queued goals
     @placements = fill_placements(gather_schedulable_goals)
@@ -546,7 +545,7 @@ class ReadingListScheduler
 
       # Don't graduate if the resulting undershoot would be worse than
       # the current overshoot — that just trades one imbalance for a
-      # larger one, and contraction would reverse it next (oscillation).
+      # larger one.
       old_start = [heaviest.started_on, Date.current].max
       current_end = heaviest.target_completion_date
       book_minutes = estimate_remaining_minutes(heaviest.book)
@@ -619,109 +618,6 @@ class ReadingListScheduler
     regenerate_quotas_from_today!(goal)
   end
 
-  # ─── Phase 3a (contraction): Shorten locked goals when undershooting ──
-  #
-  # Mirror of adjust_locked_goals!. When locked goals' combined load is
-  # below the daily target, shorten the lightest one to a shorter tier,
-  # increasing its daily share. Only shortens if the result stays at or
-  # above the target (closest-above).
-
-  def contract_locked_goals!
-    MAX_ADJUSTMENT_ITERATIONS.times do
-      undershooting = (Date.current..(Date.current + 6)).any? do |date|
-        next false unless reading_day?(date)
-        target = target_for_date(date)
-        target > 0 && @load_profile[date] < target
-      end
-      break unless undershooting
-
-      # Find the locked goal with the lowest daily share (lightest contributor).
-      # Skip goals just graduated — contracting them back would oscillate.
-      contractable = locked_goals.reject { |g| @graduated_ids.include?(g.id) }
-      lightest = contractable.min_by do |goal|
-        book_minutes = estimate_remaining_minutes(goal.book)
-        compute_weekday_share(book_minutes, [goal.started_on, Date.current].max, goal.target_completion_date)
-      end
-      break unless lightest
-
-      contraction_tier = find_contraction_tier(lightest)
-      break unless contraction_tier
-
-      contract_goal!(lightest, contraction_tier)
-      @graduated_ids << lightest.id
-    end
-  end
-
-  def find_contraction_tier(goal)
-    old_start = [goal.started_on, Date.current].max
-    current_end = goal.target_completion_date
-    book_minutes = estimate_remaining_minutes(goal.book)
-    old_share = compute_weekday_share(book_minutes, old_start, current_end)
-
-    # Find the shorter tier whose resulting load is closest to the daily
-    # target from above. Overshoot is expected and acceptable (Invariant 2).
-    # Scoring mirrors evaluate_combination: prefer at-or-above (bucket 0),
-    # fall back to closest-below (bucket 1) when no tier can reach target.
-    #
-    # Only evaluate impact on the near term (next 7 days). Days beyond
-    # that will be filled by fill_placements with new books — scoring the
-    # entire tier range would penalize longer tiers for a gap that other
-    # placements will close.
-    check_end = Date.current + 6
-    best_tier = nil
-    best_score = nil  # [bucket, sort_key]
-
-    TIERS.each do |tier|
-      tier_end = calendar_end(goal.started_on, tier)
-      next if tier_end >= current_end  # not shorter
-
-      new_share = compute_weekday_share(book_minutes, old_start, tier_end)
-      next if new_share <= 0
-
-      eval_end = [tier_end, check_end].min
-      min_deviation = Float::INFINITY
-      max_overshoot = 0
-      (old_start..eval_end).each do |date|
-        next unless reading_day?(date)
-        target = target_for_date(date)
-        next if target <= 0
-        deviation = @load_profile[date] - old_share + new_share - target
-        min_deviation = deviation if deviation < min_deviation
-        max_overshoot = deviation if deviation > max_overshoot
-      end
-      next if min_deviation == Float::INFINITY  # no reading days
-
-      score = if min_deviation >= 0
-                [0, max_overshoot]    # all days at/above — smallest overshoot wins
-              else
-                [1, -min_deviation]   # some days under — least undershoot wins
-              end
-
-      if best_score.nil? || (score <=> best_score) < 0
-        best_score = score
-        best_tier = tier
-      end
-    end
-
-    best_tier
-  end
-
-  def contract_goal!(goal, tier)
-    old_start = [goal.started_on, Date.current].max
-    old_end = goal.target_completion_date
-    book_minutes = estimate_remaining_minutes(goal.book)
-    old_share = compute_weekday_share(book_minutes, old_start, old_end)
-
-    remove_range_from_profiles(old_start, old_end, old_share)
-
-    new_end = calendar_end(goal.started_on, tier)
-    goal.update!(target_completion_date: new_end)
-
-    new_share = compute_weekday_share(book_minutes, old_start, new_end)
-    add_range_to_profiles(old_start, new_end, new_share)
-
-    regenerate_quotas_from_today!(goal)
-  end
 
   # ─── Phase 4 ────────────────────────────────────────────────────
 
@@ -898,7 +794,7 @@ class ReadingListScheduler
 
   # A goal is committed once its started_on date has arrived.
   # Committed goals are not re-placed — only their end dates may flex
-  # via graduation/contraction.
+  # via graduation.
   def locked_goals
     @locked_goals ||= @user.reading_goals
       .active
