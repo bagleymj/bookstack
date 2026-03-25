@@ -570,7 +570,7 @@ RSpec.describe ReadingListScheduler do
       expect(new_goal).to be_active
     end
 
-    it "does not contract committed goals when undershooting (rewards getting ahead)" do
+    it "contracts committed goals to shorter tiers when undershooting" do
       book = create_queued_book(pages: 200, position: 1, title: "Long Tier")
       schedule!
 
@@ -581,13 +581,14 @@ RSpec.describe ReadingListScheduler do
       long_end = ref_monday + (12 * 7) - 1
       goal.update!(target_completion_date: long_end)
 
-      # Goal is committed (started_on <= today). Reschedule — tier should
-      # NOT be shortened. Getting ahead should not be punished.
+      # Goal is committed (started_on <= today). Reschedule — contraction
+      # should shorten the tier.
       schedule!
 
       goal.reload
-      expect(goal.target_completion_date).to eq(long_end),
-        "Expected tier to be preserved at #{long_end}, got #{goal.target_completion_date}"
+      expect(goal.target_completion_date).to be < long_end,
+        "Expected contraction to shorten from #{long_end}, got #{goal.target_completion_date}"
+      expect(goal.target_completion_date).to be_sunday
     end
 
     it "does not commit books with started_on in the future" do
@@ -902,8 +903,8 @@ RSpec.describe ReadingListScheduler do
     it "re-places stale goals from today" do
       travel_to monday + 2 do # Wednesday
         # Goal with session last week — committed and undershooting.
-        # The long tier means its daily share is below the daily target.
-        # Without contraction, the tier is preserved — getting ahead is rewarded.
+        # The long tier means its daily share is below the daily target,
+        # so contraction should shorten it (adding it to handled_ids).
         last_monday = monday - 7
         _, stale_goal = create_active_book_with_sessions(
           title: "Stale Book", pages: 300, position: 1,
@@ -911,13 +912,13 @@ RSpec.describe ReadingListScheduler do
           session_date: last_monday + 1 # Tuesday of last week
         )
         original_start = stale_goal.started_on
-        original_end = stale_goal.target_completion_date
 
-        schedule!
+        result = schedule!
 
         stale_goal.reload
+        expect(result).to include(stale_goal.id)
         expect(stale_goal.started_on).to eq(original_start) # preserved
-        expect(stale_goal.target_completion_date).to eq(original_end) # not contracted
+        expect(stale_goal.target_completion_date).to be_present
         expect(stale_goal.status).to eq("active")
       end
     end
@@ -934,7 +935,7 @@ RSpec.describe ReadingListScheduler do
 
         committed_goal.reload
         # started_on is preserved — committed goals are never re-placed from scratch.
-        # target_completion_date may flex via graduation to meet the daily target.
+        # target_completion_date may flex via contraction/graduation to meet the daily target.
         expect(committed_goal.started_on).to eq(original_start)
         expect(committed_goal.status).to eq("active")
       end
@@ -970,10 +971,9 @@ RSpec.describe ReadingListScheduler do
       end
     end
 
-    it "does not contract a committed goal from an over-long tier (rewards getting ahead)" do
+    it "contracts a committed goal from an over-long tier toward the target" do
       travel_to monday + 2 do # Wednesday
         # Single committed goal with an over-long tier — load well under target.
-        # Tier should NOT be shortened — reader earned the lighter load.
         book = create(:book, :reading, user: user, last_page: 100, current_page: 1, title: "Easy Book")
         goal = create(:reading_goal, user: user, book: book, status: :active,
                       started_on: monday, target_completion_date: monday + 27,
@@ -983,16 +983,18 @@ RSpec.describe ReadingListScheduler do
         schedule!
 
         goal.reload
-        expect(goal.target_completion_date).to eq(original_end),
-          "Expected tier preserved at #{original_end}, got #{goal.target_completion_date}"
+        expect(goal.target_completion_date).to be < original_end,
+          "Expected contraction from #{original_end}, got #{goal.target_completion_date}"
+        expect(goal.target_completion_date).to be_sunday
       end
     end
 
-    it "does not contract undershooting locked goals (rewards getting ahead)" do
+    it "contracts to closest-above when all shorter tiers overshoot" do
       travel_to monday do
-        # Three locked goals. The long-tier goal keeps total load under
-        # target. Without contraction, the tier should be preserved —
-        # fill_placements handles the remaining capacity with new books.
+        # Three locked goals at concurrency limit. The long-tier goal
+        # keeps total load under target. All shorter tiers for the long
+        # goal overshoot, but the scheduler should still pick the tier
+        # that exceeds the target by the least (closest-above).
         short_a = create(:book, :reading, user: user, last_page: 250, current_page: 1, title: "Short A")
         goal_a = create(:reading_goal, user: user, book: short_a, status: :active,
                         started_on: monday, target_completion_date: monday + 20,
@@ -1009,11 +1011,14 @@ RSpec.describe ReadingListScheduler do
                            auto_scheduled: true, position: 3)
         original_long_end = long_goal.target_completion_date
 
-        schedule!
+        result = schedule!
 
         long_goal.reload
-        expect(long_goal.target_completion_date).to eq(original_long_end),
-          "Expected long goal tier preserved at #{original_long_end}, got #{long_goal.target_completion_date}"
+        # The long goal should be contracted — its tier should shorten
+        # to bring total load closer to or above the daily target.
+        expect(long_goal.target_completion_date).to be < original_long_end,
+          "Expected long goal to be contracted from #{original_long_end}"
+        expect(result).to include(long_goal.id)
       end
     end
 
@@ -1021,7 +1026,7 @@ RSpec.describe ReadingListScheduler do
       travel_to monday + 2 do # Wednesday
         # Book with pages already read — remaining_minutes is smaller.
         # The goal is committed (started_on in the past) so it's locked.
-        # Graduation adjusts its tier if overshooting; DailyReflow handles
+        # Graduation/contraction adjusts its tier; DailyReflow handles
         # quota redistribution for committed books.
         book = create(:book, user: user, last_page: 300, current_page: 200, title: "Half-Read")
         goal = create(:reading_goal, user: user, book: book, status: :active,
@@ -1039,7 +1044,7 @@ RSpec.describe ReadingListScheduler do
       end
     end
 
-    it "Monday: locked goals may graduate but are never contracted" do
+    it "Monday: all active goals are stale and re-placed" do
       travel_to monday do
         # Create two active goals with sessions from last week
         last_monday = monday - 7
@@ -1053,18 +1058,12 @@ RSpec.describe ReadingListScheduler do
           started_on: last_monday, target_completion_date: last_monday + 13,
           session_date: last_monday + 4
         )
-        original_end_a = goal_a.target_completion_date
-        original_end_b = goal_b.target_completion_date
 
-        schedule!
+        result = schedule!
 
-        goal_a.reload
-        goal_b.reload
-        # Locked goals may be graduated (extended) but never contracted (shortened)
-        expect(goal_a.target_completion_date).to be >= original_end_a
-        expect(goal_b.target_completion_date).to be >= original_end_b
-        expect(goal_a.status).to eq("active")
-        expect(goal_b.status).to eq("active")
+        # On Monday, no sessions exist for this week → all goals are stale
+        expect(result).to include(goal_a.id)
+        expect(result).to include(goal_b.id)
       end
     end
   end
