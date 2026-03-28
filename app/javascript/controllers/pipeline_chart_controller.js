@@ -386,8 +386,7 @@ export default class extends Controller {
     this.timelineLayer = this.svg.append("g").attr("class", "layer-timeline")
     this.overlayLayer = this.svg.append("g").attr("class", "layer-overlays")
 
-    // Drop shadow on brick layer
-    this.brickLayer.style("filter", "drop-shadow(0 1px 3px rgba(0,0,0,0.12))")
+    // No drop-shadow filter — causes ghost artifacts during zoom transforms
 
     // Zoom behavior
     this.currentTransform = d3.zoomIdentity
