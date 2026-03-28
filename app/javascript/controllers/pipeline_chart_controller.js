@@ -305,6 +305,7 @@ export default class extends Controller {
     const { bricks, maxY } = this.computeBricks(this.goals)
     this.currentBricks = bricks
     this.renderBricks(bricks)
+    this.buildHitBoxes()
     const labels = this.computeLabels(bricks, this.goals)
     this.renderLabels(labels)
     this.renderTimeline()
@@ -967,16 +968,34 @@ export default class extends Controller {
 
   // ── Hit testing ───────────────────────────────────────────────────
 
-  findGoalAtPoint(mx, my) {
+  // Precompute per-goal bounding boxes for generous hit targets.
+  // Called once after bricks are rendered. Each bbox spans the full
+  // date range and vertical extent of all the goal's bricks.
+  buildHitBoxes() {
     const gap = 1.5
-    for (let i = this.currentBricks.length - 1; i >= 0; i--) {
-      const b = this.currentBricks[i]
-      const bx = this.xScale(b.date) + gap / 2
-      const by = this.yScale(b.yOffset + b.minutes) + gap / 2
-      const bw = Math.max(this.xScale(b.nextDate) - this.xScale(b.date) - gap, 1)
-      const bh = Math.max(this.yScale(b.yOffset) - this.yScale(b.yOffset + b.minutes) - gap, 1)
-      if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
-        return this.goals.find(g => g.id === b.goalId)
+    this.goalHitBoxes = []
+
+    this.goals.forEach(goal => {
+      const goalBricks = this.currentBricks.filter(b => b.goalId === goal.id)
+      if (!goalBricks.length) return
+
+      const x1 = d3.min(goalBricks, b => this.xScale(b.date) + gap / 2)
+      const x2 = d3.max(goalBricks, b => this.xScale(b.nextDate) - gap / 2)
+      const y1 = d3.min(goalBricks, b => this.yScale(b.yOffset + b.minutes) + gap / 2)
+      const y2 = d3.max(goalBricks, b => this.yScale(b.yOffset) - gap / 2)
+
+      this.goalHitBoxes.push({ goal, x1, x2, y1, y2 })
+    })
+
+    // Reverse so topmost (last-rendered, shortest duration) is checked first
+    this.goalHitBoxes.reverse()
+  }
+
+  findGoalAtPoint(mx, my) {
+    if (!this.goalHitBoxes) return null
+    for (const box of this.goalHitBoxes) {
+      if (mx >= box.x1 && mx <= box.x2 && my >= box.y1 && my <= box.y2) {
+        return box.goal
       }
     }
     return null
