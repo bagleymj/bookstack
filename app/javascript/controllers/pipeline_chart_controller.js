@@ -968,34 +968,38 @@ export default class extends Controller {
 
   // ── Hit testing ───────────────────────────────────────────────────
 
-  // Precompute per-goal bounding boxes for generous hit targets.
-  // Called once after bricks are rendered. Each bbox spans the full
-  // date range and vertical extent of all the goal's bricks.
+  // Index bricks by day for fast lookup. Called once after rendering.
   buildHitBoxes() {
-    const gap = 1.5
-    this.goalHitBoxes = []
-
-    this.goals.forEach(goal => {
-      const goalBricks = this.currentBricks.filter(b => b.goalId === goal.id)
-      if (!goalBricks.length) return
-
-      const x1 = d3.min(goalBricks, b => this.xScale(b.date) + gap / 2)
-      const x2 = d3.max(goalBricks, b => this.xScale(b.nextDate) - gap / 2)
-      const y1 = d3.min(goalBricks, b => this.yScale(b.yOffset + b.minutes) + gap / 2)
-      const y2 = d3.max(goalBricks, b => this.yScale(b.yOffset) - gap / 2)
-
-      this.goalHitBoxes.push({ goal, x1, x2, y1, y2 })
+    this.bricksByDay = new Map()
+    this.currentBricks.forEach(b => {
+      const key = b.dateStr
+      if (!this.bricksByDay.has(key)) this.bricksByDay.set(key, [])
+      this.bricksByDay.get(key).push(b)
     })
-
-    // Reverse so topmost (last-rendered, shortest duration) is checked first
-    this.goalHitBoxes.reverse()
   }
 
+  // Hybrid hit test: snap to the nearest day column (forgiving
+  // horizontally), then check exact vertical position (no overlap
+  // conflicts between stacked goals).
   findGoalAtPoint(mx, my) {
-    if (!this.goalHitBoxes) return null
-    for (const box of this.goalHitBoxes) {
-      if (mx >= box.x1 && mx <= box.x2 && my >= box.y1 && my <= box.y2) {
-        return box.goal
+    if (!this.bricksByDay) return null
+
+    // Find which day the cursor is over by inverting the x scale
+    const hoverDate = this.xScale.invert(mx)
+    const dayStart = d3.timeDay.floor(hoverDate)
+    const dateStr = dayStart.toISOString().split('T')[0]
+
+    const dayBricks = this.bricksByDay.get(dateStr)
+    if (!dayBricks) return null
+
+    // Check vertical position against bricks on this day (top-down)
+    const gap = 1.5
+    for (let i = dayBricks.length - 1; i >= 0; i--) {
+      const b = dayBricks[i]
+      const by = this.yScale(b.yOffset + b.minutes) + gap / 2
+      const bh = Math.max(this.yScale(b.yOffset) - this.yScale(b.yOffset + b.minutes) - gap, 1)
+      if (my >= by && my <= by + bh) {
+        return this.goals.find(g => g.id === b.goalId)
       }
     }
     return null
