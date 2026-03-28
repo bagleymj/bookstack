@@ -13,6 +13,13 @@ class ReadingListScheduler
 
   attr_reader :daily_target, :deficit
 
+  # Public class method so controllers can compute tier end dates
+  # without instantiating a full scheduler.
+  def self.calendar_end_for(start_date, tier)
+    ref_monday = start_date.beginning_of_week(:monday)
+    ref_monday + (TIER_WEEKS[tier] * 7) - 1
+  end
+
   def initialize(user)
     @user = user
   end
@@ -79,6 +86,12 @@ class ReadingListScheduler
 
     locked_goals.each { |goal| add_goal_to_profiles(goal) }
 
+    # Phase 3-manual: Stamp manually placed goals into profiles
+    stamp_manual_goals!
+
+    # Phase 3-recompute: Recompute daily target with manual goals "spoken for"
+    recompute_daily_target_after_manual!
+
     # Phase 3a: Adjust locked goals — graduate if overshooting
     adjust_locked_goals!
 
@@ -90,6 +103,17 @@ class ReadingListScheduler
 
     # Phase 5: Generate quotas
     handled_ids = Set.new(@graduated_ids)
+
+    @manual_placements.each do |entry|
+      goal = entry[:goal]
+      if goal.daily_quotas.exists?
+        regenerate_quotas_from_today!(goal)
+      else
+        generate_quotas_for!(goal)
+      end
+      handled_ids << goal.id
+    end
+
     @placements.each do |entry|
       goal = entry[:goal]
       if @stale_goal_ids.include?(goal.id)
@@ -165,14 +189,26 @@ class ReadingListScheduler
   # The epoch is defined by position: the first @epoch_target
   # active/queued auto-scheduled goals ordered by position.
   def current_epoch_goals
-    @current_epoch_goals ||= @user.reading_goals
-      .where(auto_scheduled: true)
-      .where.not(position: nil)
-      .where(status: [:queued, :active])
-      .includes(:book)
-      .order(:position)
-      .limit(@epoch_target)
-      .to_a
+    @current_epoch_goals ||= begin
+      manual = @user.reading_goals
+        .where(manually_placed: true)
+        .where(status: [:queued, :active])
+        .includes(:book)
+        .to_a
+
+      remaining_slots = [@epoch_target - manual.size, 0].max
+
+      auto = @user.reading_goals
+        .where(auto_scheduled: true)
+        .where.not(position: nil)
+        .where(status: [:queued, :active])
+        .includes(:book)
+        .order(:position)
+        .limit(remaining_slots)
+        .to_a
+
+      manual + auto
+    end
   end
 
   def full_book_minutes(book)
@@ -352,6 +388,7 @@ class ReadingListScheduler
     candidates = []
     goals.each do |goal|
       next unless unscheduled.include?(goal.id)
+      next if goal.postponed_until && slot_start < goal.postponed_until
       next if current_week_slot?(slot_start) && !goal.book.owned?
       next if current_week_slot?(slot_start) && !Date.current.monday? && has_existing_schedule?
       next if series_predecessor_blocks?(goal.book, slot_start)
@@ -494,6 +531,7 @@ class ReadingListScheduler
     # Only preserve started_on for stale goals (active with prior sessions).
     # Active goals without sessions are effectively queued — update their start.
     attrs[:started_on] = placement[:start] unless @stale_goal_ids&.include?(goal.id)
+    attrs[:postponed_until] = nil if goal.postponed_until
     goal.update!(attrs)
   end
 
@@ -619,6 +657,59 @@ class ReadingListScheduler
   end
 
 
+  # ─── Manual Goal Support ──────────────────────────────────────
+
+  def manually_placed_goals
+    @manually_placed_goals ||= @user.reading_goals
+      .where(manually_placed: true)
+      .where.not(started_on: nil, target_completion_date: nil)
+      .where(status: [:active, :queued])
+      .includes(:book)
+      .to_a
+  end
+
+  def stamp_manual_goals!
+    @manual_placements = []
+    manually_placed_goals.each do |goal|
+      # Ensure end date matches the tier
+      tier = goal.placement_tier&.to_sym
+      if tier && TIER_WEEKS[tier]
+        expected_end = calendar_end(goal.started_on, tier)
+        goal.update!(target_completion_date: expected_end) if goal.target_completion_date != expected_end
+      end
+
+      # Activate if still queued
+      goal.update!(status: :active) if goal.queued?
+
+      add_goal_to_profiles(goal)
+      track_series_end_date(goal.book, goal.target_completion_date)
+      book_minutes = estimate_remaining_minutes(goal.book)
+      @manual_placements << { goal: goal, book_minutes: book_minutes }
+    end
+  end
+
+  # After stamping manual goals, recompute the daily target with those
+  # books "spoken for". This prevents manual placements from inflating
+  # the target for all other auto-scheduled books.
+  def recompute_daily_target_after_manual!
+    return if @manual_placements.empty?
+
+    pace_window_end = @pace_start + 365
+    manual_completing = @manual_placements.count do |entry|
+      entry[:goal].target_completion_date <= pace_window_end
+    end
+
+    books_remaining = [@epoch_target - @actual_completed - manual_completing, 0].max
+    return if books_remaining <= 0
+
+    auto_epoch_books = current_epoch_goals.reject(&:manually_placed?).map(&:book)
+    return if auto_epoch_books.empty?
+
+    avg_minutes = auto_epoch_books.sum { |book| full_book_minutes(book) }.to_f / auto_epoch_books.size
+    @daily_target = (books_remaining * avg_minutes) / @days_remaining
+    compute_weekend_targets
+  end
+
   # ─── Phase 4 ────────────────────────────────────────────────────
 
   def verify_throughput!
@@ -648,16 +739,21 @@ class ReadingListScheduler
       g.target_completion_date && g.target_completion_date <= pace_window_end
     end
 
+    manual_count = @manual_placements.count do |entry|
+      entry[:goal].target_completion_date <= pace_window_end
+    end
+
     placed_count = @placements.count do |entry|
       entry[:goal].target_completion_date <= pace_window_end
     end
 
-    @actual_completed + locked_count + placed_count
+    @actual_completed + locked_count + manual_count + placed_count
   end
 
   def try_shorten_longest_tier!
     adjustable = @placements
       .reject { |p| locked_goal_ids.include?(p[:goal].id) }
+      .reject { |p| p[:goal].manually_placed? }
       .sort_by { |p| -TIER_WEEKS[p[:tier]] }
 
     pace_window_end = @pace_start + 365
@@ -705,6 +801,7 @@ class ReadingListScheduler
   def try_lengthen_shortest_tier!
     adjustable = @placements
       .reject { |p| locked_goal_ids.include?(p[:goal].id) }
+      .reject { |p| p[:goal].manually_placed? }
       .sort_by { |p| TIER_WEEKS[p[:tier]] }
 
     adjustable.each do |entry|
@@ -798,6 +895,7 @@ class ReadingListScheduler
   def locked_goals
     @locked_goals ||= @user.reading_goals
       .active
+      .where(manually_placed: false)
       .where.not(target_completion_date: nil)
       .where("started_on <= ?", Date.current)
       .includes(:book)
@@ -831,7 +929,9 @@ class ReadingListScheduler
   end
 
   def gather_schedulable_goals
-    goals = current_epoch_goals.reject { |g| locked_goal_ids.include?(g.id) }
+    goals = current_epoch_goals
+      .reject { |g| locked_goal_ids.include?(g.id) }
+      .reject { |g| g.manually_placed? }
 
     # Track stale goals (active with prior sessions but not committed).
     # Rare with started_on-based commitment, but preserves started_on if present.
@@ -913,6 +1013,13 @@ class ReadingListScheduler
 
     # Locked active goals — predecessor finishes at target_completion_date
     locked_goals.each do |goal|
+      book = goal.book
+      next unless book.in_series?
+      dates[[book.series_name, book.series_position]] = goal.target_completion_date
+    end
+
+    # Manually placed goals — their end dates are fixed
+    manually_placed_goals.each do |goal|
       book = goal.book
       next unless book.in_series?
       dates[[book.series_name, book.series_position]] = goal.target_completion_date

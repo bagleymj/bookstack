@@ -72,6 +72,61 @@ module Api
         render json: { delta: delta }
       end
 
+      # POST /api/v1/reading_list/manual_place — manually place a book at a specific Monday + tier
+      def manual_place
+        book = current_user.books.find(params[:book_id])
+        start_date = Date.parse(params[:start_date])
+        tier = params[:tier]
+
+        unless start_date.monday?
+          render json: { errors: ["Start date must be a Monday"] }, status: :unprocessable_entity
+          return
+        end
+
+        unless ReadingListScheduler::TIERS.map(&:to_s).include?(tier)
+          render json: { errors: ["Invalid tier: #{tier}"] }, status: :unprocessable_entity
+          return
+        end
+
+        end_date = ReadingListScheduler.calendar_end_for(start_date, tier.to_sym)
+
+        # Find existing queued/active goal for the book, or create new
+        goal = current_user.reading_goals.find_by(book: book, status: [:queued, :active])
+        if goal
+          goal.daily_quotas.where("date >= ?", Date.current).destroy_all
+          goal.update!(
+            started_on: start_date,
+            target_completion_date: end_date,
+            status: :active,
+            manually_placed: true,
+            placement_tier: tier,
+            auto_scheduled: false,
+            position: nil
+          )
+        else
+          goal = current_user.reading_goals.create!(
+            book: book,
+            started_on: start_date,
+            target_completion_date: end_date,
+            status: :active,
+            manually_placed: true,
+            placement_tier: tier,
+            auto_scheduled: false
+          )
+        end
+
+        recompact_positions!
+        ReadingListScheduler.new(current_user).schedule!
+
+        warnings = series_warnings_for(goal)
+        goals = current_user.reading_goals.pipeline_visible.includes(:book).ordered_by_start
+        render json: {
+          goal: goal.reload.as_pipeline_data,
+          goals: goals.map(&:as_pipeline_data),
+          warnings: warnings
+        }, status: :created
+      end
+
       # DELETE /api/v1/reading_list/:id — remove from list
       def destroy
         goal = current_user.reading_goals.find(params[:id])
@@ -99,6 +154,27 @@ module Api
                     .order(:position)
                     .each_with_index do |goal, index|
           goal.update_column(:position, index + 1)
+        end
+      end
+
+      def series_warnings_for(goal)
+        book = goal.book
+        return [] unless book.in_series? && book.series_position > 1
+
+        predecessor = current_user.books.find_by(
+          series_name: book.series_name,
+          series_position: book.series_position - 1
+        )
+        return [] unless predecessor
+        return [] if predecessor.completed?
+
+        pred_goal = current_user.reading_goals.find_by(book: predecessor, status: :active)
+        if pred_goal && pred_goal.target_completion_date && pred_goal.target_completion_date >= goal.started_on
+          ["#{predecessor.title} (book #{predecessor.series_position}) is scheduled to finish after this book starts"]
+        elsif !pred_goal || !predecessor.completed?
+          ["#{predecessor.title} (book #{predecessor.series_position}) hasn't been completed yet"]
+        else
+          []
         end
       end
     end

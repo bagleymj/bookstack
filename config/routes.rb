@@ -74,6 +74,7 @@ Rails.application.routes.draw do
           collection do
             post :reorder
             get :impact_preview
+            post :manual_place
           end
         end
       end
@@ -108,6 +109,8 @@ Rails.application.routes.draw do
         member do
           post :mark_completed
           post :mark_abandoned
+          post :postpone
+          post :unlock
         end
       end
 

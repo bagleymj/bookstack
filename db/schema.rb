@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_03_18_001046) do
+ActiveRecord::Schema[7.1].define(version: 2026_03_27_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -101,6 +101,9 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_18_001046) do
     t.date "discrepancy_acknowledged_on"
     t.integer "position"
     t.boolean "auto_scheduled", default: false, null: false
+    t.boolean "manually_placed", default: false, null: false
+    t.string "placement_tier"
+    t.date "postponed_until"
     t.index ["book_id"], name: "index_reading_goals_on_book_id"
     t.index ["user_id", "book_id"], name: "index_reading_goals_on_user_id_and_book_id"
     t.index ["user_id", "position"], name: "index_reading_goals_on_user_id_and_position"
