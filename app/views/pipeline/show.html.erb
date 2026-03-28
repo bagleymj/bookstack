@@ -34,14 +34,20 @@
   <% end %>
 
   <!-- Pipeline Chart (read-only) -->
-  <div class="rounded-lg bg-white shadow">
+  <div class="rounded-xl bg-white shadow-sm ring-1 ring-gray-100">
     <div class="px-4 py-5 sm:p-6">
       <div data-controller="pipeline-chart"
            data-pipeline-chart-url-value="<%= api_v1_pipeline_index_path %>"
-           class="overflow-hidden relative"
+           class="overflow-hidden relative rounded-lg"
            style="touch-action: none;">
-        <div class="min-h-[200px] flex items-center justify-center text-gray-500">
-          Loading pipeline...
+        <div class="min-h-[200px] flex items-center justify-center text-gray-400">
+          <div class="flex flex-col items-center gap-2">
+            <svg class="w-6 h-6 animate-spin text-gray-300" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span class="text-sm">Loading pipeline...</span>
+          </div>
         </div>
       </div>
       <!-- Chart Legend -->

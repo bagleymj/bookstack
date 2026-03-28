@@ -129,9 +129,6 @@ export default class extends Controller {
         if (isPast) {
           minutes = getActualMinutes(g, dateStr)
         } else if (isToday) {
-          // Total height is the planned daily share so today's column matches
-          // future columns. The dark progress overlay is sized by quota
-          // completion fraction, not session duration estimates.
           const quotaFraction = g.today_quota_progress || 0
           minutes = g.minutes_per_day
           todayProgress = quotaFraction * minutes
@@ -280,15 +277,18 @@ export default class extends Controller {
     // Compute and render bricks
     const { bricks, maxY } = this.computeBricks(this.goals)
     this.currentBricks = bricks
-    this.renderBricks(bricks, {})
+    this.renderBricks(bricks, { animate: true })
     const labels = this.computeLabels(bricks, this.goals)
-    this.renderLabels(labels, {})
+    this.renderLabels(labels, { animate: true })
 
     this.renderOverlays()
 
     if (!this.compactValue) {
       this.renderLegend(this.goals)
     }
+
+    // Auto-center on today after entrance animation
+    this.centerOnToday()
   }
 
   setupScales() {
@@ -327,6 +327,7 @@ export default class extends Controller {
       .append("svg")
       .attr("width", svgWidth)
       .attr("height", svgHeight)
+      .style("cursor", "grab")
 
     // Clip path to contain zoomed content within chart area
     const defs = this.svgElement.append("defs")
@@ -356,16 +357,14 @@ export default class extends Controller {
     this.labelLayer = this.svg.append("g").attr("class", "layer-labels")
     this.overlayLayer = this.svg.append("g").attr("class", "layer-overlays")
 
-    // Apply group-level drop shadow to brick layer
-    this.brickLayer.style("filter", "drop-shadow(0 1px 2px rgba(0,0,0,0.15))")
+    // Richer drop shadow on bricks
+    this.brickLayer.style("filter", "drop-shadow(0 2px 4px rgba(0,0,0,0.18))")
 
     // Set up d3.zoom
     this.currentTransform = d3.zoomIdentity
     this.zoomBehavior = d3.zoom()
-      .scaleExtent([0.5, 5])
+      .scaleExtent([0.3, 8])
       .filter((event) => {
-        // Allow wheel events (for zoom) and pointer events (for pan)
-        // but prevent page scroll when wheeling over the chart
         if (event.type === "wheel") {
           event.preventDefault()
         }
@@ -374,6 +373,13 @@ export default class extends Controller {
       .on("zoom", (event) => {
         this.currentTransform = event.transform
         this.zoomGroup.attr("transform", event.transform)
+        this.updateZoomIndicator()
+      })
+      .on("start", () => {
+        this.svgElement.style("cursor", "grabbing")
+      })
+      .on("end", () => {
+        this.svgElement.style("cursor", "grab")
       })
 
     this.svgElement
@@ -386,38 +392,124 @@ export default class extends Controller {
     // Tooltip (DOM element, not SVG)
     this.tooltip = d3.select(this.element)
       .append("div")
-      .attr("class", "absolute hidden bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg pointer-events-none z-50 max-w-xs")
-      .style("transition", "opacity 0.15s")
+      .attr("class", "absolute hidden bg-gray-900/95 text-white text-sm px-4 py-3 rounded-xl shadow-xl pointer-events-none z-50 max-w-xs backdrop-blur-sm")
+      .style("transition", "opacity 0.15s, transform 0.15s")
+      .style("border", "1px solid rgba(255,255,255,0.1)")
   }
 
   renderZoomControls() {
     const controls = d3.select(this.element)
       .append("div")
-      .attr("class", "absolute top-2 right-2 flex flex-col gap-1 z-40")
+      .attr("class", "absolute top-3 right-3 flex items-center gap-1 z-40")
+      .style("backdrop-filter", "blur(8px)")
+      .style("background", "rgba(255,255,255,0.85)")
+      .style("border", "1px solid rgba(0,0,0,0.08)")
+      .style("border-radius", "8px")
+      .style("padding", "2px")
+      .style("box-shadow", "0 1px 3px rgba(0,0,0,0.08)")
 
-    const buttonClass = "w-8 h-8 flex items-center justify-center rounded bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 hover:text-gray-800 shadow-sm cursor-pointer text-sm font-medium select-none"
-
-    controls.append("button")
-      .attr("class", buttonClass)
-      .attr("title", "Zoom in")
-      .html("+")
-      .on("click", () => this.zoomBehavior.scaleBy(this.svgElement.transition().duration(200), 1.4))
+    const buttonClass = "w-7 h-7 flex items-center justify-center rounded-md text-gray-500 hover:text-gray-800 hover:bg-gray-100/80 cursor-pointer text-sm font-medium select-none transition-colors"
 
     controls.append("button")
       .attr("class", buttonClass)
       .attr("title", "Zoom out")
+      .style("font-size", "16px")
       .html("&minus;")
-      .on("click", () => this.zoomBehavior.scaleBy(this.svgElement.transition().duration(200), 1 / 1.4))
+      .on("click", () => this.zoomBehavior.scaleBy(this.svgElement.transition().duration(250).ease(d3.easeCubicOut), 1 / 1.5))
+
+    this.zoomIndicator = controls.append("span")
+      .attr("class", "text-xs text-gray-400 font-medium tabular-nums select-none")
+      .style("min-width", "36px")
+      .style("text-align", "center")
+      .text("100%")
 
     controls.append("button")
       .attr("class", buttonClass)
-      .attr("title", "Reset zoom")
+      .attr("title", "Zoom in")
+      .style("font-size", "16px")
+      .html("+")
+      .on("click", () => this.zoomBehavior.scaleBy(this.svgElement.transition().duration(250).ease(d3.easeCubicOut), 1.5))
+
+    // Divider
+    controls.append("div")
+      .style("width", "1px")
+      .style("height", "16px")
+      .style("background", "rgba(0,0,0,0.1)")
+      .style("margin", "0 2px")
+
+    controls.append("button")
+      .attr("class", buttonClass)
+      .attr("title", "Reset view")
+      .style("font-size", "13px")
       .html("&#8634;")
-      .on("click", () => this.zoomBehavior.transform(this.svgElement.transition().duration(200), d3.zoomIdentity))
+      .on("click", () => this.zoomBehavior.transform(this.svgElement.transition().duration(300).ease(d3.easeCubicOut), d3.zoomIdentity))
+  }
+
+  updateZoomIndicator() {
+    if (this.zoomIndicator) {
+      const pct = Math.round(this.currentTransform.k * 100)
+      this.zoomIndicator.text(`${pct}%`)
+    }
+  }
+
+  centerOnToday() {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    if (today < this.startDate || today > this.endDate) return
+
+    const todayX = this.xScale(today) + this.margin.left
+    const svgWidth = this.width + this.margin.left + this.margin.right
+    const centerX = svgWidth / 2
+
+    // Only pan if today is far enough from center to matter
+    const offset = centerX - todayX
+    if (Math.abs(offset) < 50) return
+
+    const t = d3.zoomIdentity.translate(offset, 0)
+    this.svgElement
+      .transition()
+      .duration(800)
+      .delay(400) // wait for entrance animation
+      .ease(d3.easeCubicInOut)
+      .call(this.zoomBehavior.transform, t)
   }
 
   renderDefs() {
     const defs = this.svgElement.select("defs")
+
+    // Glow filter for hover effect
+    const glow = defs.append("filter")
+      .attr("id", "brick-glow")
+      .attr("x", "-30%").attr("y", "-30%")
+      .attr("width", "160%").attr("height", "160%")
+    glow.append("feGaussianBlur")
+      .attr("in", "SourceAlpha")
+      .attr("stdDeviation", "3")
+      .attr("result", "blur")
+    glow.append("feFlood")
+      .attr("flood-color", "rgba(255,255,255,0.5)")
+      .attr("result", "color")
+    glow.append("feComposite")
+      .attr("in", "color")
+      .attr("in2", "blur")
+      .attr("operator", "in")
+      .attr("result", "glow")
+    const glowMerge = glow.append("feMerge")
+    glowMerge.append("feMergeNode").attr("in", "glow")
+    glowMerge.append("feMergeNode").attr("in", "SourceGraphic")
+
+    // Today pulse glow
+    const todayGlow = defs.append("filter")
+      .attr("id", "today-glow")
+      .attr("x", "-50%").attr("y", "-50%")
+      .attr("width", "200%").attr("height", "200%")
+    todayGlow.append("feGaussianBlur")
+      .attr("in", "SourceGraphic")
+      .attr("stdDeviation", "3")
+      .attr("result", "blur")
+    const todayMerge = todayGlow.append("feMerge")
+    todayMerge.append("feMergeNode").attr("in", "blur")
+    todayMerge.append("feMergeNode").attr("in", "SourceGraphic")
 
     this.goals.forEach((goal, i) => {
       const queuedDim = goal._isQueued ? 0.5 : 1.0
@@ -437,11 +529,15 @@ export default class extends Controller {
 
         grad.append("stop")
           .attr("offset", "0%")
-          .attr("stop-color", d3.color(base).brighter(0.25))
+          .attr("stop-color", d3.color(base).brighter(0.35))
+          .attr("stop-opacity", opacity)
+        grad.append("stop")
+          .attr("offset", "50%")
+          .attr("stop-color", base)
           .attr("stop-opacity", opacity)
         grad.append("stop")
           .attr("offset", "100%")
-          .attr("stop-color", d3.color(base).darker(0.2))
+          .attr("stop-color", d3.color(base).darker(0.25))
           .attr("stop-opacity", opacity)
       })
     })
@@ -449,6 +545,21 @@ export default class extends Controller {
 
   renderGrid() {
     const g = this.gridLayer
+
+    // Subtle chart background gradient
+    const bgGrad = this.svgElement.select("defs").append("linearGradient")
+      .attr("id", "chart-bg-grad")
+      .attr("x1", "0%").attr("y1", "0%")
+      .attr("x2", "0%").attr("y2", "100%")
+    bgGrad.append("stop").attr("offset", "0%").attr("stop-color", "#fafbfc")
+    bgGrad.append("stop").attr("offset", "100%").attr("stop-color", "#f1f5f9")
+
+    g.append("rect")
+      .attr("x", 0).attr("y", 0)
+      .attr("width", this.width)
+      .attr("height", this.chartHeight)
+      .attr("fill", "url(#chart-bg-grad)")
+      .attr("rx", 4)
 
     // Day-column grid: vertical line for each day
     const days = []
@@ -468,7 +579,7 @@ export default class extends Controller {
       .attr("x2", d => this.xScale(d))
       .attr("y1", 0)
       .attr("y2", this.chartHeight)
-      .style("stroke", "#e8e8e8")
+      .style("stroke", "#e2e8f0")
       .style("stroke-width", 0.5)
 
     // Horizontal grid lines (minutes)
@@ -482,8 +593,8 @@ export default class extends Controller {
       .attr("x2", this.width)
       .attr("y1", d => this.yScale(d))
       .attr("y2", d => this.yScale(d))
-      .style("stroke", "#e5e7eb")
-      .style("stroke-dasharray", "2,2")
+      .style("stroke", "#e2e8f0")
+      .style("stroke-dasharray", "2,4")
 
     // Weekend shading
     const weekendDays = days.filter(d => d.getDay() === 0 || d.getDay() === 6)
@@ -496,8 +607,8 @@ export default class extends Controller {
       .attr("y", 0)
       .attr("width", d => this.xScale(d3.timeDay.offset(d, 1)) - this.xScale(d))
       .attr("height", this.chartHeight)
-      .style("fill", "#f3f4f6")
-      .style("opacity", 0.6)
+      .style("fill", "#e2e8f0")
+      .style("opacity", 0.35)
 
     // X axis
     g.append("g")
@@ -510,7 +621,11 @@ export default class extends Controller {
       )
       .selectAll("text")
       .style("font-size", "11px")
-      .style("fill", "#6b7280")
+      .style("fill", "#94a3b8")
+
+    // Style axis lines
+    g.select(".x-axis .domain").style("stroke", "#cbd5e1")
+    g.selectAll(".x-axis .tick line").style("stroke", "#cbd5e1")
 
     // Y axis
     g.append("g")
@@ -522,7 +637,10 @@ export default class extends Controller {
       )
       .selectAll("text")
       .style("font-size", "11px")
-      .style("fill", "#6b7280")
+      .style("fill", "#94a3b8")
+
+    g.select(".y-axis .domain").style("stroke", "#cbd5e1")
+    g.selectAll(".y-axis .tick line").style("stroke", "#cbd5e1")
 
     // Y axis label
     if (!this.compactValue) {
@@ -531,39 +649,78 @@ export default class extends Controller {
         .attr("y", -this.margin.left + 14)
         .attr("x", -this.chartHeight / 2)
         .attr("text-anchor", "middle")
-        .style("fill", "#9ca3af")
-        .style("font-size", "12px")
+        .style("fill", "#94a3b8")
+        .style("font-size", "11px")
+        .style("letter-spacing", "0.05em")
         .text("minutes / day")
     }
 
-    // Today marker
+    // Today marker — glowing red line with pulse
     const todayDate = new Date()
     if (todayDate >= this.startDate && todayDate <= this.endDate) {
+      const todayX = this.xScale(todayDate)
+
+      // Glow behind the line
       g.append("line")
-        .attr("x1", this.xScale(todayDate))
-        .attr("x2", this.xScale(todayDate))
-        .attr("y1", 0)
-        .attr("y2", this.chartHeight)
+        .attr("class", "today-glow")
+        .attr("x1", todayX).attr("x2", todayX)
+        .attr("y1", -5).attr("y2", this.chartHeight + 5)
+        .style("stroke", "#ef4444")
+        .style("stroke-width", 6)
+        .style("opacity", 0.15)
+        .style("filter", "url(#today-glow)")
+
+      // Animated pulse layer
+      const pulse = g.append("line")
+        .attr("class", "today-pulse")
+        .attr("x1", todayX).attr("x2", todayX)
+        .attr("y1", -5).attr("y2", this.chartHeight + 5)
+        .style("stroke", "#ef4444")
+        .style("stroke-width", 8)
+        .style("opacity", 0)
+
+      // Pulse animation loop
+      const doPulse = () => {
+        pulse
+          .style("opacity", 0.12)
+          .transition().duration(1500).ease(d3.easeSinOut)
+          .style("opacity", 0)
+          .on("end", () => {
+            setTimeout(doPulse, 2000)
+          })
+      }
+      setTimeout(doPulse, 1000)
+
+      // Main today line
+      g.append("line")
+        .attr("x1", todayX).attr("x2", todayX)
+        .attr("y1", 0).attr("y2", this.chartHeight)
         .style("stroke", "#ef4444")
         .style("stroke-width", 2)
-        .style("stroke-dasharray", "4,4")
+        .style("stroke-dasharray", "6,4")
+        .style("stroke-linecap", "round")
 
-      g.append("text")
-        .attr("x", this.xScale(todayDate))
-        .attr("y", -8)
-        .attr("text-anchor", "middle")
+      // Today label with pill background
+      const labelG = g.append("g").attr("transform", `translate(${todayX}, -12)`)
+      labelG.append("rect")
+        .attr("x", -20).attr("y", -8)
+        .attr("width", 40).attr("height", 16)
+        .attr("rx", 8)
         .style("fill", "#ef4444")
-        .style("font-size", "11px")
-        .style("font-weight", "500")
-        .text("Today")
+      labelG.append("text")
+        .attr("text-anchor", "middle")
+        .attr("dy", "0.35em")
+        .style("fill", "#fff")
+        .style("font-size", "9px")
+        .style("font-weight", "600")
+        .style("letter-spacing", "0.05em")
+        .text("TODAY")
     }
   }
 
   renderBricks(bricks, opts = {}) {
-    const gap = 1
-    const t = opts.transition
-      ? d3.transition().duration(opts.duration || 80).ease(d3.easeCubicOut)
-      : null
+    const gap = 1.5
+    const animate = opts.animate && !this.compactValue
 
     // ── Main brick rects ──
     const join = this.brickLayer.selectAll(".brick")
@@ -574,8 +731,8 @@ export default class extends Controller {
     const enter = join.enter()
       .append("rect")
       .attr("class", "brick")
-      .attr("rx", 2)
-      .attr("ry", 2)
+      .attr("rx", 3)
+      .attr("ry", 3)
 
     const applyAttrs = (sel) => {
       sel
@@ -589,14 +746,36 @@ export default class extends Controller {
         })
     }
 
-    // Position enter elements immediately (no transition from 0,0)
-    applyAttrs(enter)
+    if (animate) {
+      // Entrance: bricks fade+scale in, staggered left-to-right
+      const dateExtent = d3.extent(bricks, d => d.date.getTime())
+      const dateRange = dateExtent[1] - dateExtent[0] || 1
+      const totalStagger = 400 // ms spread across all columns
 
-    if (t) {
-      applyAttrs(join.transition(t))
+      enter
+        .style("opacity", 0)
+        .attr("transform", d => {
+          const cx = this.xScale(d.date) + (this.xScale(d.nextDate) - this.xScale(d.date)) / 2
+          const cy = this.yScale(d.yOffset + d.minutes / 2)
+          return `translate(${cx}, ${cy}) scale(0.3) translate(${-cx}, ${-cy})`
+        })
+
+      applyAttrs(enter)
+
+      enter.transition()
+        .duration(300)
+        .delay(d => {
+          const progress = (d.date.getTime() - dateExtent[0]) / dateRange
+          return progress * totalStagger
+        })
+        .ease(d3.easeBackOut.overshoot(0.6))
+        .style("opacity", 1)
+        .attr("transform", null)
     } else {
-      applyAttrs(join)
+      applyAttrs(enter)
     }
+
+    applyAttrs(join)
 
     // ── Today progress overlay bricks ──
     const todayBricks = bricks.filter(b => b.isToday && b.todayProgress > 0)
@@ -609,8 +788,8 @@ export default class extends Controller {
     const progressEnter = progressJoin.enter()
       .append("rect")
       .attr("class", "brick-today-progress")
-      .attr("rx", 2)
-      .attr("ry", 2)
+      .attr("rx", 3)
+      .attr("ry", 3)
 
     const applyProgress = (sel) => {
       sel
@@ -627,13 +806,14 @@ export default class extends Controller {
         .attr("fill", d => `url(#brick-grad-${d.goalIndex}-today-progress)`)
     }
 
-    applyProgress(progressEnter)
-
-    if (t) {
-      applyProgress(progressJoin.transition(t))
+    if (animate) {
+      progressEnter.style("opacity", 0)
+      applyProgress(progressEnter)
+      progressEnter.transition().duration(400).delay(500).style("opacity", 1)
     } else {
-      applyProgress(progressJoin)
+      applyProgress(progressEnter)
     }
+    applyProgress(progressJoin)
 
     // ── Highlight lines (top edge bevel) ──
     const highlightJoin = this.brickLayer.selectAll(".brick-highlight")
@@ -644,8 +824,8 @@ export default class extends Controller {
     const hlEnter = highlightJoin.enter()
       .append("line")
       .attr("class", "brick-highlight")
-      .style("stroke", "rgba(255,255,255,0.3)")
-      .style("stroke-width", 0.5)
+      .style("stroke", "rgba(255,255,255,0.35)")
+      .style("stroke-width", 0.75)
       .style("pointer-events", "none")
 
     const applyHighlight = (sel) => {
@@ -656,15 +836,15 @@ export default class extends Controller {
         .attr("y2", d => this.yScale(d.yOffset + d.minutes) + gap / 2 + 0.5)
     }
 
-    applyHighlight(hlEnter)
-
-    if (t) {
-      applyHighlight(highlightJoin.transition(t))
+    if (animate) {
+      hlEnter.style("opacity", 0)
+      applyHighlight(hlEnter)
+      hlEnter.transition().duration(300).delay(500).style("opacity", 1)
     } else {
-      applyHighlight(highlightJoin)
+      applyHighlight(hlEnter)
     }
+    applyHighlight(highlightJoin)
 
-    // ── Queued goal dashed borders ──
     // ── Unowned goal amber dotted borders ──
     const unownedBricks = bricks.filter(b => b.isUnowned)
     const unownedJoin = this.brickLayer.selectAll(".brick-unowned-border")
@@ -675,7 +855,7 @@ export default class extends Controller {
     const ubEnter = unownedJoin.enter()
       .append("rect")
       .attr("class", "brick-unowned-border")
-      .attr("rx", 2)
+      .attr("rx", 3)
       .style("fill", "none")
       .style("stroke", "#f59e0b")
       .style("stroke-width", 1.5)
@@ -691,7 +871,7 @@ export default class extends Controller {
     }
 
     applyUnowned(ubEnter)
-    if (t) { applyUnowned(unownedJoin.transition(t)) } else { applyUnowned(unownedJoin) }
+    applyUnowned(unownedJoin)
 
     // ── Queued goal dashed borders ──
     const queuedBricks = bricks.filter(b => b.isQueued)
@@ -703,7 +883,7 @@ export default class extends Controller {
     const qbEnter = queuedJoin.enter()
       .append("rect")
       .attr("class", "brick-queued-border")
-      .attr("rx", 2)
+      .attr("rx", 3)
       .style("fill", "none")
       .style("stroke", "rgba(255,255,255,0.4)")
       .style("stroke-width", 1)
@@ -719,13 +899,11 @@ export default class extends Controller {
     }
 
     applyQueued(qbEnter)
-    if (t) { applyQueued(queuedJoin.transition(t)) } else { applyQueued(queuedJoin) }
+    applyQueued(queuedJoin)
   }
 
   renderLabels(labels, opts = {}) {
-    const t = opts.transition
-      ? d3.transition().duration(opts.duration || 80).ease(d3.easeCubicOut)
-      : null
+    const animate = opts.animate && !this.compactValue
 
     // Title labels
     const titleJoin = this.labelLayer.selectAll(".label-title")
@@ -738,7 +916,7 @@ export default class extends Controller {
       .attr("class", "label-title")
       .style("fill", "#fff")
       .style("font-weight", "600")
-      .style("text-shadow", "0 1px 2px rgba(0,0,0,0.4)")
+      .style("text-shadow", "0 1px 3px rgba(0,0,0,0.5)")
       .style("pointer-events", "none")
       .attr("dy", "0.35em")
 
@@ -753,13 +931,14 @@ export default class extends Controller {
         })
     }
 
-    applyTitle(titleEnter)
-
-    if (t) {
-      applyTitle(titleJoin.transition(t))
+    if (animate) {
+      titleEnter.style("opacity", 0)
+      applyTitle(titleEnter)
+      titleEnter.transition().duration(300).delay(500).style("opacity", 1)
     } else {
-      applyTitle(titleJoin)
+      applyTitle(titleEnter)
     }
+    applyTitle(titleJoin)
 
     // Minutes/day labels
     if (!this.compactValue) {
@@ -775,7 +954,7 @@ export default class extends Controller {
         .style("fill", "rgba(255,255,255,0.8)")
         .style("font-size", "10px")
         .style("font-weight", "500")
-        .style("text-shadow", "0 1px 2px rgba(0,0,0,0.4)")
+        .style("text-shadow", "0 1px 3px rgba(0,0,0,0.5)")
         .style("pointer-events", "none")
         .attr("dy", "0.35em")
 
@@ -786,13 +965,14 @@ export default class extends Controller {
           .text(d => `${d.minutesPerDay}m/day`)
       }
 
-      applyMpd(mpdEnter)
-
-      if (t) {
-        applyMpd(mpdJoin.transition(t))
+      if (animate) {
+        mpdEnter.style("opacity", 0)
+        applyMpd(mpdEnter)
+        mpdEnter.transition().duration(300).delay(600).style("opacity", 1)
       } else {
-        applyMpd(mpdJoin)
+        applyMpd(mpdEnter)
       }
+      applyMpd(mpdJoin)
     }
 
     // Estimate indicators (dashed border on widest run for goals without actual data)
@@ -805,7 +985,7 @@ export default class extends Controller {
     const estEnter = estJoin.enter()
       .append("rect")
       .attr("class", "estimate-indicator")
-      .attr("rx", 2)
+      .attr("rx", 3)
       .style("fill", "none")
       .style("stroke", "rgba(255,255,255,0.3)")
       .style("stroke-width", 1)
@@ -821,12 +1001,7 @@ export default class extends Controller {
     }
 
     applyEst(estEnter)
-
-    if (t) {
-      applyEst(estJoin.transition(t))
-    } else {
-      applyEst(estJoin)
-    }
+    applyEst(estJoin)
   }
 
   // ── Overlays (hover, drag, resize, click) ─────────────────────────
@@ -872,8 +1047,12 @@ export default class extends Controller {
         ? '<div class="text-amber-400 font-medium">Not yet owned</div>'
         : ''
 
+      // Color swatch in tooltip header
       goal._tooltipHtml = `
-        <div class="font-semibold mb-1">${goal.title}</div>
+        <div class="flex items-center gap-2 mb-1">
+          <span style="width:10px;height:10px;border-radius:3px;background:${goal.color};display:inline-block;flex-shrink:0"></span>
+          <span class="font-semibold">${goal.title}</span>
+        </div>
         <div class="text-gray-300 text-xs">${goal.author || "Unknown author"}</div>
         ${unownedLine}
         <div class="mt-2 space-y-1 text-xs">
@@ -903,58 +1082,59 @@ export default class extends Controller {
 
       // Invisible hit target covering all bricks for this goal
       const hitTarget = this.overlayLayer.append("rect")
-        .attr("class", "overlay-hit cursor-pointer")
+        .attr("class", "overlay-hit")
         .attr("x", minX)
         .attr("y", minY)
         .attr("width", maxX - minX)
         .attr("height", maxY - minY)
         .style("fill", "transparent")
         .style("stroke", "none")
+        .style("cursor", "pointer")
         .datum(goal)
 
-      // ── Hover tooltip (checks ALL goals' bricks, not just this overlay's) ──
+      // ── Hover: glow the hovered goal, dim everything else ──
       hitTarget.on("mousemove", (event) => {
         const [mx, my] = d3.pointer(event, self.svg.node())
         const hitGoal = self.findGoalAtPoint(mx, my)
 
         if (hitGoal) {
           if (self._hoveredGoalId !== hitGoal.id) {
-            // Clear previous highlight
-            if (self._hoveredGoalId) {
-              self.brickLayer.selectAll(".brick")
-                .filter(d => d.goalId === self._hoveredGoalId)
-                .style("filter", null)
-            }
             self._hoveredGoalId = hitGoal.id
+
+            // Dim all bricks, then brighten + glow the hovered ones
             self.brickLayer.selectAll(".brick")
-              .filter(d => d.goalId === hitGoal.id)
-              .style("filter", "brightness(1.1)")
+              .transition().duration(150)
+              .style("opacity", d => d.goalId === hitGoal.id ? 1 : 0.3)
+              .style("filter", d => d.goalId === hitGoal.id ? "url(#brick-glow)" : null)
+
+            // Dim/show highlights
+            self.brickLayer.selectAll(".brick-highlight")
+              .transition().duration(150)
+              .style("opacity", d => d.goalId === hitGoal.id ? 1 : 0.3)
+
+            // Dim/show labels
+            self.labelLayer.selectAll(".label-title, .label-mpd")
+              .transition().duration(150)
+              .style("opacity", function() {
+                const goalId = d3.select(this).datum()?.goalId
+                return goalId === hitGoal.id ? 1 : 0.25
+              })
+
             self.tooltip.html(hitGoal._tooltipHtml).classed("hidden", false)
+            self.svgElement.style("cursor", "pointer")
           }
-          // Use pointer relative to the element container for tooltip positioning
+          // Tooltip position
           const rect = self.element.getBoundingClientRect()
           self.tooltip
             .style("left", `${event.clientX - rect.left + 15}px`)
             .style("top", `${event.clientY - rect.top - 10}px`)
         } else {
-          if (self._hoveredGoalId) {
-            self.brickLayer.selectAll(".brick")
-              .filter(d => d.goalId === self._hoveredGoalId)
-              .style("filter", null)
-            self._hoveredGoalId = null
-          }
-          self.tooltip.classed("hidden", true)
+          self.clearHover()
         }
       })
 
       hitTarget.on("mouseleave", () => {
-        if (self._hoveredGoalId) {
-          self.brickLayer.selectAll(".brick")
-            .filter(d => d.goalId === self._hoveredGoalId)
-            .style("filter", null)
-          self._hoveredGoalId = null
-        }
-        self.tooltip.classed("hidden", true)
+        self.clearHover()
       })
 
       // ── Click to navigate (checks ALL goals' bricks) ──
@@ -969,10 +1149,33 @@ export default class extends Controller {
     })
   }
 
+  clearHover() {
+    if (this._hoveredGoalId) {
+      this._hoveredGoalId = null
+
+      // Restore all bricks
+      this.brickLayer.selectAll(".brick")
+        .transition().duration(200)
+        .style("opacity", 1)
+        .style("filter", null)
+
+      this.brickLayer.selectAll(".brick-highlight")
+        .transition().duration(200)
+        .style("opacity", 1)
+
+      this.labelLayer.selectAll(".label-title, .label-mpd")
+        .transition().duration(200)
+        .style("opacity", 1)
+
+      this.svgElement.style("cursor", "grab")
+    }
+    this.tooltip.classed("hidden", true)
+  }
+
   // ── Hit testing ─────────────────────────────────────────────────
 
   findGoalAtPoint(mx, my) {
-    const gap = 1
+    const gap = 1.5
     // Check bricks in reverse order (topmost visually = last appended)
     for (let i = this.currentBricks.length - 1; i >= 0; i--) {
       const b = this.currentBricks[i]
