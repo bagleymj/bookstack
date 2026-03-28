@@ -2,7 +2,8 @@ module Api
   module V1
     class ReadingGoalsController < BaseController
       before_action :set_goal, only: [
-        :show, :destroy, :mark_completed, :mark_abandoned
+        :show, :destroy, :mark_completed, :mark_abandoned,
+        :postpone, :unlock
       ]
 
       def index
@@ -40,6 +41,33 @@ module Api
 
       def mark_abandoned
         @goal.mark_abandoned!
+        render json: { reading_goal: ReadingGoalSerializer.new(@goal.reload).as_json }
+      end
+
+      def postpone
+        unless @goal.active? && @goal.auto_scheduled? && !@goal.manually_placed?
+          render json: { errors: ["Only active auto-scheduled goals can be postponed"] }, status: :unprocessable_entity
+          return
+        end
+
+        @goal.postpone!
+        ReadingListScheduler.new(current_user).schedule!
+        render json: { reading_goal: ReadingGoalSerializer.new(@goal.reload).as_json }
+      end
+
+      def unlock
+        unless @goal.active? && @goal.manually_placed?
+          render json: { errors: ["Only active manually placed goals can be unlocked"] }, status: :unprocessable_entity
+          return
+        end
+
+        @goal.unlock!
+
+        # Assign position at end of auto queue
+        max_position = current_user.reading_goals.where.not(position: nil).maximum(:position) || 0
+        @goal.update!(position: max_position + 1)
+
+        ReadingListScheduler.new(current_user).schedule!
         render json: { reading_goal: ReadingGoalSerializer.new(@goal.reload).as_json }
       end
 
