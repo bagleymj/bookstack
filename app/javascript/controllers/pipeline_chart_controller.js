@@ -52,6 +52,7 @@ export default class extends Controller {
         .pipeline-svg[data-hovering] .goal-group[data-active] .brick {
           stroke: rgba(255,255,255,0.6);
           stroke-width: 1.5;
+          vector-effect: non-scaling-stroke;
         }
         .label-group {
           transition: opacity 0.15s ease-out;
@@ -554,6 +555,7 @@ export default class extends Controller {
         .attr("x1", 0).attr("x2", this.width)
         .attr("y1", this.yScale(m)).attr("y2", this.yScale(m))
         .attr("stroke", "#e2e8f0").attr("stroke-dasharray", "1,3")
+        .attr("vector-effect", "non-scaling-stroke")
     })
 
     // Y axis — minimal: just tick values, no axis line
@@ -591,6 +593,7 @@ export default class extends Controller {
       .attr("y1", 0).attr("y2", this.chartHeight)
       .attr("stroke", "#ef4444").attr("stroke-width", 1.5)
       .attr("stroke-dasharray", "6,4").attr("stroke-linecap", "round")
+      .attr("vector-effect", "non-scaling-stroke")
 
     // Pill label
     const pill = this.todayFgLayer.append("g")
@@ -631,6 +634,7 @@ export default class extends Controller {
           .attr("x1", x1).attr("x2", x1)
           .attr("y1", 0).attr("y2", this.chartHeight)
           .attr("stroke", "#cbd5e1").attr("stroke-width", 0.5)
+          .attr("vector-effect", "non-scaling-stroke")
       }
 
       // Month name
@@ -651,6 +655,7 @@ export default class extends Controller {
         .attr("x1", x).attr("x2", x)
         .attr("y1", this.chartHeight).attr("y2", this.chartHeight + 4)
         .attr("stroke", "#cbd5e1").attr("stroke-width", 0.5)
+        .attr("vector-effect", "non-scaling-stroke")
     })
   }
 
@@ -704,6 +709,7 @@ export default class extends Controller {
         .attr("y2", d => this.yScale(d.yOffset + d.minutes) + gap / 2 + 0.5)
         .attr("stroke", "rgba(255,255,255,0.3)")
         .attr("stroke-width", 0.5)
+        .attr("vector-effect", "non-scaling-stroke")
         .style("pointer-events", "none")
 
       // Today progress overlay
@@ -736,6 +742,7 @@ export default class extends Controller {
         .attr("rx", 3)
         .attr("fill", "none").attr("stroke", "#f59e0b")
         .attr("stroke-width", 1.5).attr("stroke-dasharray", "2,2")
+        .attr("vector-effect", "non-scaling-stroke")
         .style("pointer-events", "none")
         .attr("x", d => this.xScale(d.date) + gap / 2)
         .attr("y", d => this.yScale(d.yOffset + d.minutes) + gap / 2)
@@ -752,6 +759,7 @@ export default class extends Controller {
         .attr("rx", 3)
         .attr("fill", "none").attr("stroke", "rgba(255,255,255,0.4)")
         .attr("stroke-width", 1).attr("stroke-dasharray", "4,3")
+        .attr("vector-effect", "non-scaling-stroke")
         .style("pointer-events", "none")
         .attr("x", d => this.xScale(d.date) + gap / 2)
         .attr("y", d => this.yScale(d.yOffset + d.minutes) + gap / 2)
@@ -812,6 +820,7 @@ export default class extends Controller {
           .attr("rx", 3)
           .attr("fill", "none").attr("stroke", "rgba(255,255,255,0.25)")
           .attr("stroke-width", 1).attr("stroke-dasharray", "3,3")
+          .attr("vector-effect", "non-scaling-stroke")
           .style("pointer-events", "none")
           .attr("x", l.x - 7)
           .attr("y", l.y - l.height / 2 + 1)
