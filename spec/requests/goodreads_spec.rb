@@ -37,6 +37,37 @@ RSpec.describe "Goodreads", type: :request do
       expect(response.body).to include("Please select a CSV file")
     end
 
+    it "filters entries by selected shelves" do
+      file = Rack::Test::UploadedFile.new(StringIO.new(csv_content), "text/csv", false, original_filename: "goodreads.csv")
+      post preview_goodreads_path, params: { file: file, shelves: ["to-read"] }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include("Meditations")
+      expect(response.body).not_to include("The Republic")
+    end
+
+    it "shows all shelves when none are selected" do
+      file = Rack::Test::UploadedFile.new(StringIO.new(csv_content), "text/csv", false, original_filename: "goodreads.csv")
+      post preview_goodreads_path, params: { file: file, shelves: [] }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include("Meditations")
+      expect(response.body).to include("The Republic")
+    end
+
+    it "redirects when selected shelves match no books" do
+      csv_with_only_read = <<~CSV
+        Book Id,Title,Author,Author l-f,Additional Authors,ISBN,ISBN13,My Rating,Average Rating,Publisher,Binding,Number of Pages,Year Published,Original Publication Year,Date Read,Date Added,Bookshelves,Bookshelves with positions,Exclusive Shelf,My Review,Spoiler,Private Notes,Read Count,Recommended For,Recommended By,Owned Copies,Original Purchase Date,Original Purchase Location,Condition,Condition Description,BCID
+        1,Meditations,Marcus Aurelius,"Aurelius, Marcus",,="0140449337",="9780140449334",0,4.25,Penguin Classics,Paperback,256,2006,180,,2024/01/15,,,read,,,,1,,,,,,,,
+      CSV
+      file = Rack::Test::UploadedFile.new(StringIO.new(csv_with_only_read), "text/csv", false, original_filename: "goodreads.csv")
+      post preview_goodreads_path, params: { file: file, shelves: ["to-read"] }
+
+      expect(response).to redirect_to(goodreads_path)
+      follow_redirect!
+      expect(response.body).to include("No books found")
+    end
+
     it "marks existing books by ISBN" do
       create(:book, user: user, isbn: "9780140449334", title: "Meditations", last_page: 256)
 

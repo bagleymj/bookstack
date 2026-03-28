@@ -14,10 +14,18 @@ class GoodreadsController < ApplicationController
 
     csv_content = params[:file].read.force_encoding("UTF-8")
     service = GoodreadsImportService.new(current_user)
-    @entries = service.parse(csv_content)
+    all_entries = service.parse(csv_content)
+
+    # Filter by selected shelves (if none selected, include all)
+    selected_shelves = Array(params[:shelves]).select(&:present?)
+    @entries = if selected_shelves.any?
+      all_entries.select { |e| selected_shelves.include?(e[:exclusive_shelf]) }
+    else
+      all_entries
+    end
 
     if @entries.empty?
-      redirect_to goodreads_path, alert: "No books found in the CSV file."
+      redirect_to goodreads_path, alert: "No books found in the CSV file for the selected shelves."
       return
     end
 

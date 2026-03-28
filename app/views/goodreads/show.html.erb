@@ -46,6 +46,25 @@
             </div>
           </div>
 
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Import shelves</label>
+            <div class="flex flex-wrap gap-3">
+              <label class="inline-flex items-center gap-2 cursor-pointer">
+                <%= check_box_tag "shelves[]", "to-read", true, class: "h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600" %>
+                <span class="text-sm text-gray-700">To Read</span>
+              </label>
+              <label class="inline-flex items-center gap-2 cursor-pointer">
+                <%= check_box_tag "shelves[]", "currently-reading", true, class: "h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600" %>
+                <span class="text-sm text-gray-700">Currently Reading</span>
+              </label>
+              <label class="inline-flex items-center gap-2 cursor-pointer">
+                <%= check_box_tag "shelves[]", "read", true, class: "h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600" %>
+                <span class="text-sm text-gray-700">Read</span>
+              </label>
+            </div>
+            <p class="mt-1 text-xs text-gray-500">Only books from selected shelves will appear in the preview.</p>
+          </div>
+
           <%= submit_tag "Upload & Preview", class: "inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 cursor-pointer" %>
         <% end %>
       </div>
