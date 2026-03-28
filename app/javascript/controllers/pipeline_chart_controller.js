@@ -905,10 +905,24 @@ export default class extends Controller {
             self.setHoveredGoal(hitGoal.id)
             self.tooltip.html(hitGoal._tooltipHtml).classed("hidden", false)
           }
-          const rect = self.element.getBoundingClientRect()
+          const container = self.element.getBoundingClientRect()
+          const tip = self.tooltip.node().getBoundingClientRect()
+          const cursorX = event.clientX - container.left
+          const cursorY = event.clientY - container.top
+
+          // Flip horizontally if tooltip would overflow right edge
+          const left = cursorX + 15 + tip.width > container.width
+            ? cursorX - tip.width - 10
+            : cursorX + 15
+
+          // Flip vertically if tooltip would overflow bottom edge
+          const top = cursorY - 10 + tip.height > container.height
+            ? cursorY - tip.height - 5
+            : cursorY - 10
+
           self.tooltip
-            .style("left", `${event.clientX - rect.left + 15}px`)
-            .style("top", `${event.clientY - rect.top - 10}px`)
+            .style("left", `${Math.max(0, left)}px`)
+            .style("top", `${Math.max(0, top)}px`)
         } else {
           self.clearHover()
         }
