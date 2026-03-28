@@ -38,7 +38,7 @@
     <div class="px-4 py-5 sm:p-6">
       <div data-controller="pipeline-chart"
            data-pipeline-chart-url-value="<%= api_v1_pipeline_index_path %>"
-           class="overflow-x-auto relative"
+           class="overflow-hidden relative"
            style="touch-action: none;">
         <div class="min-h-[200px] flex items-center justify-center text-gray-500">
           Loading pipeline...
@@ -83,7 +83,7 @@
             Dimmed bricks = queued (not yet started)
           </div>
         </div>
-        <p class="mt-2 text-xs text-gray-400">Hover a brick for details. Click to view the reading goal.</p>
+        <p class="mt-2 text-xs text-gray-400">Hover a brick for details. Click to view the reading goal. Scroll to zoom, drag to pan.</p>
       </details>
     </div>
   </div>

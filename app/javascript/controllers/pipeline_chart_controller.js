@@ -320,12 +320,35 @@ export default class extends Controller {
   }
 
   createSvg() {
-    this.svg = d3.select(this.element)
+    const svgWidth = this.width + this.margin.left + this.margin.right
+    const svgHeight = this.chartHeight + this.margin.top + this.margin.bottom
+
+    this.svgElement = d3.select(this.element)
       .append("svg")
-      .attr("width", this.width + this.margin.left + this.margin.right)
-      .attr("height", this.chartHeight + this.margin.top + this.margin.bottom)
-      .append("g")
+      .attr("width", svgWidth)
+      .attr("height", svgHeight)
+
+    // Clip path to contain zoomed content within chart area
+    const defs = this.svgElement.append("defs")
+    defs.append("clipPath")
+      .attr("id", "chart-clip")
+      .append("rect")
+      .attr("x", -this.margin.left)
+      .attr("y", -this.margin.top)
+      .attr("width", svgWidth)
+      .attr("height", svgHeight)
+
+    // Outer group for margin offset + clipping
+    const outerG = this.svgElement.append("g")
       .attr("transform", `translate(${this.margin.left},${this.margin.top})`)
+      .attr("clip-path", "url(#chart-clip)")
+
+    // Zoom wrapper group — d3.zoom transforms this
+    this.zoomGroup = outerG.append("g")
+      .attr("class", "zoom-group")
+
+    // The svg reference used by all render methods
+    this.svg = this.zoomGroup
 
     // Create layers
     this.gridLayer = this.svg.append("g").attr("class", "layer-grid")
@@ -336,6 +359,30 @@ export default class extends Controller {
     // Apply group-level drop shadow to brick layer
     this.brickLayer.style("filter", "drop-shadow(0 1px 2px rgba(0,0,0,0.15))")
 
+    // Set up d3.zoom
+    this.currentTransform = d3.zoomIdentity
+    this.zoomBehavior = d3.zoom()
+      .scaleExtent([0.5, 5])
+      .filter((event) => {
+        // Allow wheel events (for zoom) and pointer events (for pan)
+        // but prevent page scroll when wheeling over the chart
+        if (event.type === "wheel") {
+          event.preventDefault()
+        }
+        return true
+      })
+      .on("zoom", (event) => {
+        this.currentTransform = event.transform
+        this.zoomGroup.attr("transform", event.transform)
+      })
+
+    this.svgElement
+      .call(this.zoomBehavior)
+      .on("dblclick.zoom", null) // disable double-click zoom (interferes with brick clicks)
+
+    // Zoom controls
+    this.renderZoomControls()
+
     // Tooltip (DOM element, not SVG)
     this.tooltip = d3.select(this.element)
       .append("div")
@@ -343,8 +390,34 @@ export default class extends Controller {
       .style("transition", "opacity 0.15s")
   }
 
+  renderZoomControls() {
+    const controls = d3.select(this.element)
+      .append("div")
+      .attr("class", "absolute top-2 right-2 flex flex-col gap-1 z-40")
+
+    const buttonClass = "w-8 h-8 flex items-center justify-center rounded bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 hover:text-gray-800 shadow-sm cursor-pointer text-sm font-medium select-none"
+
+    controls.append("button")
+      .attr("class", buttonClass)
+      .attr("title", "Zoom in")
+      .html("+")
+      .on("click", () => this.zoomBehavior.scaleBy(this.svgElement.transition().duration(200), 1.4))
+
+    controls.append("button")
+      .attr("class", buttonClass)
+      .attr("title", "Zoom out")
+      .html("&minus;")
+      .on("click", () => this.zoomBehavior.scaleBy(this.svgElement.transition().duration(200), 1 / 1.4))
+
+    controls.append("button")
+      .attr("class", buttonClass)
+      .attr("title", "Reset zoom")
+      .html("&#8634;")
+      .on("click", () => this.zoomBehavior.transform(this.svgElement.transition().duration(200), d3.zoomIdentity))
+  }
+
   renderDefs() {
-    const defs = this.svg.append("defs")
+    const defs = this.svgElement.select("defs")
 
     this.goals.forEach((goal, i) => {
       const queuedDim = goal._isQueued ? 0.5 : 1.0
@@ -858,9 +931,11 @@ export default class extends Controller {
               .style("filter", "brightness(1.1)")
             self.tooltip.html(hitGoal._tooltipHtml).classed("hidden", false)
           }
+          // Use pointer relative to the element container for tooltip positioning
+          const rect = self.element.getBoundingClientRect()
           self.tooltip
-            .style("left", `${event.offsetX + 15}px`)
-            .style("top", `${event.offsetY - 10}px`)
+            .style("left", `${event.clientX - rect.left + 15}px`)
+            .style("top", `${event.clientY - rect.top - 10}px`)
         } else {
           if (self._hoveredGoalId) {
             self.brickLayer.selectAll(".brick")
