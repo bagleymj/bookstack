@@ -413,4 +413,133 @@ RSpec.describe ReadingGoal, type: :model do
       expect(goal.progress_percentage).to eq(book.progress_percentage)
     end
   end
+
+  describe "#postpone!" do
+    it "clears dates and sets status to queued with postponed_until" do
+      goal = create(:reading_goal, user: user, book: book, status: :active,
+                    started_on: Date.current, target_completion_date: 14.days.from_now.to_date,
+                    auto_scheduled: true, position: 1)
+
+      goal.postpone!
+
+      expect(goal.status).to eq("queued")
+      expect(goal.started_on).to be_nil
+      expect(goal.target_completion_date).to be_nil
+      expect(goal.postponed_until).to be_present
+      expect(goal.postponed_until).to be_monday
+    end
+
+    it "preserves auto_scheduled and position" do
+      goal = create(:reading_goal, user: user, book: book, status: :active,
+                    started_on: Date.current, target_completion_date: 14.days.from_now.to_date,
+                    auto_scheduled: true, position: 3)
+
+      goal.postpone!
+
+      expect(goal.auto_scheduled).to be true
+      expect(goal.position).to eq(3)
+    end
+
+    it "deletes future quotas but preserves past ones" do
+      goal = create(:reading_goal, user: user, book: book, status: :active,
+                    started_on: 3.days.ago.to_date, target_completion_date: 14.days.from_now.to_date,
+                    auto_scheduled: true, position: 1)
+      # Generate some quotas
+      QuotaCalculator.new(goal).generate_quotas!
+      past_count = goal.daily_quotas.where("date < ?", Date.current).count
+
+      goal.postpone!
+
+      expect(goal.daily_quotas.where("date >= ?", Date.current).count).to eq(0)
+      expect(goal.daily_quotas.where("date < ?", Date.current).count).to eq(past_count)
+    end
+
+    it "sets postponed_until to the Monday after next" do
+      goal = create(:reading_goal, user: user, book: book, status: :active,
+                    started_on: Date.current, target_completion_date: 14.days.from_now.to_date,
+                    auto_scheduled: true, position: 1)
+
+      next_monday = Date.current.beginning_of_week(:monday) + 7
+      expected = next_monday + 7
+
+      goal.postpone!
+
+      expect(goal.postponed_until).to eq(expected)
+    end
+  end
+
+  describe "#unlock!" do
+    it "clears manual placement and converts to auto-scheduled" do
+      goal = create(:reading_goal, user: user, book: book, status: :active,
+                    started_on: Date.current, target_completion_date: 14.days.from_now.to_date,
+                    manually_placed: true, placement_tier: "two_weeks",
+                    auto_scheduled: false)
+
+      goal.unlock!
+
+      expect(goal.status).to eq("queued")
+      expect(goal.started_on).to be_nil
+      expect(goal.target_completion_date).to be_nil
+      expect(goal.manually_placed).to be false
+      expect(goal.placement_tier).to be_nil
+      expect(goal.auto_scheduled).to be true
+    end
+
+    it "deletes future quotas" do
+      goal = create(:reading_goal, user: user, book: book, status: :active,
+                    started_on: Date.current, target_completion_date: 14.days.from_now.to_date,
+                    manually_placed: true, placement_tier: "two_weeks",
+                    auto_scheduled: false)
+      QuotaCalculator.new(goal).generate_quotas!
+
+      goal.unlock!
+
+      expect(goal.daily_quotas.where("date >= ?", Date.current).count).to eq(0)
+    end
+  end
+
+  describe "placement_tier validation" do
+    it "validates placement_tier when manually_placed is true" do
+      goal = build(:reading_goal, user: user, book: book, status: :active,
+                   started_on: Date.current, target_completion_date: 14.days.from_now.to_date,
+                   manually_placed: true, placement_tier: "invalid_tier")
+      expect(goal).not_to be_valid
+      expect(goal.errors[:placement_tier]).to include("must be a valid tier")
+    end
+
+    it "accepts valid tiers" do
+      goal = build(:reading_goal, user: user, book: book, status: :active,
+                   started_on: Date.current, target_completion_date: 14.days.from_now.to_date,
+                   manually_placed: true, placement_tier: "two_weeks")
+      expect(goal).to be_valid
+    end
+
+    it "does not validate tier when not manually placed" do
+      goal = build(:reading_goal, user: user, book: book, status: :active,
+                   started_on: Date.current, target_completion_date: 14.days.from_now.to_date,
+                   manually_placed: false, placement_tier: nil)
+      expect(goal).to be_valid
+    end
+  end
+
+  describe "#as_pipeline_data" do
+    it "includes manually_placed and placement_tier" do
+      goal = create(:reading_goal, user: user, book: book, status: :active,
+                    started_on: Date.current, target_completion_date: 14.days.from_now.to_date,
+                    manually_placed: true, placement_tier: "two_weeks")
+
+      data = goal.as_pipeline_data
+      expect(data[:manually_placed]).to be true
+      expect(data[:placement_tier]).to eq("two_weeks")
+    end
+
+    it "includes postponed_until in queued pipeline data" do
+      goal = create(:reading_goal, user: user, book: book, status: :queued,
+                    started_on: nil, target_completion_date: nil,
+                    postponed_until: Date.current + 14)
+
+      data = goal.as_pipeline_data
+      expect(data[:postponed_until]).to eq((Date.current + 14).to_s)
+    end
+  end
 end

@@ -1549,4 +1549,271 @@ RSpec.describe ReadingListScheduler do
       # (it may or may not overlap depending on leveling, but it's not blocked)
     end
   end
+
+  # ─── Manual Goal Placement ──────────────────────────────────────
+
+  describe "manual goal placement" do
+    def create_manual_goal(book:, start_date:, tier:)
+      end_date = ReadingListScheduler.calendar_end_for(start_date, tier)
+      create(:reading_goal,
+        user: user, book: book, status: :active,
+        started_on: start_date, target_completion_date: end_date,
+        manually_placed: true, placement_tier: tier.to_s,
+        auto_scheduled: false)
+    end
+
+    it "stamps manual goals into profiles before auto fill" do
+      monday = Date.current.beginning_of_week(:monday)
+      monday += 7 unless Date.current.monday?
+
+      travel_to monday do
+        book_manual = create(:book, user: user, last_page: 300, title: "Manual Book")
+        create_manual_goal(book: book_manual, start_date: monday, tier: :two_weeks)
+        create_queued_book(pages: 300, position: 1, title: "Auto Book")
+
+        schedule!
+
+        manual = user.reading_goals.find_by(book: book_manual)
+        expect(manual.started_on).to eq(monday)
+        expect(manual.target_completion_date).to eq(ReadingListScheduler.calendar_end_for(monday, :two_weeks))
+        expect(manual.manually_placed).to be true
+      end
+    end
+
+    it "does not graduate manual goals" do
+      monday = Date.current.beginning_of_week(:monday)
+      monday += 7 unless Date.current.monday?
+
+      travel_to monday do
+        # Create a heavy manual goal that would trigger graduation for a normal book
+        book_manual = create(:book, user: user, last_page: 2000, title: "Heavy Manual")
+        goal = create_manual_goal(book: book_manual, start_date: monday, tier: :week)
+        original_end = goal.target_completion_date
+
+        schedule!
+
+        goal.reload
+        expect(goal.target_completion_date).to eq(original_end)
+        expect(goal.placement_tier).to eq("week")
+      end
+    end
+
+    it "counts manual goals toward concurrency" do
+      monday = Date.current.beginning_of_week(:monday)
+      monday += 7 unless Date.current.monday?
+
+      travel_to monday do
+        user.update!(max_concurrent_books: 2)
+
+        book1 = create(:book, user: user, last_page: 300, title: "Manual 1")
+        book2 = create(:book, user: user, last_page: 300, title: "Manual 2")
+        create_manual_goal(book: book1, start_date: monday, tier: :four_weeks)
+        create_manual_goal(book: book2, start_date: monday, tier: :four_weeks)
+
+        create_queued_book(pages: 300, position: 1, title: "Auto Should Wait")
+
+        schedule!
+
+        auto_goal = user.reading_goals.find_by(book: user.books.find_by(title: "Auto Should Wait"))
+        # Auto book should not start on the same Monday (concurrency full)
+        expect(auto_goal.started_on).to be > monday
+      end
+    end
+
+    it "recomputes daily target lower when manual goals are spoken for" do
+      monday = Date.current.beginning_of_week(:monday)
+      monday += 7 unless Date.current.monday?
+
+      travel_to monday do
+        # Create enough queued books to establish a baseline target
+        5.times { |i| create_queued_book(pages: 300, position: i + 1, title: "Auto #{i}") }
+
+        scheduler_before = ReadingListScheduler.new(user)
+        scheduler_before.schedule!
+        target_before = scheduler_before.daily_target
+
+        # Reset and add a manual goal that takes one epoch slot
+        user.reading_goals.destroy_all
+
+        book_manual = create(:book, user: user, last_page: 300, title: "Manual")
+        create_manual_goal(book: book_manual, start_date: monday, tier: :two_weeks)
+        5.times { |i| create_queued_book(pages: 300, position: i + 1, title: "Auto #{i}") }
+
+        scheduler_after = ReadingListScheduler.new(user)
+        scheduler_after.schedule!
+        target_after = scheduler_after.daily_target
+
+        # Daily target should be lower with a manual goal spoken for
+        expect(target_after).to be < target_before
+      end
+    end
+
+    it "does not re-place manual goals on second run" do
+      monday = Date.current.beginning_of_week(:monday)
+      monday += 7 unless Date.current.monday?
+
+      travel_to monday do
+        book_manual = create(:book, user: user, last_page: 300, title: "Manual")
+        goal = create_manual_goal(book: book_manual, start_date: monday, tier: :three_weeks)
+
+        schedule!
+        first_start = goal.reload.started_on
+        first_end = goal.reload.target_completion_date
+
+        schedule!
+        expect(goal.reload.started_on).to eq(first_start)
+        expect(goal.reload.target_completion_date).to eq(first_end)
+      end
+    end
+
+    it "skips a Monday that is already full from manual goal" do
+      monday = Date.current.beginning_of_week(:monday)
+      monday += 7 unless Date.current.monday?
+
+      travel_to monday do
+        # Place a heavy manual goal that fills the daily target on its own
+        book_manual = create(:book, user: user, last_page: 2000, title: "Heavy Manual")
+        create_manual_goal(book: book_manual, start_date: monday, tier: :week)
+
+        create_queued_book(pages: 300, position: 1, title: "Auto")
+
+        schedule!
+
+        auto_goal = user.reading_goals.find_by(book: user.books.find_by(title: "Auto"))
+        # Auto book should start after the manual book's Monday
+        expect(auto_goal.started_on).to be > monday
+      end
+    end
+
+    it "fills remaining capacity when manual goal only partially fills Monday" do
+      monday = Date.current.beginning_of_week(:monday)
+      monday += 7 unless Date.current.monday?
+
+      travel_to monday do
+        user.update!(max_concurrent_books: 3)
+
+        # Small manual goal — leaves room for auto books
+        book_manual = create(:book, user: user, last_page: 50, title: "Small Manual")
+        create_manual_goal(book: book_manual, start_date: monday, tier: :week)
+
+        create_queued_book(pages: 300, position: 1, title: "Auto")
+
+        schedule!
+
+        auto_goal = user.reading_goals.find_by(book: user.books.find_by(title: "Auto"))
+        # Auto book can start on the same Monday since there's room
+        expect(auto_goal.started_on).to eq(monday)
+      end
+    end
+
+    it "throughput verification does not adjust manual goals" do
+      monday = Date.current.beginning_of_week(:monday)
+      monday += 7 unless Date.current.monday?
+
+      travel_to monday do
+        book_manual = create(:book, user: user, last_page: 300, title: "Manual")
+        goal = create_manual_goal(book: book_manual, start_date: monday, tier: :four_weeks)
+        original_tier = goal.placement_tier
+
+        3.times { |i| create_queued_book(pages: 300, position: i + 1, title: "Auto #{i}") }
+
+        schedule!
+
+        goal.reload
+        expect(goal.placement_tier).to eq(original_tier)
+      end
+    end
+  end
+
+  # ─── Postponement ───────────────────────────────────────────────
+
+  describe "postponement" do
+    it "skips postponed goals until their eligible Monday" do
+      monday = Date.current.beginning_of_week(:monday)
+      monday += 7 unless Date.current.monday?
+
+      travel_to monday do
+        book = create_queued_book(pages: 300, position: 1, title: "Postponed Book")
+        goal = user.reading_goals.find_by(book: book)
+        goal.update!(postponed_until: monday + 14) # eligible 2 Mondays from now
+
+        create_queued_book(pages: 300, position: 2, title: "Other Book")
+
+        schedule!
+
+        postponed_goal = user.reading_goals.find_by(book: book)
+        other_goal = user.reading_goals.find_by(book: user.books.find_by(title: "Other Book"))
+
+        # Other book should be scheduled; postponed book should start on or after its eligible date
+        expect(other_goal.status).to eq("active")
+        expect(other_goal.started_on).to eq(monday)
+
+        expect(postponed_goal.status).to eq("active")
+        expect(postponed_goal.started_on).to be >= monday + 14
+      end
+    end
+
+    it "clears postponed_until when goal is placed" do
+      monday = Date.current.beginning_of_week(:monday)
+      monday += 7 unless Date.current.monday?
+
+      travel_to monday do
+        book = create_queued_book(pages: 300, position: 1, title: "Postponed")
+        goal = user.reading_goals.find_by(book: book)
+        goal.update!(postponed_until: monday) # eligible today
+
+        schedule!
+
+        goal.reload
+        expect(goal.postponed_until).to be_nil
+        expect(goal.status).to eq("active")
+      end
+    end
+
+    it "frees capacity when a goal is postponed" do
+      monday = Date.current.beginning_of_week(:monday)
+      monday += 7 unless Date.current.monday?
+
+      travel_to monday do
+        user.update!(max_concurrent_books: 1)
+
+        book1 = create_queued_book(pages: 300, position: 1, title: "First")
+        create_queued_book(pages: 300, position: 2, title: "Second")
+
+        schedule!
+
+        # First book takes the only slot; second waits
+        goal1 = user.reading_goals.find_by(book: book1)
+        goal2 = user.reading_goals.find_by(book: user.books.find_by(title: "Second"))
+        expect(goal1.started_on).to eq(monday)
+        second_original_start = goal2.started_on
+        expect(second_original_start).to be > monday
+
+        # Postpone first book
+        goal1.postpone!
+        schedule!
+
+        # Second book should now start earlier (freed slot)
+        goal2.reload
+        expect(goal2.started_on).to be <= second_original_start
+      end
+    end
+  end
+
+  # ─── calendar_end_for class method ─────────────────────────────
+
+  describe ".calendar_end_for" do
+    it "returns a Sunday" do
+      monday = Date.new(2026, 3, 30) # a Monday
+      end_date = ReadingListScheduler.calendar_end_for(monday, :two_weeks)
+      expect(end_date).to be_sunday
+    end
+
+    it "computes correct end date for each tier" do
+      monday = Date.new(2026, 3, 30)
+      expect(ReadingListScheduler.calendar_end_for(monday, :week)).to eq(Date.new(2026, 4, 5))
+      expect(ReadingListScheduler.calendar_end_for(monday, :two_weeks)).to eq(Date.new(2026, 4, 12))
+      expect(ReadingListScheduler.calendar_end_for(monday, :four_weeks)).to eq(Date.new(2026, 4, 26))
+    end
+  end
 end
