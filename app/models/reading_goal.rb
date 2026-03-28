@@ -20,6 +20,7 @@ class ReadingGoal < ApplicationRecord
   validates :started_on, presence: true, unless: :queued?
   validate :target_date_after_start_date, unless: :queued?
   validate :one_active_goal_per_book, on: :create
+  validate :valid_placement_tier, if: :manually_placed?
 
   # Scopes
   scope :current, -> { active.where("target_completion_date >= ?", Date.current) }
@@ -275,6 +276,35 @@ class ReadingGoal < ApplicationRecord
     QuotaCalculator.new(self).generate_quotas!(from_date: effective_start)
   end
 
+  # Postpone a committed auto-scheduled book back to the queue.
+  # Skips the next Monday and becomes eligible the Monday after.
+  def postpone!
+    next_monday = Date.current.beginning_of_week(:monday) + 7
+    eligible_monday = next_monday + 7
+
+    daily_quotas.where("date >= ?", Date.current).destroy_all
+    update!(
+      status: :queued,
+      started_on: nil,
+      target_completion_date: nil,
+      postponed_until: eligible_monday
+    )
+  end
+
+  # Unlock a manually placed book back to the auto-scheduled queue.
+  # The controller assigns a queue position after calling this.
+  def unlock!
+    daily_quotas.where("date >= ?", Date.current).destroy_all
+    update!(
+      status: :queued,
+      started_on: nil,
+      target_completion_date: nil,
+      manually_placed: false,
+      placement_tier: nil,
+      auto_scheduled: true
+    )
+  end
+
   def as_pipeline_data
     return queued_pipeline_data if queued?
 
@@ -319,6 +349,8 @@ class ReadingGoal < ApplicationRecord
       session_count: session_boundaries[:count],
       position: position,
       auto_scheduled: auto_scheduled,
+      manually_placed: manually_placed,
+      placement_tier: placement_tier,
       snap_label: snap_period_label,
       owned: book.owned?
     }
@@ -482,6 +514,9 @@ class ReadingGoal < ApplicationRecord
       session_count: 0,
       position: position,
       auto_scheduled: auto_scheduled,
+      manually_placed: manually_placed,
+      placement_tier: placement_tier,
+      postponed_until: postponed_until&.to_s,
       owned: book.owned?
     }
   end
@@ -541,6 +576,13 @@ class ReadingGoal < ApplicationRecord
 
   def generate_daily_quotas
     QuotaCalculator.new(self).generate_quotas!
+  end
+
+  def valid_placement_tier
+    valid_tiers = ReadingListScheduler::TIERS.map(&:to_s)
+    unless valid_tiers.include?(placement_tier.to_s)
+      errors.add(:placement_tier, "must be a valid tier")
+    end
   end
 
   def target_date_after_start_date
