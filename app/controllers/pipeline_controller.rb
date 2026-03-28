@@ -10,7 +10,11 @@ class PipelineController < ApplicationController
 
     # Reading list data
     list_goals = current_user.reading_goals.in_reading_list.includes(:book, :daily_quotas)
-    @currently_reading = list_goals.select { |g| g.active? && g.has_reading_sessions? }
+    manual_goals = current_user.reading_goals
+                               .where(manually_placed: true, status: [:active, :queued])
+                               .includes(:book, :daily_quotas).to_a
+    all_active = (list_goals + manual_goals).uniq(&:id)
+    @currently_reading = all_active.select { |g| g.active? && (g.has_reading_sessions? || g.manually_placed?) }
     @up_next = list_goals.reject { |g| g.active? && g.has_reading_sessions? }
     @available_books = current_user.books
                                    .where.not(status: :completed)
