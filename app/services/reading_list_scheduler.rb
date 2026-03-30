@@ -255,8 +255,9 @@ class ReadingListScheduler
       next if combo.empty?
 
       combo.each do |entry|
-        record_placement!(placements, entry[:goal], entry[:placement], entry[:book_minutes])
-        unscheduled.delete(entry[:goal].id)
+        if record_placement!(placements, entry[:goal], entry[:placement], entry[:book_minutes])
+          unscheduled.delete(entry[:goal].id)
+        end
       end
     end
 
@@ -277,10 +278,11 @@ class ReadingListScheduler
         placement = compute_share_for(book_minutes, slot_start, TIERS.first)
         next unless placement
         next unless fits_concurrency?(placement[:start], placement[:end])
-        record_placement!(placements, goal, placement, book_minutes)
-        unscheduled.delete(goal.id)
-        placed = true
-        break
+        if record_placement!(placements, goal, placement, book_minutes)
+          unscheduled.delete(goal.id)
+          placed = true
+          break
+        end
       end
 
       @unplaceable_books << goal.book.title unless placed
@@ -458,10 +460,19 @@ class ReadingListScheduler
   end
 
   def record_placement!(placements, goal, placement, book_minutes)
+    # Hard guard: never exceed the concurrency limit on any reading day.
+    # This catches any gap in upstream checks (combo scoring, fallback loop, etc.)
+    unless fits_concurrency?(placement[:start], placement[:end])
+      Rails.logger.warn("[Scheduler] Blocked placement of '#{goal.book.title}' " \
+        "at #{placement[:start]}–#{placement[:end]}: would exceed concurrency limit")
+      return false
+    end
+
     apply_placement!(goal, placement)
     add_range_to_profiles(placement[:start], placement[:end], placement[:share])
     track_series_end_date(goal.book, placement[:end])
     placements << { goal: goal, placement: placement, tier: placement[:tier], book_minutes: book_minutes }
+    true
   end
 
   # The last book placed on the pipeline should break UNDER the target —

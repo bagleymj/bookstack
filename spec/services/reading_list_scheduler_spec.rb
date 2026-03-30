@@ -535,6 +535,30 @@ RSpec.describe ReadingListScheduler do
         expect(active_count).to be <= 2
       end
     end
+
+    it "never exceeds concurrency limit on any reading day even with many queued books" do
+      user.update!(concurrency_limit: 3, weekend_mode: :skip)
+      # Queue enough books to fill many slots — mix of sizes to stress the combo/fallback logic
+      sizes = [100, 150, 200, 250, 300, 350, 400, 500, 600, 800, 150, 200, 250, 300, 100]
+      sizes.each_with_index do |pages, i|
+        create_queued_book(pages: pages, position: i + 1, title: "Book #{i + 1} (#{pages}pp)")
+      end
+      schedule!
+
+      goals = user.reading_goals.where.not(started_on: nil, target_completion_date: nil)
+      limit = user.concurrency_limit
+
+      goals.flat_map { |g| (g.started_on..g.target_completion_date).to_a }
+           .uniq
+           .reject { |d| d.on_weekend? }  # only check reading days
+           .each do |date|
+        active_count = goals.count { |g| g.started_on <= date && g.target_completion_date >= date }
+        active_titles = goals.select { |g| g.started_on <= date && g.target_completion_date >= date }
+                             .map { |g| g.book.title }
+        expect(active_count).to be <= limit,
+          "#{date} has #{active_count} active books (limit: #{limit}): #{active_titles.join(', ')}"
+      end
+    end
   end
 
   # ─── Locked Goals ──────────────────────────────────────────────
