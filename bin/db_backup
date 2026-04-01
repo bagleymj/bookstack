@@ -1,21 +1,30 @@
 #!/usr/bin/env bash
-# Database backup script for BookStack
+# Database backup script for BookStack (SQLite)
 
 set -e
 
-BACKUP_DIR=".postgres/backups"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
+BACKUP_DIR="$REPO_ROOT/storage/backups"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="$BACKUP_DIR/bookstack_$TIMESTAMP.sql"
+BACKUP_FILE="$BACKUP_DIR/bookstack_$TIMESTAMP.sqlite3"
+DB_FILE="$REPO_ROOT/storage/development.sqlite3"
 
 mkdir -p "$BACKUP_DIR"
 
+if [ ! -f "$DB_FILE" ]; then
+  echo "No database to back up (storage/development.sqlite3 not found)"
+  exit 0
+fi
+
 echo "Backing up database to $BACKUP_FILE..."
-pg_dump -h localhost bookstack_development > "$BACKUP_FILE"
+cp "$DB_FILE" "$BACKUP_FILE"
 
 echo "Backup created: $BACKUP_FILE"
 echo "Size: $(du -h "$BACKUP_FILE" | cut -f1)"
 
 # Keep only last 50 backups
 cd "$BACKUP_DIR"
-ls -t *.sql 2>/dev/null | tail -n +51 | xargs -r rm --
+ls -t *.sqlite3 2>/dev/null | tail -n +51 | xargs -r rm --
 echo "Cleanup complete. Keeping last 50 backups."

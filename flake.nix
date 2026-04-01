@@ -22,8 +22,8 @@
             nodejs_20
             yarn
 
-            # PostgreSQL
-            postgresql_16
+            # SQLite
+            sqlite
 
             # Build dependencies
             gcc
@@ -35,9 +35,6 @@
             libffi
             pkg-config
 
-            # For native gem compilation
-            libpq
-
             # Tailwind CSS (system binary for NixOS compatibility)
             tailwindcss_4
 
@@ -47,10 +44,6 @@
 
           shellHook = ''
             # Resolve the MAIN repo root — immune to worktrees, cd, subshells.
-            # git rev-parse --git-common-dir always returns the main repo's .git
-            # even when evaluated from a worktree. This ensures PGDATA/PGHOST/GEM_HOME
-            # always point to the main repo's .postgres/ and .gems/ directories,
-            # never to a worktree that lacks them.
             MAIN_GIT_DIR="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
             if [ -n "$MAIN_GIT_DIR" ] && [ -d "$MAIN_GIT_DIR" ]; then
               BOOKSTACK_ROOT="$(dirname "$MAIN_GIT_DIR")"
@@ -61,11 +54,6 @@
             export GEM_HOME="$BOOKSTACK_ROOT/.gems"
             export PATH="$GEM_HOME/bin:$PATH"
             export BUNDLE_PATH="$GEM_HOME"
-
-            export PGDATA="$BOOKSTACK_ROOT/.postgres"
-            export PGHOST="$BOOKSTACK_ROOT/.postgres"
-            export PGPORT="5432"
-            export DATABASE_URL="postgresql://localhost:5432/bookstack_development"
 
             export TAILWINDCSS_INSTALL_DIR="${pkgs.tailwindcss_4}/bin"
           '';

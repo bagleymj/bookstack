@@ -37,9 +37,7 @@
 # Nix/direnv
 .direnv/
 .gems/
-.postgres/
 result
 
 /app/assets/builds/*
 !/app/assets/builds/.keep
-.postgres/backups/

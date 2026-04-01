@@ -13,11 +13,11 @@ This project uses Nix flakes for development environment management. Enter the d
 nix develop
 ```
 
-The Nix shell provides all dependencies (Ruby, Node, PostgreSQL, etc.) via direnv.
-- PostgreSQL data is stored in `.postgres/`
+The Nix shell provides all dependencies (Ruby, Node, SQLite, etc.) via direnv.
+- SQLite databases are stored in `storage/`
 - Ruby gems are stored in `.gems/`
 - Run `bin/setup` once after cloning to initialize the database
-- Run `bin/dev` to start PostgreSQL, Rails, and Tailwind together
+- Run `bin/dev` to start Rails and Tailwind together
 
 ## Common Commands
 
@@ -109,7 +109,9 @@ bin/rspec spec/models/
 
 ## Database Safety
 
-**CRITICAL: The dev database has been wiped FIVE times. Mechanical safeguards are now enforced at multiple levels.**
+**CRITICAL: The dev database has been wiped multiple times. Mechanical safeguards are enforced.**
+
+The database is SQLite (`storage/development.sqlite3`). Backups are simple file copies stored in `storage/backups/`.
 
 ### Enforced by `bin/rails` guard
 
@@ -131,7 +133,7 @@ bundle exec rails db:migrate  # bypasses guard — NEVER DO THIS
 
 ### Enforced by `bin/rspec` guard
 
-`rails_helper.rb` **blocks** rspec unless `BOOKSTACK_RSPEC_BACKUP_DONE=1` is set. Only `bin/rspec` sets this — after taking an automatic backup. `maintain_test_schema!` has been **removed** because it was the root cause of dev database wipes (it runs `db:test:load_schema` which has repeatedly corrupted the dev database).
+`rails_helper.rb` **blocks** rspec unless `BOOKSTACK_RSPEC_BACKUP_DONE=1` is set. Only `bin/rspec` sets this — after taking an automatic backup. `maintain_test_schema!` has been **removed** because it was the root cause of dev database wipes.
 
 ```bash
 # CORRECT
@@ -159,12 +161,12 @@ BOOKSTACK_DB_BACKUP_DONE=1 RAILS_ENV=test bin/rails db:schema:load
 ### Backup and restore
 
 ```bash
-bin/db_backup                                    # Create a backup
-bin/db_restore                                   # List available backups
-bin/db_restore bookstack_20260206_120000.sql     # Restore from a backup
+bin/db_backup                                          # Create a backup
+bin/db_restore                                         # List available backups
+bin/db_restore bookstack_20260206_120000.sqlite3       # Restore from a backup
 ```
 
-Backups are stored in `.postgres/backups/` (last 10 kept automatically).
+Backups are stored in `storage/backups/` (last 50 kept automatically).
 
 ## Git Workflow
 
@@ -220,7 +222,7 @@ git branch -d claude/<short-description>
 **Multiple Claude Code agents run simultaneously.** Always assume this is the case — never assume you are the only agent. The user may launch additional agents at any point during your task. Worktrees ensure your work is fully isolated and cannot interfere with (or be interfered by) other agents. However:
 
 **Shared resources — don't touch if already running:**
-- Do NOT start/stop `bin/dev`, PostgreSQL, or other services if they're already running (check with `lsof -i :3000` and `pg_isready`)
+- Do NOT start/stop `bin/dev` or other services if they're already running (check with `lsof -i :3000`)
 - Do NOT run `db:migrate` without asking the user — another agent may depend on the current schema
 
 **Worktree awareness:**

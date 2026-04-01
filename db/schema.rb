@@ -11,11 +11,8 @@
 # It's strongly recommended that you check this file into your version control system.
 
 ActiveRecord::Schema[7.1].define(version: 2026_03_27_120000) do
-  # These are extensions that must be enabled in order to support this database
-  enable_extension "plpgsql"
-
   create_table "books", force: :cascade do |t|
-    t.bigint "user_id", null: false
+    t.integer "user_id", null: false
     t.string "title", null: false
     t.string "author"
     t.integer "total_pages", null: false
@@ -41,7 +38,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_27_120000) do
   end
 
   create_table "daily_quotas", force: :cascade do |t|
-    t.bigint "reading_goal_id", null: false
+    t.integer "reading_goal_id", null: false
     t.date "date", null: false
     t.integer "target_pages", null: false
     t.integer "actual_pages", default: 0
@@ -79,8 +76,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_27_120000) do
   end
 
   create_table "page_range_votes", force: :cascade do |t|
-    t.bigint "edition_id", null: false
-    t.bigint "user_id", null: false
+    t.integer "edition_id", null: false
+    t.integer "user_id", null: false
     t.integer "first_page", null: false
     t.integer "last_page", null: false
     t.datetime "created_at", null: false
@@ -91,8 +88,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_27_120000) do
   end
 
   create_table "reading_goals", force: :cascade do |t|
-    t.bigint "user_id", null: false
-    t.bigint "book_id", null: false
+    t.integer "user_id", null: false
+    t.integer "book_id", null: false
     t.date "target_completion_date"
     t.date "started_on"
     t.integer "status", default: 0
@@ -112,8 +109,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_27_120000) do
   end
 
   create_table "reading_sessions", force: :cascade do |t|
-    t.bigint "user_id", null: false
-    t.bigint "book_id", null: false
+    t.integer "user_id", null: false
+    t.integer "book_id", null: false
     t.datetime "started_at", null: false
     t.datetime "ended_at"
     t.integer "start_page", null: false
@@ -133,7 +130,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_27_120000) do
   end
 
   create_table "user_reading_stats", force: :cascade do |t|
-    t.bigint "user_id", null: false
+    t.integer "user_id", null: false
     t.float "average_wpm", default: 200.0
     t.integer "total_sessions", default: 0
     t.integer "total_pages_read", default: 0
